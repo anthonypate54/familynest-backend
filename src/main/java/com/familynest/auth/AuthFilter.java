@@ -67,13 +67,7 @@ public class AuthFilter extends OncePerRequestFilter {
         String role = authUtil.getUserRole(token);
         logger.debug("Extracted userId: {}, role: {}", userId, role);
 
-        // Role-based access control
-        if (path.startsWith("/api/users") && path.contains("/create-family") && !"ADMIN".equals(role)) {
-            logger.debug("User role {} not authorized to create family", role);
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Only ADMIN can create families");
-            return;
-        }
-
+        // Set user attributes for the request
         request.setAttribute("userId", userId);
         request.setAttribute("role", role);
         logger.debug("Valid token for userId: {}, role: {}, proceeding to controller", userId, role);

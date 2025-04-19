@@ -70,10 +70,14 @@ public class UserController {
     @GetMapping("/test")
     public ResponseEntity<String> testEndpoint(HttpServletRequest request) {
         logger.debug("Received test request from: {}", request.getRemoteAddr());
+        logger.debug("Request URL: {}", request.getRequestURL());
+        logger.debug("Request URI: {}", request.getRequestURI());
+        logger.debug("Request method: {}", request.getMethod());
+        logger.debug("Request headers:");
         Enumeration<String> headerNames = request.getHeaderNames();
         while (headerNames.hasMoreElements()) {
             String headerName = headerNames.nextElement();
-            logger.debug("Header {}: {}", headerName, request.getHeader(headerName));
+            logger.debug("  {}: {}", headerName, request.getHeader(headerName));
         }
         return ResponseEntity.ok("Test successful");
     }
@@ -115,6 +119,9 @@ public class UserController {
             if (userData.getUsername() == null || userData.getUsername().length() < 3) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Username must be at least 3 characters long"));
             }
+            if (userData.getEmail() == null || !userData.getEmail().contains("@")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Valid email is required"));
+            }
             if (userData.getPassword() == null || userData.getPassword().length() < 6) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least 6 characters long"));
             }
@@ -125,17 +132,21 @@ public class UserController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Last name is required"));
             }
 
-            // Check if username already exists
+            // Check if username or email already exists
             if (userRepository.findByUsername(userData.getUsername()) != null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Username already exists"));
+            }
+            if (userRepository.findByEmail(userData.getEmail()) != null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email already exists"));
             }
 
             User user = new User();
             user.setUsername(userData.getUsername());
+            user.setEmail(userData.getEmail());
             user.setPassword(authUtil.hashPassword(userData.getPassword()));
             user.setFirstName(userData.getFirstName());
             user.setLastName(userData.getLastName());
-            user.setRole("USER");
+            user.setRole(userData.getRole() != null ? userData.getRole() : "USER");
             user.setFamilyId(null);
 
             if (photo != null && !photo.isEmpty()) {
@@ -158,23 +169,23 @@ public class UserController {
 
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> loginUser(@RequestBody Map<String, String> loginData) {
-        logger.debug("Received login request for username: {}", loginData.get("username"));
+        logger.debug("Received login request for email: {}", loginData.get("email"));
         try {
-            String username = loginData.get("username");
+            String email = loginData.get("email");
             String password = loginData.get("password");
             
-            if (username == null || password == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Username and password are required"));
+            if (email == null || password == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email and password are required"));
             }
 
-            User user = userRepository.findByUsername(username);
+            User user = userRepository.findByEmail(email);
             if (user == null || !authUtil.verifyPassword(password, user.getPassword())) {
-                logger.debug("Invalid credentials for username: {}", username);
+                logger.debug("Invalid credentials for email: {}", email);
                 return ResponseEntity.status(401)
-                    .body(Map.of("error", "Invalid username or password"));
+                    .body(Map.of("error", "Invalid email or password"));
             }
 
-            logger.debug("Login successful for username: {}", username);
+            logger.debug("Login successful for email: {}", email);
             String token = authUtil.generateToken(user.getId(), user.getRole());
             Map<String, Object> response = new HashMap<>();
             response.put("userId", user.getId());
@@ -226,15 +237,14 @@ public class UserController {
         try {
             // Validate JWT token and get role
             String token = authHeader.replace("Bearer ", "");
+            logger.debug("Token received: {}", token);
+            logger.debug("Validating token for user ID: {}", id);
             Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+            logger.debug("Token claims: {}", claims);
             String role = (String) claims.get("role");
+            logger.debug("User role from token: {}", role);
     
-            // Check if user is an ADMIN
-            if (!"ADMIN".equals(role)) {
-                logger.debug("User with role {} is not authorized to create families", role);
-                return new ResponseEntity<>(Map.of("error", "Only ADMIN can create families"), HttpStatus.FORBIDDEN);
-            }
-    
+            logger.debug("Looking up user with ID: {}", id);
             User user = userRepository.findById(id).orElse(null);
             if (user == null) {
                 logger.debug("User not found for ID: {}", id);
@@ -244,17 +254,23 @@ public class UserController {
                 logger.debug("User ID {} already belongs to a family: {}", id, user.getFamilyId());
                 return ResponseEntity.badRequest().body(Map.of("error", "User already belongs to a family"));
             }
+
+            logger.debug("Creating new family with name: {}", familyData.get("name"));
             Family family = new Family();
             family.setName(familyData.get("name"));
-            familyRepository.save(family);
-            user.setFamilyId(family.getId());
+            Family savedFamily = familyRepository.save(family);
+            logger.debug("Family created with ID: {}", savedFamily.getId());
+
+            logger.debug("Updating user {} with new family ID: {}", id, savedFamily.getId());
+            user.setFamilyId(savedFamily.getId());
             userRepository.save(user);
-            logger.debug("Family created with ID: {} for user ID: {}", family.getId(), id);
+            
+            logger.debug("Family creation completed successfully");
             Map<String, Object> response = new HashMap<>();
-            response.put("familyId", family.getId());
+            response.put("familyId", savedFamily.getId());
             return ResponseEntity.status(201).body(response);
         } catch (Exception e) {
-            logger.error("Error creating family: {}", e.getMessage());
+            logger.error("Error creating family: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error creating family: " + e.getMessage()));
         }
     }
@@ -328,6 +344,7 @@ public class UserController {
                 return ResponseEntity.badRequest().body(null);
             }
             List<Message> messages = messageRepository.findByFamilyId(user.getFamilyId());
+            logger.debug("Found {} messages for family ID: {}", messages.size(), user.getFamilyId());
             List<Map<String, Object>> response = messages.stream().map(message -> {
                 Map<String, Object> messageMap = new HashMap<>();
                 messageMap.put("content", message.getContent());
