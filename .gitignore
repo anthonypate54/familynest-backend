@@ -41,3 +41,12 @@ src/main/resources/application.properties
 
 ### Uploads Directory ###
 uploads/
+
+### Build Outputs ###
+target/
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
