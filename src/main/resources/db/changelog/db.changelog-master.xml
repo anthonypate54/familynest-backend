@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.25.xsd">
+
+    <include file="db/migration/V2__add_email_to_user.sql"/>
+    <include file="db/migration/V4__Add_image_to_message.sql"/>
+    <include file="db/migration/V5__Add_sender_id_to_message.sql"/>
+    <include file="db/migration/V6__Update_existing_messages_sender_id.sql"/>
+    <include file="db/migration/V7__Update_existing_messages_with_sender.sql"/>
+    <include file="db/migration/V8__Update_existing_messages_with_sender.sql"/>
+    <include file="db/migration/V9__Ensure_users_and_update_sender_ids.sql"/>
+    <include file="db/migration/V10__Update_message_sender_ids.sql"/>
+
+</databaseChangeLog> 

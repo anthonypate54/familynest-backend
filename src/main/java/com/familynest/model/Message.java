@@ -21,7 +21,13 @@ public class Message {
 
     private Long familyId;
 
+    private Long senderId;
+
     private LocalDateTime timestamp;
+
+    private String mediaType;
+
+    private String mediaUrl;
 
     // Getters and setters
     public Long getId() {
@@ -56,11 +62,35 @@ public class Message {
         this.familyId = familyId;
     }
 
+    public Long getSenderId() {
+        return senderId;
+    }
+
+    public void setSenderId(Long senderId) {
+        this.senderId = senderId;
+    }
+
     public LocalDateTime getTimestamp() {
         return timestamp;
     }
 
     public void setTimestamp(LocalDateTime timestamp) {
         this.timestamp = timestamp;
+    }
+
+    public String getMediaType() {
+        return mediaType;
+    }
+
+    public void setMediaType(String mediaType) {
+        this.mediaType = mediaType;
+    }
+
+    public String getMediaUrl() {
+        return mediaUrl;
+    }
+
+    public void setMediaUrl(String mediaUrl) {
+        this.mediaUrl = mediaUrl;
     }
 }

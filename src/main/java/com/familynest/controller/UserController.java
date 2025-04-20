@@ -303,8 +303,12 @@ public class UserController {
         }
     }
 
-    @PostMapping("/{id}/messages")
-    public ResponseEntity<Void> postMessage(@PathVariable Long id, @RequestBody Map<String, String> messageData) {
+    @PostMapping(value = "/{id}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Void> postMessage(
+        @PathVariable Long id,
+        @RequestPart(value = "content", required = false) String content,
+        @RequestPart(value = "media", required = false) MultipartFile media,
+        @RequestPart(value = "mediaType", required = false) String mediaType) {
         logger.debug("Received request to post message for user ID: {}", id);
         try {
             User user = userRepository.findById(id).orElse(null);
@@ -317,10 +321,21 @@ public class UserController {
                 return ResponseEntity.badRequest().build();
             }
             Message message = new Message();
-            message.setContent(messageData.get("content"));
+            message.setContent(content != null ? content : "");
             message.setSenderUsername(user.getUsername());
+            message.setSenderId(user.getId());
             message.setFamilyId(user.getFamilyId());
             message.setTimestamp(LocalDateTime.now());
+
+            if (media != null && mediaType != null) {
+                String fileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
+                Path filePath = Paths.get(uploadDir, fileName);
+                Files.createDirectories(filePath.getParent());
+                Files.write(filePath, media.getBytes());
+                message.setMediaType(mediaType);
+                message.setMediaUrl("/api/users/photos/" + fileName);
+            }
+
             messageRepository.save(message);
             logger.debug("Message posted successfully for family ID: {}", user.getFamilyId());
             return ResponseEntity.status(201).build();
@@ -349,8 +364,26 @@ public class UserController {
                 Map<String, Object> messageMap = new HashMap<>();
                 messageMap.put("content", message.getContent());
                 messageMap.put("senderUsername", message.getSenderUsername());
+                messageMap.put("senderId", message.getSenderId());
+                
+                // Get sender's photo if available
+                if (message.getSenderId() != null) {
+                    logger.debug("Looking up sender with ID: {}", message.getSenderId());
+                    User sender = userRepository.findById(message.getSenderId()).orElse(null);
+                    if (sender != null) {
+                        logger.debug("Found sender: username={}, photo={}", sender.getUsername(), sender.getPhoto());
+                        messageMap.put("senderPhoto", sender.getPhoto());
+                    } else {
+                        logger.debug("No sender found for ID: {}", message.getSenderId());
+                    }
+                } else {
+                    logger.debug("Message has no senderId: {}", message.getContent());
+                }
+                
                 messageMap.put("familyId", message.getFamilyId());
                 messageMap.put("timestamp", message.getTimestamp().toString());
+                messageMap.put("mediaType", message.getMediaType());
+                messageMap.put("mediaUrl", message.getMediaUrl());
                 return messageMap;
             }).collect(Collectors.toList());
             logger.debug("Returning {} messages for family ID: {}", response.size(), user.getFamilyId());
