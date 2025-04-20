@@ -56,24 +56,15 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(
-            "http://10.0.0.81:3000",  // Machine's actual IP
-            "http://localhost:8080",
-            "http://localhost:3000",
-            "http://10.0.2.2:8080",
-            "http://10.0.2.2:3000",
-            "http://10.0.3.2:3000",
-            "http://10.0.3.2:8080",
-            "http://10.0.3.15:3000",
-            "http://10.0.0.81:8080",
-            "http://localhost:8081",
-            "http://10.0.2.2:8081",
-            "http://127.0.0.1:3000",
-            "http://0.0.0.0:3000"
-        ));
+        // Allow all origins during development
+        configuration.addAllowedOrigin("*");
+        // Explicitly add common emulator origins
+        configuration.addAllowedOriginPattern("http://10.0.2.2:[*]");
+        configuration.addAllowedOriginPattern("http://10.0.0.2:[*]");
+        
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin"));
-        configuration.setAllowCredentials(true);
+        configuration.setAllowCredentials(false);  // Must be false when allowedOrigins contains "*"
         configuration.setMaxAge(3600L);
         configuration.setExposedHeaders(Arrays.asList("Content-Type", "Content-Length"));
 

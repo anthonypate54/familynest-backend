@@ -310,6 +310,11 @@ public class UserController {
         @RequestPart(value = "media", required = false) MultipartFile media,
         @RequestPart(value = "mediaType", required = false) String mediaType) {
         logger.debug("Received request to post message for user ID: {}", id);
+        logger.debug("Content: {}, Media: {}, MediaType: {}", 
+                    content, 
+                    media != null ? media.getOriginalFilename() + " (" + media.getSize() + " bytes)" : "null", 
+                    mediaType);
+        
         try {
             User user = userRepository.findById(id).orElse(null);
             if (user == null) {
@@ -328,19 +333,44 @@ public class UserController {
             message.setTimestamp(LocalDateTime.now());
 
             if (media != null && mediaType != null) {
-                String fileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
-                Path filePath = Paths.get(uploadDir, fileName);
-                Files.createDirectories(filePath.getParent());
-                Files.write(filePath, media.getBytes());
-                message.setMediaType(mediaType);
-                message.setMediaUrl("/api/users/photos/" + fileName);
+                try {
+                    String originalFilename = media.getOriginalFilename();
+                    String extension = "";
+                    if (originalFilename != null && originalFilename.contains(".")) {
+                        extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+                    }
+                    
+                    String fileName = System.currentTimeMillis() + "_" + (originalFilename != null ? originalFilename : "media" + extension);
+                    Path filePath = Paths.get(uploadDir, fileName);
+                    logger.debug("Saving media to: {}", filePath);
+                    
+                    Files.createDirectories(filePath.getParent());
+                    Files.write(filePath, media.getBytes());
+                    
+                    // Set permissions to ensure file is accessible
+                    Files.setPosixFilePermissions(filePath, 
+                        java.util.Set.of(
+                            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+                            java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+                            java.nio.file.attribute.PosixFilePermission.OTHERS_READ
+                        )
+                    );
+                    
+                    message.setMediaType(mediaType);
+                    message.setMediaUrl("/api/users/photos/" + fileName);
+                    logger.debug("Media saved successfully: {}, type: {}", fileName, mediaType);
+                } catch (IOException e) {
+                    logger.error("Error saving media file: {}", e.getMessage(), e);
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+                }
             }
 
             messageRepository.save(message);
             logger.debug("Message posted successfully for family ID: {}", user.getFamilyId());
             return ResponseEntity.status(201).build();
         } catch (Exception e) {
-            logger.error("Error posting message: {}", e.getMessage());
+            logger.error("Error posting message: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().build();
         }
     }
@@ -485,7 +515,7 @@ public class UserController {
     @GetMapping("/photos/{filename:.+}")
     public ResponseEntity<Resource> servePhoto(@PathVariable String filename, HttpServletRequest request) {
         try {
-            logger.debug("Received photo request from: {}", request.getRemoteAddr());
+            logger.debug("Received media request for: {}", filename);
             logger.debug("Request URI: {}", request.getRequestURI());
             logger.debug("Request method: {}", request.getMethod());
             
@@ -508,9 +538,10 @@ public class UserController {
             
             return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
+                .header("Content-Disposition", "inline; filename=\"" + resource.getFilename() + "\"")
                 .body(resource);
         } catch (Exception e) {
-            logger.error("Error serving photo: {}", e.getMessage(), e);
+            logger.error("Error serving media file: {}", e.getMessage(), e);
             return ResponseEntity.notFound().build();
         }
     }
@@ -521,6 +552,14 @@ public class UserController {
             case "jpg", "jpeg" -> "image/jpeg";
             case "png" -> "image/png";
             case "gif" -> "image/gif";
+            case "mp4" -> "video/mp4";
+            case "mov" -> "video/quicktime";
+            case "avi" -> "video/x-msvideo";
+            case "wmv" -> "video/x-ms-wmv";
+            case "3gp" -> "video/3gpp";
+            case "webm" -> "video/webm";
+            case "mkv" -> "video/x-matroska";
+            case "flv" -> "video/x-flv";
             default -> "application/octet-stream";
         };
     }
