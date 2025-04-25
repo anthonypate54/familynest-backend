@@ -1,7 +1,11 @@
-UPDATE message m
-SET sender_id = (
-    SELECT id 
-    FROM app_user u 
-    WHERE u.username = m.sender_username
-)
-WHERE m.sender_id IS NULL; 
+-- This migration is now a no-op since its functionality is already covered in V7
+-- We're keeping this file to maintain the migration history sequence
+
+-- Original code (commented out):
+-- UPDATE message m
+-- SET sender_id = (
+--     SELECT id 
+--     FROM app_user u 
+--     WHERE u.username = m.sender_username
+-- )
+-- WHERE m.sender_id IS NULL; 

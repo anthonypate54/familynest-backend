@@ -31,6 +31,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.familynest.dto.UserDataDTO;
 import org.springframework.web.bind.annotation.RequestHeader;
 import com.familynest.auth.JwtUtil;
+import com.familynest.model.Invitation;
+import com.familynest.repository.InvitationRepository;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -63,6 +65,9 @@ public class UserController {
 
     @Autowired
     private JwtUtil jwtUtil; // Ensure JwtUtil is injected
+
+    @Autowired
+    private InvitationRepository invitationRepository;
 
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
@@ -98,6 +103,7 @@ public class UserController {
         response.put("username", user.getUsername());
         response.put("firstName", user.getFirstName());
         response.put("lastName", user.getLastName());
+        response.put("email", user.getEmail());
         response.put("password", user.getPassword());
         response.put("role", user.getRole());
         response.put("photo", user.getPhoto());
@@ -504,6 +510,7 @@ public class UserController {
         response.put("username", user.getUsername());
         response.put("firstName", user.getFirstName());
         response.put("lastName", user.getLastName());
+        response.put("email", user.getEmail());
         response.put("password", user.getPassword());
         response.put("role", user.getRole() != null ? user.getRole() : "USER");
         response.put("photo", user.getPhoto());
@@ -562,5 +569,181 @@ public class UserController {
             case "flv" -> "video/x-flv";
             default -> "application/octet-stream";
         };
+    }
+
+    @PostMapping("/{id}/invite")
+    public ResponseEntity<Map<String, Object>> inviteUser(
+            @PathVariable Long id,
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, String> inviteData) {
+        logger.debug("Received request to invite user from user ID: {}", id);
+        try {
+            // Validate the request
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            if (!authUtil.validateToken(token)) {
+                logger.debug("Unauthorized access attempt by user ID: {}", id);
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
+            }
+
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null || !userId.equals(id)) {
+                logger.debug("Unauthorized access attempt by user ID: {}", id);
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
+            }
+
+            User inviter = userRepository.findById(id).orElse(null);
+            if (inviter == null) {
+                logger.debug("Inviter not found for ID: {}", id);
+                return ResponseEntity.badRequest().body(Map.of("error", "Inviter not found"));
+            }
+
+            if (inviter.getFamilyId() == null) {
+                logger.debug("User ID {} does not belong to any family", id);
+                return ResponseEntity.badRequest().body(Map.of("error", "User does not belong to a family"));
+            }
+
+            String inviteeEmail = inviteData.get("email");
+            if (inviteeEmail == null || inviteeEmail.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invitee email is required"));
+            }
+
+            // Check if invitee already has a pending invitation
+            List<Invitation> existingInvitations = invitationRepository.findByInviteeEmail(inviteeEmail);
+            if (existingInvitations.stream().anyMatch(inv -> inv.getFamilyId().equals(inviter.getFamilyId()) && inv.getStatus().equals("PENDING"))) {
+                return ResponseEntity.badRequest().body(Map.of("error", "An invitation to this family is already pending for this email"));
+            }
+
+            Invitation invitation = new Invitation();
+            invitation.setFamilyId(inviter.getFamilyId());
+            invitation.setInviterId(id);
+            invitation.setInviteeEmail(inviteeEmail);
+            Invitation savedInvitation = invitationRepository.save(invitation);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("invitationId", savedInvitation.getId());
+            response.put("message", "Invitation sent successfully");
+            return ResponseEntity.status(201).body(response);
+        } catch (Exception e) {
+            logger.error("Error sending invitation: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error sending invitation: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/invitations")
+    public ResponseEntity<List<Map<String, Object>>> getInvitations(@RequestHeader("Authorization") String authHeader) {
+        logger.debug("Received request to get invitations");
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(403).body(List.of(Map.of("error", "Unauthorized access")));
+            }
+
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null) {
+                return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
+            }
+
+            List<Invitation> invitations = invitationRepository.findByInviteeEmail(user.getEmail());
+            List<Map<String, Object>> response = invitations.stream().map(inv -> {
+                Map<String, Object> invMap = new HashMap<>();
+                invMap.put("id", inv.getId());
+                invMap.put("familyId", inv.getFamilyId());
+                invMap.put("inviterId", inv.getInviterId());
+                invMap.put("status", inv.getStatus());
+                invMap.put("createdAt", inv.getCreatedAt().toString());
+                invMap.put("expiresAt", inv.getExpiresAt().toString());
+                return invMap;
+            }).collect(Collectors.toList());
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error retrieving invitations: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
+        }
+    }
+
+    @PostMapping("/invitations/{invitationId}/accept")
+    public ResponseEntity<Map<String, Object>> acceptInvitation(
+            @PathVariable Long invitationId,
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Received request to accept invitation ID: {}", invitationId);
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
+            }
+
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
+            }
+
+            Invitation invitation = invitationRepository.findByIdAndInviteeEmail(invitationId, user.getEmail()).orElse(null);
+            if (invitation == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invitation not found or not intended for this user"));
+            }
+
+            if (!invitation.getStatus().equals("PENDING")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invitation is no longer pending"));
+            }
+
+            if (invitation.getExpiresAt().isBefore(LocalDateTime.now())) {
+                invitation.setStatus("EXPIRED");
+                invitationRepository.save(invitation);
+                return ResponseEntity.badRequest().body(Map.of("error", "Invitation has expired"));
+            }
+
+            if (user.getFamilyId() != null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "User already belongs to a family"));
+            }
+
+            user.setFamilyId(invitation.getFamilyId());
+            userRepository.save(user);
+            invitation.setStatus("ACCEPTED");
+            invitationRepository.save(invitation);
+
+            return ResponseEntity.ok(Map.of("message", "Invitation accepted", "familyId", invitation.getFamilyId()));
+        } catch (Exception e) {
+            logger.error("Error accepting invitation: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error accepting invitation: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/invitations/{invitationId}/reject")
+    public ResponseEntity<Map<String, Object>> rejectInvitation(
+            @PathVariable Long invitationId,
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Received request to reject invitation ID: {}", invitationId);
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
+            }
+
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
+            }
+
+            Invitation invitation = invitationRepository.findByIdAndInviteeEmail(invitationId, user.getEmail()).orElse(null);
+            if (invitation == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invitation not found or not intended for this user"));
+            }
+
+            if (!invitation.getStatus().equals("PENDING")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invitation is no longer pending"));
+            }
+
+            invitation.setStatus("REJECTED");
+            invitationRepository.save(invitation);
+
+            return ResponseEntity.ok(Map.of("message", "Invitation rejected"));
+        } catch (Exception e) {
+            logger.error("Error rejecting invitation: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error rejecting invitation: " + e.getMessage()));
+        }
     }
 }
