@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.Enumeration;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/users")
@@ -571,62 +572,56 @@ public class UserController {
         };
     }
 
-    @PostMapping("/{id}/invite")
-    public ResponseEntity<Map<String, Object>> inviteUser(
-            @PathVariable Long id,
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, String> inviteData) {
-        logger.debug("Received request to invite user from user ID: {}", id);
-        try {
-            // Validate the request
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            if (!authUtil.validateToken(token)) {
-                logger.debug("Unauthorized access attempt by user ID: {}", id);
-                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
-            }
-
-            Long userId = authUtil.extractUserId(token);
-            if (userId == null || !userId.equals(id)) {
-                logger.debug("Unauthorized access attempt by user ID: {}", id);
-                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
-            }
-
-            User inviter = userRepository.findById(id).orElse(null);
-            if (inviter == null) {
-                logger.debug("Inviter not found for ID: {}", id);
-                return ResponseEntity.badRequest().body(Map.of("error", "Inviter not found"));
-            }
-
-            if (inviter.getFamilyId() == null) {
-                logger.debug("User ID {} does not belong to any family", id);
-                return ResponseEntity.badRequest().body(Map.of("error", "User does not belong to a family"));
-            }
-
-            String inviteeEmail = inviteData.get("email");
-            if (inviteeEmail == null || inviteeEmail.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Invitee email is required"));
-            }
-
-            // Check if invitee already has a pending invitation
-            List<Invitation> existingInvitations = invitationRepository.findByInviteeEmail(inviteeEmail);
-            if (existingInvitations.stream().anyMatch(inv -> inv.getFamilyId().equals(inviter.getFamilyId()) && inv.getStatus().equals("PENDING"))) {
-                return ResponseEntity.badRequest().body(Map.of("error", "An invitation to this family is already pending for this email"));
-            }
-
-            Invitation invitation = new Invitation();
-            invitation.setFamilyId(inviter.getFamilyId());
-            invitation.setInviterId(id);
-            invitation.setInviteeEmail(inviteeEmail);
-            Invitation savedInvitation = invitationRepository.save(invitation);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("invitationId", savedInvitation.getId());
-            response.put("message", "Invitation sent successfully");
-            return ResponseEntity.status(201).body(response);
-        } catch (Exception e) {
-            logger.error("Error sending invitation: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Error sending invitation: " + e.getMessage()));
+    @PostMapping("/{userId}/invite")
+    public ResponseEntity<?> inviteUser(@PathVariable Long userId, @RequestBody Map<String, String> body) {
+        String email = body.get("email");
+        if (email == null || email.isEmpty()) {
+            return ResponseEntity.badRequest().body("Email is required");
         }
+        
+        // Get the user's family
+        Optional<User> userOptional = userRepository.findById(userId);
+        if (userOptional.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        
+        User user = userOptional.get();
+        Long familyId = user.getFamilyId();
+        
+        if (familyId == null) {
+            return ResponseEntity.badRequest().body("User is not part of a family");
+        }
+        
+        // Check if the invited email is already in the same family
+        User invitedUser = userRepository.findByEmail(email);
+        if (invitedUser != null) {
+            if (invitedUser.getFamilyId() != null && invitedUser.getFamilyId().equals(familyId)) {
+                return ResponseEntity.badRequest().body("User is already in your family");
+            }
+        }
+        
+        // Check if there's already a pending invitation for this email to this family
+        List<Invitation> pendingInvitations = invitationRepository.findByInviteeEmailAndFamilyIdAndStatus(
+            email, familyId, "PENDING");
+        
+        if (!pendingInvitations.isEmpty()) {
+            return ResponseEntity.badRequest().body("An invitation is already pending for this email");
+        }
+        
+        // Create the invitation
+        Invitation invitation = new Invitation();
+        invitation.setInviteeEmail(email);
+        invitation.setFamilyId(familyId);
+        invitation.setInviterId(userId);
+        invitation.setStatus("PENDING");
+        
+        // Set expiration time to 7 days from now
+        LocalDateTime expiresAt = LocalDateTime.now().plusDays(7);
+        invitation.setExpiresAt(expiresAt);
+        
+        invitationRepository.save(invitation);
+        
+        return ResponseEntity.ok().build();
     }
 
     @GetMapping("/invitations")

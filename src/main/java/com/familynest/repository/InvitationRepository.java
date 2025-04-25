@@ -8,5 +8,6 @@ import java.util.Optional;
 public interface InvitationRepository extends JpaRepository<Invitation, Long> {
     List<Invitation> findByInviteeEmail(String inviteeEmail);
     List<Invitation> findByFamilyId(Long familyId);
+    List<Invitation> findByInviteeEmailAndFamilyIdAndStatus(String email, Long familyId, String status);
     Optional<Invitation> findByIdAndInviteeEmail(Long id, String inviteeEmail);
 } 
