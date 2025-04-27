@@ -1,0 +1,10 @@
+-- This migration is now a no-op since sender_username column doesn't exist yet at this point
+-- It will be added in V13 and populated there.
+-- Original SQL:
+-- UPDATE message m
+-- SET sender_id = (
+--     SELECT id 
+--     FROM app_user u 
+--     WHERE u.username = m.sender_username
+-- )
+-- WHERE m.sender_id IS NULL; 

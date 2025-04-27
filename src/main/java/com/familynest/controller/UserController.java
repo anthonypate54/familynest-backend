@@ -124,29 +124,46 @@ public class UserController {
 
             // Validate required fields
             if (userData.getUsername() == null || userData.getUsername().length() < 3) {
+                logger.debug("Username validation failed: {}", userData.getUsername());
                 return ResponseEntity.badRequest().body(Map.of("error", "Username must be at least 3 characters long"));
             }
             if (userData.getEmail() == null || !userData.getEmail().contains("@")) {
+                logger.debug("Email validation failed: {}", userData.getEmail());
                 return ResponseEntity.badRequest().body(Map.of("error", "Valid email is required"));
             }
             if (userData.getPassword() == null || userData.getPassword().length() < 6) {
+                logger.debug("Password validation failed: length less than 6");
                 return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least 6 characters long"));
             }
             if (userData.getFirstName() == null || userData.getFirstName().isEmpty()) {
+                logger.debug("First name validation failed: {}", userData.getFirstName());
                 return ResponseEntity.badRequest().body(Map.of("error", "First name is required"));
             }
             if (userData.getLastName() == null || userData.getLastName().isEmpty()) {
+                logger.debug("Last name validation failed: {}", userData.getLastName());
                 return ResponseEntity.badRequest().body(Map.of("error", "Last name is required"));
             }
 
-            // Check if username or email already exists
-            if (userRepository.findByUsername(userData.getUsername()) != null) {
+            // Check if username already exists
+            logger.debug("Checking if username exists: {}", userData.getUsername());
+            User existingUsername = userRepository.findByUsername(userData.getUsername());
+            if (existingUsername != null) {
+                logger.debug("Username already exists: {}", userData.getUsername());
                 return ResponseEntity.badRequest().body(Map.of("error", "Username already exists"));
             }
-            if (userRepository.findByEmail(userData.getEmail()) != null) {
+            
+            // Check if email already exists
+            logger.debug("Checking if email exists: {}", userData.getEmail());
+            Optional<User> existingEmailOpt = userRepository.findByEmail(userData.getEmail());
+            if (existingEmailOpt.isPresent()) {
+                logger.debug("Email already exists: {}", userData.getEmail());
                 return ResponseEntity.badRequest().body(Map.of("error", "Email already exists"));
+            } else {
+                logger.debug("Email is available: {}", userData.getEmail());
             }
 
+            // Create and save the new user
+            logger.debug("Creating new user with username: {}, email: {}", userData.getUsername(), userData.getEmail());
             User user = new User();
             user.setUsername(userData.getUsername());
             user.setEmail(userData.getEmail());
@@ -165,11 +182,12 @@ public class UserController {
             }
 
             User savedUser = userRepository.save(user);
+            logger.debug("User created successfully with ID: {}", savedUser.getId());
             Map<String, Object> response = new HashMap<>();
             response.put("userId", savedUser.getId());
             return ResponseEntity.status(201).body(response);
         } catch (Exception e) {
-            logger.error("Error creating user: {}", e.getMessage());
+            logger.error("Error creating user: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error creating user: " + e.getMessage()));
         }
     }
@@ -185,13 +203,14 @@ public class UserController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Email and password are required"));
             }
 
-            User user = userRepository.findByEmail(email);
-            if (user == null || !authUtil.verifyPassword(password, user.getPassword())) {
+            Optional<User> userOpt = userRepository.findByEmail(email);
+            if (userOpt.isEmpty() || !authUtil.verifyPassword(password, userOpt.get().getPassword())) {
                 logger.debug("Invalid credentials for email: {}", email);
                 return ResponseEntity.status(401)
                     .body(Map.of("error", "Invalid email or password"));
             }
-
+            
+            User user = userOpt.get();
             logger.debug("Login successful for email: {}", email);
             String token = authUtil.generateToken(user.getId(), user.getRole());
             Map<String, Object> response = new HashMap<>();
@@ -283,30 +302,38 @@ public class UserController {
     }
     
     @PostMapping("/{id}/join-family/{familyId}")
-    public ResponseEntity<Void> joinFamily(@PathVariable Long id, @PathVariable Long familyId) {
+    public ResponseEntity<Map<String, Object>> joinFamily(@PathVariable Long id, @PathVariable Long familyId) {
         logger.debug("Received request for user ID: {} to join family ID: {}", id, familyId);
         try {
             User user = userRepository.findById(id).orElse(null);
             if (user == null) {
                 logger.debug("User not found for ID: {}", id);
-                return ResponseEntity.badRequest().build();
+                return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
+            
             if (user.getFamilyId() != null) {
-                logger.debug("User ID {} already belongs to a family: {}", id, user.getFamilyId());
-                return ResponseEntity.badRequest().build();
+                if (user.getFamilyId().equals(familyId)) {
+                    logger.debug("User ID: {} is already in family ID: {}", id, familyId);
+                    return ResponseEntity.badRequest().body(Map.of("error", "User is already in that family"));
+                } else {
+                    logger.debug("User ID: {} already belongs to a different family: {}", id, user.getFamilyId());
+                    return ResponseEntity.badRequest().body(Map.of("error", "User already belongs to a family"));
+                }
             }
+            
             Family family = familyRepository.findById(familyId).orElse(null);
             if (family == null) {
                 logger.debug("Family not found for ID: {}", familyId);
-                return ResponseEntity.badRequest().build();
+                return ResponseEntity.badRequest().body(Map.of("error", "Family not found"));
             }
+            
             user.setFamilyId(familyId);
             userRepository.save(user);
             logger.debug("User ID: {} joined family ID: {}", id, familyId);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             logger.error("Error joining family: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(Map.of("error", "Error joining family: " + e.getMessage()));
         }
     }
 
@@ -336,6 +363,7 @@ public class UserController {
             message.setContent(content != null ? content : "");
             message.setSenderUsername(user.getUsername());
             message.setSenderId(user.getId());
+            message.setUserId(user.getId());
             message.setFamilyId(user.getFamilyId());
             message.setTimestamp(LocalDateTime.now());
 
@@ -593,15 +621,16 @@ public class UserController {
         }
         
         // Check if the invited email is already in the same family
-        User invitedUser = userRepository.findByEmail(email);
-        if (invitedUser != null) {
+        Optional<User> invitedUserOpt = userRepository.findByEmail(email);
+        if (invitedUserOpt.isPresent()) {
+            User invitedUser = invitedUserOpt.get();
             if (invitedUser.getFamilyId() != null && invitedUser.getFamilyId().equals(familyId)) {
                 return ResponseEntity.badRequest().body("User is already in your family");
             }
         }
         
         // Check if there's already a pending invitation for this email to this family
-        List<Invitation> pendingInvitations = invitationRepository.findByInviteeEmailAndFamilyIdAndStatus(
+        List<Invitation> pendingInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
             email, familyId, "PENDING");
         
         if (!pendingInvitations.isEmpty()) {
@@ -610,9 +639,9 @@ public class UserController {
         
         // Create the invitation
         Invitation invitation = new Invitation();
-        invitation.setInviteeEmail(email);
+        invitation.setEmail(email);
         invitation.setFamilyId(familyId);
-        invitation.setInviterId(userId);
+        invitation.setSenderId(userId);
         invitation.setStatus("PENDING");
         
         // Set expiration time to 7 days from now
@@ -639,12 +668,12 @@ public class UserController {
                 return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
             }
 
-            List<Invitation> invitations = invitationRepository.findByInviteeEmail(user.getEmail());
+            List<Invitation> invitations = invitationRepository.findByEmail(user.getEmail());
             List<Map<String, Object>> response = invitations.stream().map(inv -> {
                 Map<String, Object> invMap = new HashMap<>();
                 invMap.put("id", inv.getId());
                 invMap.put("familyId", inv.getFamilyId());
-                invMap.put("inviterId", inv.getInviterId());
+                invMap.put("inviterId", inv.getSenderId());
                 invMap.put("status", inv.getStatus());
                 invMap.put("createdAt", inv.getCreatedAt().toString());
                 invMap.put("expiresAt", inv.getExpiresAt().toString());
@@ -675,7 +704,7 @@ public class UserController {
                 return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
 
-            Invitation invitation = invitationRepository.findByIdAndInviteeEmail(invitationId, user.getEmail()).orElse(null);
+            Invitation invitation = invitationRepository.findByIdAndEmail(invitationId, user.getEmail()).orElse(null);
             if (invitation == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Invitation not found or not intended for this user"));
             }
@@ -723,7 +752,7 @@ public class UserController {
                 return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
 
-            Invitation invitation = invitationRepository.findByIdAndInviteeEmail(invitationId, user.getEmail()).orElse(null);
+            Invitation invitation = invitationRepository.findByIdAndEmail(invitationId, user.getEmail()).orElse(null);
             if (invitation == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Invitation not found or not intended for this user"));
             }

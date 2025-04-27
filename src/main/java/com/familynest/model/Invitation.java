@@ -2,6 +2,7 @@ package com.familynest.model;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "invitation")
@@ -13,11 +14,14 @@ public class Invitation {
     @Column(name = "family_id", nullable = false)
     private Long familyId;
 
-    @Column(name = "inviter_id", nullable = false)
-    private Long inviterId;
+    @Column(name = "sender_id")
+    private Long senderId;
 
-    @Column(name = "invitee_email", nullable = false)
-    private String inviteeEmail;
+    @Column(name = "email", nullable = false)
+    private String email;
+
+    @Column(name = "token", nullable = false, unique = true)
+    private String token = UUID.randomUUID().toString();
 
     @Column(name = "status", nullable = false)
     private String status = "PENDING";
@@ -45,20 +49,28 @@ public class Invitation {
         this.familyId = familyId;
     }
 
-    public Long getInviterId() {
-        return inviterId;
+    public Long getSenderId() {
+        return senderId;
     }
 
-    public void setInviterId(Long inviterId) {
-        this.inviterId = inviterId;
+    public void setSenderId(Long senderId) {
+        this.senderId = senderId;
     }
 
-    public String getInviteeEmail() {
-        return inviteeEmail;
+    public String getEmail() {
+        return email;
     }
 
-    public void setInviteeEmail(String inviteeEmail) {
-        this.inviteeEmail = inviteeEmail;
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public void setToken(String token) {
+        this.token = token;
     }
 
     public String getStatus() {

@@ -6,6 +6,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Column;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "app_user")
@@ -33,6 +34,26 @@ public class User {
     private String photo;
 
     private Long familyId;
+    
+    // Demographic information
+    private String phoneNumber;
+    
+    private String address;
+    
+    private String city;
+    
+    private String state;
+    
+    private String zipCode;
+    
+    private String country;
+    
+    private LocalDate birthDate;
+    
+    @Column(columnDefinition = "TEXT")
+    private String bio;
+    
+    private Boolean showDemographics = false;
 
     // Getters and setters
     public Long getId() {
@@ -105,5 +126,78 @@ public class User {
 
     public void setFamilyId(Long familyId) {
         this.familyId = familyId;
+    }
+    
+    // Demographic getters and setters
+    public String getPhoneNumber() {
+        return phoneNumber;
+    }
+
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
+    public String getCity() {
+        return city;
+    }
+
+    public void setCity(String city) {
+        this.city = city;
+    }
+
+    public String getState() {
+        return state;
+    }
+
+    public void setState(String state) {
+        this.state = state;
+    }
+
+    public String getZipCode() {
+        return zipCode;
+    }
+
+    public void setZipCode(String zipCode) {
+        this.zipCode = zipCode;
+    }
+
+    public String getCountry() {
+        return country;
+    }
+
+    public void setCountry(String country) {
+        this.country = country;
+    }
+
+    public LocalDate getBirthDate() {
+        return birthDate;
+    }
+
+    public void setBirthDate(LocalDate birthDate) {
+        this.birthDate = birthDate;
+    }
+
+    public String getBio() {
+        return bio;
+    }
+
+    public void setBio(String bio) {
+        this.bio = bio;
+    }
+
+    public Boolean getShowDemographics() {
+        return showDemographics;
+    }
+
+    public void setShowDemographics(Boolean showDemographics) {
+        this.showDemographics = showDemographics;
     }
 }

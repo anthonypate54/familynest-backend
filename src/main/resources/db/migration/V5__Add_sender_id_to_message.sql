@@ -1,1 +1,0 @@
-ALTER TABLE message ADD COLUMN sender_id BIGINT; 

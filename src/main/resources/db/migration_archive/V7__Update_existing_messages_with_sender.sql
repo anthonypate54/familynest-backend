@@ -1,3 +1,7 @@
+-- This migration is now a no-op since sender_username column doesn't exist yet at this point
+-- It will be added in V13 and populated there.
+-- Original SQL:
+/*
 -- First, ensure all users exist for the sender_usernames
 INSERT INTO app_user (username, email, password, role)
 SELECT DISTINCT 
@@ -17,4 +21,5 @@ SET sender_id = (
     FROM app_user u 
     WHERE u.username = m.sender_username
 )
-WHERE m.sender_id IS NULL; 
+WHERE m.sender_id IS NULL;
+*/ 

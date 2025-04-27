@@ -5,6 +5,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Column;
 import java.time.LocalDateTime;
 
 @Entity
@@ -22,6 +23,9 @@ public class Message {
     private Long familyId;
 
     private Long senderId;
+    
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
 
     private LocalDateTime timestamp;
 
@@ -68,6 +72,14 @@ public class Message {
 
     public void setSenderId(Long senderId) {
         this.senderId = senderId;
+    }
+    
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
 
     public LocalDateTime getTimestamp() {

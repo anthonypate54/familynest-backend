@@ -1,0 +1,1 @@
+ALTER TABLE message ADD COLUMN IF NOT EXISTS sender_id BIGINT; 
