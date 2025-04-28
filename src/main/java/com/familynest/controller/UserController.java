@@ -770,4 +770,30 @@ public class UserController {
             return ResponseEntity.badRequest().body(Map.of("error", "Error rejecting invitation: " + e.getMessage()));
         }
     }
+    
+    @GetMapping("/families/{familyId}")
+    public ResponseEntity<Map<String, Object>> getFamilyById(@PathVariable Long familyId) {
+        logger.debug("Received request to get family details for ID: {}", familyId);
+        try {
+            Family family = familyRepository.findById(familyId).orElse(null);
+            if (family == null) {
+                logger.debug("Family not found for ID: {}", familyId);
+                return ResponseEntity.notFound().build();
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", family.getId());
+            response.put("name", family.getName());
+            
+            // Get number of members in this family
+            List<User> members = userRepository.findByFamilyId(familyId);
+            response.put("memberCount", members.size());
+            
+            logger.debug("Returning family details: {}", response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error retrieving family: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error retrieving family: " + e.getMessage()));
+        }
+    }
 }
