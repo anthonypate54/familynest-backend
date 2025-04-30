@@ -6,7 +6,13 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Column;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.FetchType;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "app_user")
@@ -32,8 +38,14 @@ public class User {
     private String role;
 
     private String photo;
+    
+    // One family that the user owns (created)
+    @OneToOne(mappedBy = "createdBy", fetch = FetchType.LAZY)
+    private Family ownedFamily;
 
-    private Long familyId;
+    // Many families that the user is a member of
+    @OneToMany(mappedBy = "userId", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<UserFamilyMembership> familyMemberships = new ArrayList<>();
     
     // Demographic information
     private String phoneNumber;
@@ -120,12 +132,76 @@ public class User {
         this.photo = photo;
     }
 
-    public Long getFamilyId() {
-        return familyId;
+    // New methods for family membership management
+    public List<UserFamilyMembership> getFamilyMemberships() {
+        return familyMemberships;
     }
 
+    public void setFamilyMemberships(List<UserFamilyMembership> familyMemberships) {
+        this.familyMemberships = familyMemberships;
+    }
+    
+    // Method to get active family ID (for backward compatibility)
+    public Long getFamilyId() {
+        return familyMemberships.stream()
+                .filter(UserFamilyMembership::isActive)
+                .findFirst()
+                .map(UserFamilyMembership::getFamilyId)
+                .orElse(null);
+    }
+    
+    // Method to set active family ID (for backward compatibility)
     public void setFamilyId(Long familyId) {
-        this.familyId = familyId;
+        // This is maintained for backward compatibility
+        if (familyId == null) {
+            return;
+        }
+        
+        // Check if already a member of this family
+        UserFamilyMembership existingMembership = familyMemberships.stream()
+                .filter(m -> familyId.equals(m.getFamilyId()))
+                .findFirst()
+                .orElse(null);
+                
+        if (existingMembership != null) {
+            // Set this membership as active
+            familyMemberships.forEach(m -> m.setActive(false));
+            existingMembership.setActive(true);
+        } else {
+            // Add new membership and set as active
+            addFamilyMembership(familyId, true);
+        }
+    }
+    
+    // Get the family this user has created/owns (if any)
+    public Family getOwnedFamily() {
+        return ownedFamily;
+    }
+    
+    public void setOwnedFamily(Family family) {
+        this.ownedFamily = family;
+    }
+    
+    // Helper method to add a new family membership
+    public void addFamilyMembership(Long familyId, boolean isActive) {
+        UserFamilyMembership membership = new UserFamilyMembership();
+        membership.setUserId(this.id);
+        membership.setFamilyId(familyId);
+        membership.setActive(isActive);
+        
+        if (isActive) {
+            // Make sure only one membership is active
+            familyMemberships.forEach(m -> m.setActive(false));
+        }
+        
+        // If this is the user's owned family, set role to ADMIN
+        if (ownedFamily != null && ownedFamily.getId().equals(familyId)) {
+            membership.setRole("ADMIN");
+        } else {
+            membership.setRole("MEMBER");
+        }
+        
+        familyMemberships.add(membership);
     }
     
     // Demographic getters and setters

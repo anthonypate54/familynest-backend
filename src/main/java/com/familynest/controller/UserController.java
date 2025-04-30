@@ -33,6 +33,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import com.familynest.auth.JwtUtil;
 import com.familynest.model.Invitation;
 import com.familynest.repository.InvitationRepository;
+import com.familynest.model.UserFamilyMembership;
+import com.familynest.repository.UserFamilyMembershipRepository;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -45,6 +47,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.Enumeration;
 import java.util.Optional;
+import java.util.ArrayList;
 
 @RestController
 @RequestMapping("/api/users")
@@ -69,6 +72,9 @@ public class UserController {
 
     @Autowired
     private InvitationRepository invitationRepository;
+
+    @Autowired
+    private UserFamilyMembershipRepository userFamilyMembershipRepository;
 
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
@@ -284,9 +290,18 @@ public class UserController {
             logger.debug("Creating new family with name: {}", familyData.get("name"));
             Family family = new Family();
             family.setName(familyData.get("name"));
+            family.setCreatedBy(user);
             Family savedFamily = familyRepository.save(family);
             logger.debug("Family created with ID: {}", savedFamily.getId());
 
+            logger.debug("Creating UserFamilyMembership for user ID: {} and family ID: {}", id, savedFamily.getId());
+            UserFamilyMembership membership = new UserFamilyMembership();
+            membership.setUserId(id);
+            membership.setFamilyId(savedFamily.getId());
+            membership.setActive(true);
+            membership.setRole("ADMIN");
+            userFamilyMembershipRepository.save(membership);
+            
             logger.debug("Updating user {} with new family ID: {}", id, savedFamily.getId());
             user.setFamilyId(savedFamily.getId());
             userRepository.save(user);
@@ -327,8 +342,17 @@ public class UserController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Family not found"));
             }
             
+            logger.debug("Creating UserFamilyMembership for user ID: {} and family ID: {}", id, familyId);
+            UserFamilyMembership membership = new UserFamilyMembership();
+            membership.setUserId(id);
+            membership.setFamilyId(familyId);
+            membership.setActive(true);
+            membership.setRole("MEMBER");
+            userFamilyMembershipRepository.save(membership);
+
             user.setFamilyId(familyId);
             userRepository.save(user);
+            
             logger.debug("User ID: {} joined family ID: {}", id, familyId);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
@@ -342,12 +366,14 @@ public class UserController {
         @PathVariable Long id,
         @RequestPart(value = "content", required = false) String content,
         @RequestPart(value = "media", required = false) MultipartFile media,
-        @RequestPart(value = "mediaType", required = false) String mediaType) {
+        @RequestPart(value = "mediaType", required = false) String mediaType,
+        @RequestPart(value = "familyId", required = false) String familyIdStr) {
         logger.debug("Received request to post message for user ID: {}", id);
-        logger.debug("Content: {}, Media: {}, MediaType: {}", 
+        logger.debug("Content: {}, Media: {}, MediaType: {}, FamilyId: {}", 
                     content, 
                     media != null ? media.getOriginalFilename() + " (" + media.getSize() + " bytes)" : "null", 
-                    mediaType);
+                    mediaType,
+                    familyIdStr);
         
         try {
             User user = userRepository.findById(id).orElse(null);
@@ -355,16 +381,46 @@ public class UserController {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().build();
             }
-            if (user.getFamilyId() == null) {
-                logger.debug("User ID {} has no familyId, cannot post message", id);
+            
+            // Determine which family ID to use for the message
+            Long familyId = null;
+            
+            // If explicit family ID was provided in the request, use it
+            if (familyIdStr != null && !familyIdStr.isEmpty()) {
+                try {
+                    familyId = Long.parseLong(familyIdStr);
+                    logger.debug("Using explicitly provided family ID: {}", familyId);
+                } catch (NumberFormatException e) {
+                    logger.error("Invalid family ID format: {}", familyIdStr);
+                    return ResponseEntity.badRequest().build();
+                }
+            } else {
+                // Otherwise use the user's active family
+                familyId = user.getFamilyId();
+                logger.debug("Using user's active family ID: {}", familyId);
+            }
+            
+            if (familyId == null) {
+                logger.debug("No valid family ID found for message");
                 return ResponseEntity.badRequest().build();
             }
+            
+            // Verify the user is a member of this family
+            boolean isMember = userRepository.findMembersOfFamily(familyId)
+                .stream()
+                .anyMatch(member -> member.getId().equals(id));
+                
+            if (!isMember) {
+                logger.debug("User {} is not a member of family {}", id, familyId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+            
             Message message = new Message();
             message.setContent(content != null ? content : "");
             message.setSenderUsername(user.getUsername());
             message.setSenderId(user.getId());
             message.setUserId(user.getId());
-            message.setFamilyId(user.getFamilyId());
+            message.setFamilyId(familyId);
             message.setTimestamp(LocalDateTime.now());
 
             if (media != null && mediaType != null) {
@@ -402,7 +458,7 @@ public class UserController {
             }
 
             messageRepository.save(message);
-            logger.debug("Message posted successfully for family ID: {}", user.getFamilyId());
+            logger.debug("Message posted successfully for family ID: {}", familyId);
             return ResponseEntity.status(201).build();
         } catch (Exception e) {
             logger.error("Error posting message: {}", e.getMessage(), e);
@@ -794,6 +850,99 @@ public class UserController {
         } catch (Exception e) {
             logger.error("Error retrieving family: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error retrieving family: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/{id}/families")
+    public ResponseEntity<List<Map<String, Object>>> getUserFamilies(@PathVariable Long id) {
+        logger.debug("Getting families for user ID: {}", id);
+        try {
+            // Check if the user exists
+            User user = userRepository.findById(id).orElse(null);
+            if (user == null) {
+                return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
+            }
+            
+            List<Map<String, Object>> families = new ArrayList<>();
+            
+            // Get the user's family from family_id (the active family)
+            Long familyId = user.getFamilyId();
+            if (familyId != null) {
+                Family family = familyRepository.findById(familyId).orElse(null);
+                if (family != null) {
+                    Map<String, Object> familyInfo = new HashMap<>();
+                    familyInfo.put("familyId", family.getId());
+                    familyInfo.put("familyName", family.getName());
+                    familyInfo.put("memberCount", userRepository.findByFamilyId(familyId).size());
+                    
+                    // Check if user is the owner/admin of this family
+                    boolean isOwner = (family.getCreatedBy() != null && family.getCreatedBy().getId().equals(id));
+                    familyInfo.put("isOwner", isOwner);
+                    familyInfo.put("role", isOwner ? "ADMIN" : "MEMBER");
+                    
+                    families.add(familyInfo);
+                }
+            }
+            
+            // Return the list of families (may be empty)
+            return ResponseEntity.ok(families);
+        } catch (Exception e) {
+            logger.error("Error getting families for user {}: {}", id, e.getMessage(), e);
+            return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error getting families: " + e.getMessage())));
+        }
+    }
+
+    @PostMapping("/fix-family-memberships")
+    public ResponseEntity<Map<String, Object>> fixFamilyMemberships() {
+        logger.debug("Received request to fix family memberships");
+        try {
+            // Get all users
+            List<User> allUsers = userRepository.findAll();
+            int fixedCount = 0;
+            
+            for (User user : allUsers) {
+                Long familyId = user.getFamilyId();
+                if (familyId != null) {
+                    // Check if user has a membership record
+                    List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(user.getId());
+                    boolean hasMembership = memberships.stream()
+                            .anyMatch(m -> m.getFamilyId().equals(familyId));
+                    
+                    if (!hasMembership) {
+                        logger.debug("Fixing family membership for user ID: {} and family ID: {}", user.getId(), familyId);
+                        
+                        // Get the family
+                        Optional<Family> familyOpt = familyRepository.findById(familyId);
+                        if (familyOpt.isPresent()) {
+                            Family family = familyOpt.get();
+                            
+                            // Create a membership
+                            UserFamilyMembership membership = new UserFamilyMembership();
+                            membership.setUserId(user.getId());
+                            membership.setFamilyId(familyId);
+                            membership.setActive(true);
+                            
+                            // If this user is the creator of the family, set as ADMIN
+                            if (family.getCreatedBy() != null && family.getCreatedBy().getId().equals(user.getId())) {
+                                membership.setRole("ADMIN");
+                            } else {
+                                membership.setRole("MEMBER");
+                            }
+                            
+                            userFamilyMembershipRepository.save(membership);
+                            fixedCount++;
+                        }
+                    }
+                }
+            }
+            
+            return ResponseEntity.ok(Map.of(
+                "message", "Fixed family memberships",
+                "fixedCount", fixedCount
+            ));
+        } catch (Exception e) {
+            logger.error("Error fixing family memberships: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error fixing family memberships: " + e.getMessage()));
         }
     }
 }
