@@ -35,6 +35,7 @@ import com.familynest.model.Invitation;
 import com.familynest.repository.InvitationRepository;
 import com.familynest.model.UserFamilyMembership;
 import com.familynest.repository.UserFamilyMembershipRepository;
+import java.time.LocalDate;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -48,6 +49,7 @@ import java.util.stream.Collectors;
 import java.util.Enumeration;
 import java.util.Optional;
 import java.util.ArrayList;
+import com.familynest.repository.UserFamilyMessageSettingsRepository;
 
 @RestController
 @RequestMapping("/api/users")
@@ -75,6 +77,9 @@ public class UserController {
 
     @Autowired
     private UserFamilyMembershipRepository userFamilyMembershipRepository;
+
+    @Autowired
+    private UserFamilyMessageSettingsRepository userFamilyMessageSettingsRepository;
 
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
@@ -115,6 +120,18 @@ public class UserController {
         response.put("role", user.getRole());
         response.put("photo", user.getPhoto());
         response.put("familyId", user.getFamilyId());
+        
+        // Add demographic information
+        response.put("phoneNumber", user.getPhoneNumber());
+        response.put("address", user.getAddress());
+        response.put("city", user.getCity());
+        response.put("state", user.getState());
+        response.put("zipCode", user.getZipCode());
+        response.put("country", user.getCountry());
+        response.put("birthDate", user.getBirthDate() != null ? user.getBirthDate().toString() : null);
+        response.put("bio", user.getBio());
+        response.put("showDemographics", user.getShowDemographics());
+        
         logger.debug("Returning response: {}", response);
         return ResponseEntity.ok(response);
     }
@@ -282,9 +299,17 @@ public class UserController {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
-            if (user.getFamilyId() != null) {
-                logger.debug("User ID {} already belongs to a family: {}", id, user.getFamilyId());
-                return ResponseEntity.badRequest().body(Map.of("error", "User already belongs to a family"));
+            
+            // Check if user already owns a family
+            boolean userAlreadyOwnsFamily = false;
+            Family ownedFamily = user.getOwnedFamily();
+            if (ownedFamily != null) {
+                logger.debug("User ID {} already owns a family: {}", id, ownedFamily.getId());
+                userAlreadyOwnsFamily = true;
+            }
+            
+            if (userAlreadyOwnsFamily) {
+                return ResponseEntity.badRequest().body(Map.of("error", "User already owns a family"));
             }
 
             logger.debug("Creating new family with name: {}", familyData.get("name"));
@@ -326,14 +351,14 @@ public class UserController {
                 return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
             
-            if (user.getFamilyId() != null) {
-                if (user.getFamilyId().equals(familyId)) {
-                    logger.debug("User ID: {} is already in family ID: {}", id, familyId);
-                    return ResponseEntity.badRequest().body(Map.of("error", "User is already in that family"));
-                } else {
-                    logger.debug("User ID: {} already belongs to a different family: {}", id, user.getFamilyId());
-                    return ResponseEntity.badRequest().body(Map.of("error", "User already belongs to a family"));
-                }
+            // Check if user is already a member of this family
+            List<UserFamilyMembership> existingMemberships = userFamilyMembershipRepository.findByUserId(id);
+            boolean alreadyMember = existingMemberships.stream()
+                .anyMatch(membership -> membership.getFamilyId().equals(familyId));
+            
+            if (alreadyMember) {
+                logger.debug("User ID: {} is already in family ID: {}", id, familyId);
+                return ResponseEntity.badRequest().body(Map.of("error", "User is already in that family"));
             }
             
             Family family = familyRepository.findById(familyId).orElse(null);
@@ -350,8 +375,23 @@ public class UserController {
             membership.setRole("MEMBER");
             userFamilyMembershipRepository.save(membership);
 
-            user.setFamilyId(familyId);
-            userRepository.save(user);
+            // If this is the user's first family, or they have no active family, set this as active
+            if (user.getFamilyId() == null) {
+                user.setFamilyId(familyId);
+                userRepository.save(user);
+            }
+            
+            // Create message settings (default: receive messages = true)
+            logger.debug("Creating message settings for user ID: {} and family ID: {}", id, familyId);
+            try {
+                com.familynest.model.UserFamilyMessageSettings settings = 
+                    new com.familynest.model.UserFamilyMessageSettings(id, familyId, true);
+                userFamilyMessageSettingsRepository.save(settings);
+                logger.debug("Message settings created successfully");
+            } catch (Exception e) {
+                logger.error("Error creating message settings: {}", e.getMessage());
+                // Continue anyway, don't fail the whole operation
+            }
             
             logger.debug("User ID: {} joined family ID: {}", id, familyId);
             return ResponseEntity.ok().build();
@@ -475,12 +515,39 @@ public class UserController {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().body(null);
             }
-            if (user.getFamilyId() == null) {
-                logger.debug("User ID {} has no familyId, cannot retrieve messages", id);
-                return ResponseEntity.badRequest().body(null);
+            
+            // Get all families the user belongs to
+            List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(id);
+            if (memberships.isEmpty()) {
+                logger.debug("User ID {} is not a member of any family", id);
+                return ResponseEntity.ok(List.of());
             }
-            List<Message> messages = messageRepository.findByFamilyId(user.getFamilyId());
-            logger.debug("Found {} messages for family ID: {}", messages.size(), user.getFamilyId());
+            
+            // Get active family ID (for backward compatibility)
+            Long activeFamilyId = user.getFamilyId();
+            logger.debug("User's active family ID: {}", activeFamilyId);
+            
+            // Get muted families (where receiveMessages = false)
+            List<Long> mutedFamilyIds = userFamilyMessageSettingsRepository.findMutedFamilyIdsByUserId(id);
+            logger.debug("User has muted {} families: {}", mutedFamilyIds.size(), mutedFamilyIds);
+            
+            // Get family IDs user wants to receive messages from
+            List<Long> familyIds = memberships.stream()
+                    .map(UserFamilyMembership::getFamilyId)
+                    .filter(familyId -> !mutedFamilyIds.contains(familyId))
+                    .collect(Collectors.toList());
+            
+            if (familyIds.isEmpty()) {
+                logger.debug("No families to fetch messages from after filtering by preferences");
+                return ResponseEntity.ok(List.of());
+            }
+            
+            logger.debug("Fetching messages from {} families: {}", familyIds.size(), familyIds);
+            
+            // Get messages from all included families
+            List<Message> messages = messageRepository.findByFamilyIdIn(familyIds);
+            logger.debug("Found {} messages from all families", messages.size());
+            
             List<Map<String, Object>> response = messages.stream().map(message -> {
                 Map<String, Object> messageMap = new HashMap<>();
                 messageMap.put("content", message.getContent());
@@ -507,18 +574,57 @@ public class UserController {
                 messageMap.put("mediaUrl", message.getMediaUrl());
                 return messageMap;
             }).collect(Collectors.toList());
-            logger.debug("Returning {} messages for family ID: {}", response.size(), user.getFamilyId());
+            
+            logger.debug("Returning {} messages after filtering by message preferences", response.size());
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Error retrieving messages: {}", e.getMessage());
+            logger.error("Error retrieving messages: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(null);
         }
     }
 
     @GetMapping("/{id}/family-members")
-    public ResponseEntity<List<Map<String, Object>>> getFamilyMembers(@PathVariable Long id) {
+    public ResponseEntity<List<Map<String, Object>>> getFamilyMembers(
+            @PathVariable Long id,
+            @RequestHeader("Authorization") String authHeader) {
         logger.debug("Received request to get family members for user ID: {}", id);
         try {
+            // Extract userId from token and validate authorization
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long tokenUserId = authUtil.extractUserId(token);
+            if (tokenUserId == null) {
+                logger.debug("Token validation failed or userId could not be extracted");
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+            
+            // Only allow a user to get their own family members or members of a family they belong to
+            if (!tokenUserId.equals(id)) {
+                logger.debug("Token user ID {} does not match requested ID {}", tokenUserId, id);
+                // Check if the token user is a member of the same family as the requested user
+                User requestedUser = userRepository.findById(id).orElse(null);
+                User tokenUser = userRepository.findById(tokenUserId).orElse(null);
+                
+                if (requestedUser == null || tokenUser == null) {
+                    logger.debug("User not found for ID: {} or {}", id, tokenUserId);
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+                }
+                
+                Long requestedFamilyId = requestedUser.getFamilyId();
+                
+                // Check if tokenUser is a member of the requested user's family
+                boolean isMemberOfSameFamily = false;
+                if (requestedFamilyId != null) {
+                    List<UserFamilyMembership> tokenUserMemberships = userFamilyMembershipRepository.findByUserId(tokenUserId);
+                    isMemberOfSameFamily = tokenUserMemberships.stream()
+                        .anyMatch(membership -> membership.getFamilyId().equals(requestedFamilyId));
+                }
+                
+                if (!isMemberOfSameFamily) {
+                    logger.debug("User {} is not authorized to view members of family for user {}", tokenUserId, id);
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+                }
+            }
+            
             logger.debug("Querying user with ID: {}", id);
             User user = userRepository.findById(id).orElse(null);
             logger.debug("Finished querying user with ID: {}", id);
@@ -536,10 +642,50 @@ public class UserController {
             List<Map<String, Object>> response = familyMembers.stream().map(member -> {
                 Map<String, Object> memberMap = new HashMap<>();
                 memberMap.put("id", member.getId());
+                memberMap.put("userId", member.getId()); // Add userId field for consistency
                 memberMap.put("username", member.getUsername());
                 memberMap.put("firstName", member.getFirstName());
                 memberMap.put("lastName", member.getLastName());
                 memberMap.put("photo", member.getPhoto());
+                
+                // Get each member's individual family name from their family ID
+                String familyName = null;
+                Long memberFamilyId = member.getFamilyId();
+                
+                // Only include familyName in the response if the member actually has their own family
+                if (memberFamilyId != null) {
+                    // Get family name from the family entity
+                    Family memberFamily = familyRepository.findById(memberFamilyId).orElse(null);
+                    if (memberFamily != null) {
+                        familyName = memberFamily.getName();
+                        // Only include familyName if we actually found one
+                        if (familyName != null && !familyName.isEmpty()) {
+                            memberMap.put("familyName", familyName);
+                        }
+                    }
+                }
+                
+                // Check if the member is a family owner
+                boolean isOwner = false;
+                String ownedFamilyName = null;
+                
+                // Find if this member has created their own family
+                Family ownedFamily = familyRepository.findByCreatedById(member.getId());
+                if (ownedFamily != null) {
+                    isOwner = true;
+                    ownedFamilyName = ownedFamily.getName();
+                    
+                    // Add ownership information to response
+                    memberMap.put("isOwner", true);
+                    memberMap.put("ownedFamilyName", ownedFamilyName);
+                    
+                    logger.debug("User {} is a family owner. Owned family: {}", member.getId(), ownedFamilyName);
+                } else {
+                    // Not an owner
+                    memberMap.put("isOwner", false);
+                    logger.debug("User {} is not a family owner", member.getId());
+                }
+                
                 return memberMap;
             }).collect(Collectors.toList());
             logger.debug("Returning {} family members for family ID: {}", response.size(), user.getFamilyId());
@@ -943,6 +1089,141 @@ public class UserController {
         } catch (Exception e) {
             logger.error("Error fixing family memberships: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error fixing family memberships: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{id}/profile")
+    public ResponseEntity<Map<String, Object>> updateUserProfile(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> profileData) {
+        logger.debug("Received request to update profile for user ID: {}", id);
+        try {
+            User user = userRepository.findById(id).orElse(null);
+            if (user == null) {
+                logger.debug("User not found for ID: {}", id);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "User not found"));
+            }
+            
+            // Update demographic fields
+            if (profileData.containsKey("phoneNumber")) {
+                user.setPhoneNumber((String) profileData.get("phoneNumber"));
+            }
+            if (profileData.containsKey("address")) {
+                user.setAddress((String) profileData.get("address"));
+            }
+            if (profileData.containsKey("city")) {
+                user.setCity((String) profileData.get("city"));
+            }
+            if (profileData.containsKey("state")) {
+                user.setState((String) profileData.get("state"));
+            }
+            if (profileData.containsKey("zipCode")) {
+                user.setZipCode((String) profileData.get("zipCode"));
+            }
+            if (profileData.containsKey("country")) {
+                user.setCountry((String) profileData.get("country"));
+            }
+            if (profileData.containsKey("bio")) {
+                user.setBio((String) profileData.get("bio"));
+            }
+            if (profileData.containsKey("showDemographics")) {
+                user.setShowDemographics((Boolean) profileData.get("showDemographics"));
+            }
+            if (profileData.containsKey("birthDate") && profileData.get("birthDate") != null) {
+                String birthDateStr = (String) profileData.get("birthDate");
+                if (birthDateStr != null && !birthDateStr.isEmpty()) {
+                    try {
+                        LocalDate birthDate = LocalDate.parse(birthDateStr);
+                        user.setBirthDate(birthDate);
+                    } catch (Exception e) {
+                        logger.error("Error parsing birth date: {}", e.getMessage());
+                        // Continue without updating birth date
+                    }
+                }
+            }
+            
+            userRepository.save(user);
+            logger.debug("User profile updated successfully for ID: {}", id);
+            
+            // Return the updated user data
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", user.getId());
+            response.put("username", user.getUsername());
+            response.put("firstName", user.getFirstName());
+            response.put("lastName", user.getLastName());
+            response.put("email", user.getEmail());
+            response.put("phoneNumber", user.getPhoneNumber());
+            response.put("address", user.getAddress());
+            response.put("city", user.getCity());
+            response.put("state", user.getState());
+            response.put("zipCode", user.getZipCode());
+            response.put("country", user.getCountry());
+            response.put("birthDate", user.getBirthDate() != null ? user.getBirthDate().toString() : null);
+            response.put("bio", user.getBio());
+            response.put("showDemographics", user.getShowDemographics());
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error updating user profile: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error updating user profile: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/families/{familyId}/update")
+    public ResponseEntity<Map<String, Object>> updateFamily(
+            @PathVariable Long familyId,
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, String> familyData) {
+        logger.debug("Received request to update family ID: {}", familyId);
+        try {
+            // Validate JWT token and get role
+            String token = authHeader.replace("Bearer ", "");
+            Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+            Long userId = Long.parseLong(claims.get("sub").toString());
+            String role = (String) claims.get("role");
+            logger.debug("Token validated for user ID: {}, role: {}", userId, role);
+            
+            // Check if family exists
+            Family family = familyRepository.findById(familyId).orElse(null);
+            if (family == null) {
+                logger.debug("Family not found for ID: {}", familyId);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Family not found"));
+            }
+            
+            // Verify user is admin of this family
+            boolean isAdmin = false;
+            
+            // Check if user is the creator
+            if (family.getCreatedBy() != null && family.getCreatedBy().getId().equals(userId)) {
+                isAdmin = true;
+            } else {
+                // Check if user is an admin member
+                Optional<UserFamilyMembership> membership = userFamilyMembershipRepository.findByUserIdAndFamilyId(userId, familyId);
+                isAdmin = membership.isPresent() && "ADMIN".equals(membership.get().getRole());
+            }
+            
+            if (!isAdmin) {
+                logger.debug("User {} is not authorized to update family {}", userId, familyId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized to update this family"));
+            }
+            
+            // Update family name if provided
+            if (familyData.containsKey("name") && familyData.get("name") != null && !familyData.get("name").trim().isEmpty()) {
+                String newName = familyData.get("name").trim();
+                family.setName(newName);
+                familyRepository.save(family);
+                logger.debug("Updated family name to: {}", newName);
+            }
+            
+            // Return updated family details
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", family.getId());
+            response.put("name", family.getName());
+            response.put("memberCount", userRepository.findByFamilyId(familyId).size());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error updating family: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error updating family: " + e.getMessage()));
         }
     }
 }
