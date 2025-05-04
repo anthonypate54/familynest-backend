@@ -921,16 +921,51 @@ public class UserController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Invitation has expired"));
             }
 
-            if (user.getFamilyId() != null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "User already belongs to a family"));
+            // Check if user is already a member of this family
+            Long familyId = invitation.getFamilyId();
+            List<UserFamilyMembership> existingMemberships = userFamilyMembershipRepository.findByUserId(userId);
+            boolean alreadyMember = existingMemberships.stream()
+                .anyMatch(membership -> membership.getFamilyId().equals(familyId));
+            
+            if (alreadyMember) {
+                logger.debug("User ID: {} is already in family ID: {}", userId, familyId);
+                invitation.setStatus("ACCEPTED");
+                invitationRepository.save(invitation);
+                return ResponseEntity.ok(Map.of("message", "User is already a member of this family", "familyId", familyId));
             }
 
-            user.setFamilyId(invitation.getFamilyId());
-            userRepository.save(user);
+            // Create a UserFamilyMembership entry to track this membership
+            UserFamilyMembership membership = new UserFamilyMembership();
+            membership.setUserId(userId);
+            membership.setFamilyId(familyId);
+            membership.setActive(true);
+            membership.setRole("MEMBER");
+            membership.setJoinedAt(LocalDateTime.now());
+            userFamilyMembershipRepository.save(membership);
+
+            // If user doesn't have an active family yet, set this as their active family
+            if (user.getFamilyId() == null) {
+                user.setFamilyId(familyId);
+                userRepository.save(user);
+                logger.debug("Set family ID {} as active family for user {}", familyId, userId);
+            }
+            
+            // Create message settings (default: receive messages = true)
+            logger.debug("Creating message settings for user ID: {} and family ID: {}", userId, familyId);
+            try {
+                com.familynest.model.UserFamilyMessageSettings settings = 
+                    new com.familynest.model.UserFamilyMessageSettings(userId, familyId, true);
+                userFamilyMessageSettingsRepository.save(settings);
+                logger.debug("Message settings created successfully");
+            } catch (Exception e) {
+                logger.error("Error creating message settings: {}", e.getMessage());
+                // Continue anyway, don't fail the whole operation
+            }
+
             invitation.setStatus("ACCEPTED");
             invitationRepository.save(invitation);
 
-            return ResponseEntity.ok(Map.of("message", "Invitation accepted", "familyId", invitation.getFamilyId()));
+            return ResponseEntity.ok(Map.of("message", "Invitation accepted", "familyId", familyId));
         } catch (Exception e) {
             logger.error("Error accepting invitation: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error accepting invitation: " + e.getMessage()));
@@ -1011,26 +1046,43 @@ public class UserController {
             
             List<Map<String, Object>> families = new ArrayList<>();
             
-            // Get the user's family from family_id (the active family)
-            Long familyId = user.getFamilyId();
-            if (familyId != null) {
-                Family family = familyRepository.findById(familyId).orElse(null);
-                if (family != null) {
-                    Map<String, Object> familyInfo = new HashMap<>();
-                    familyInfo.put("familyId", family.getId());
-                    familyInfo.put("familyName", family.getName());
-                    familyInfo.put("memberCount", userRepository.findByFamilyId(familyId).size());
-                    
-                    // Check if user is the owner/admin of this family
-                    boolean isOwner = (family.getCreatedBy() != null && family.getCreatedBy().getId().equals(id));
-                    familyInfo.put("isOwner", isOwner);
-                    familyInfo.put("role", isOwner ? "ADMIN" : "MEMBER");
-                    
-                    families.add(familyInfo);
+            // Get all family memberships for this user from the user_family_membership table
+            List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(id);
+            logger.debug("Found {} family memberships for user {}", memberships.size(), id);
+            
+            // Convert each membership to a family info object
+            for (UserFamilyMembership membership : memberships) {
+                Long familyId = membership.getFamilyId();
+                if (familyId != null) {
+                    Family family = familyRepository.findById(familyId).orElse(null);
+                    if (family != null) {
+                        Map<String, Object> familyInfo = new HashMap<>();
+                        familyInfo.put("familyId", family.getId());
+                        familyInfo.put("familyName", family.getName());
+                        familyInfo.put("memberCount", userRepository.findByFamilyId(familyId).size());
+                        
+                        // Check if user is the owner/admin of this family
+                        boolean isOwner = (family.getCreatedBy() != null && family.getCreatedBy().getId().equals(id));
+                        familyInfo.put("isOwner", isOwner);
+                        familyInfo.put("role", membership.getRole());
+                        
+                        // Check if this is the user's active family
+                        boolean isActive = (user.getFamilyId() != null && user.getFamilyId().equals(familyId));
+                        familyInfo.put("isActive", isActive);
+                        
+                        families.add(familyInfo);
+                    }
                 }
             }
             
-            // Return the list of families (may be empty)
+            // Log the results for debugging
+            logger.debug("Returning {} families for user {}", families.size(), id);
+            for (Map<String, Object> family : families) {
+                logger.debug("Family: id={}, name={}, isOwner={}, role={}, isActive={}", 
+                    family.get("familyId"), family.get("familyName"), 
+                    family.get("isOwner"), family.get("role"), family.get("isActive"));
+            }
+            
             return ResponseEntity.ok(families);
         } catch (Exception e) {
             logger.error("Error getting families for user {}: {}", id, e.getMessage(), e);
