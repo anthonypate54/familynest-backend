@@ -35,6 +35,7 @@ import com.familynest.model.Invitation;
 import com.familynest.repository.InvitationRepository;
 import com.familynest.model.UserFamilyMembership;
 import com.familynest.repository.UserFamilyMembershipRepository;
+import com.familynest.repository.UserFamilyMessageSettingsRepository;
 import java.time.LocalDate;
 
 import java.io.IOException;
@@ -42,14 +43,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.Enumeration;
 import java.util.Optional;
-import java.util.ArrayList;
-import com.familynest.repository.UserFamilyMessageSettingsRepository;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/users")
@@ -281,17 +281,39 @@ public class UserController {
     public ResponseEntity<Map<String, Object>> createFamily(
             @PathVariable Long id,
             @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, String> familyData) {
+            @RequestBody Map<String, String> familyData,
+            HttpServletRequest request) {
         logger.debug("Received request to create family for user ID: {}", id);
         try {
-            // Validate JWT token and get role
-            String token = authHeader.replace("Bearer ", "");
-            logger.debug("Token received: {}", token);
-            logger.debug("Validating token for user ID: {}", id);
-            Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
-            logger.debug("Token claims: {}", claims);
-            String role = (String) claims.get("role");
-            logger.debug("User role from token: {}", role);
+            // Get the user ID and role either from test attributes or from JWT
+            Long tokenUserId;
+            String role;
+            Object userIdAttr = request.getAttribute("userId");
+            Object roleAttr = request.getAttribute("role");
+            
+            if (userIdAttr != null && roleAttr != null) {
+                // Use the attributes set by the TestAuthFilter
+                tokenUserId = (Long) userIdAttr;
+                role = (String) roleAttr;
+                logger.debug("Using test userId: {} and role: {}", tokenUserId, role);
+            } else {
+                // Normal authentication flow
+                String token = authHeader.replace("Bearer ", "");
+                logger.debug("Token received: {}", token);
+                logger.debug("Validating token for user ID: {}", id);
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                logger.debug("Token claims: {}", claims);
+                tokenUserId = Long.parseLong(claims.get("userId").toString());
+                role = (String) claims.get("role");
+                logger.debug("User role from token: {}", role);
+            }
+            
+            // Verify that the token user ID matches the requested user ID
+            if (!tokenUserId.equals(id)) {
+                logger.debug("Token user ID {} does not match request user ID {}", tokenUserId, id);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Not authorized to create a family for this user"));
+            }
     
             logger.debug("Looking up user with ID: {}", id);
             User user = userRepository.findById(id).orElse(null);

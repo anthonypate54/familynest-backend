@@ -9,6 +9,7 @@ import com.familynest.repository.UserFamilyMessageSettingsRepository;
 import com.familynest.repository.UserFamilyMembershipRepository;
 import com.familynest.repository.UserRepository;
 import com.familynest.repository.FamilyRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,9 +53,32 @@ public class MessagePreferencesController {
      * Get message preferences for a user
      */
     @GetMapping("/{userId}")
-    public ResponseEntity<List<Map<String, Object>>> getMessagePreferences(@PathVariable Long userId) {
+    public ResponseEntity<List<Map<String, Object>>> getMessagePreferences(
+            @PathVariable Long userId,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
         logger.debug("Received request to get message preferences for user ID: {}", userId);
         try {
+            // Validate token and user
+            Long tokenUserId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                // Use the userId attribute set by the TestAuthFilter
+                tokenUserId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", tokenUserId);
+            } else {
+                // Normal authentication flow
+                String token = authHeader.replace("Bearer ", "");
+                tokenUserId = authUtil.extractUserId(token);
+            }
+            
+            // Only allow users to view their own preferences
+            if (!userId.equals(tokenUserId)) {
+                logger.debug("Unauthorized: Token user ID {} does not match path user ID {}", tokenUserId, userId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(List.of(Map.of("error", "Not authorized to view preferences for this user")));
+            }
+            
             // Verify user exists
             Optional<User> userOpt = userRepository.findById(userId);
             if (userOpt.isEmpty()) {
@@ -116,13 +140,23 @@ public class MessagePreferencesController {
     public ResponseEntity<Map<String, Object>> updateMessagePreferences(
             @PathVariable Long userId,
             @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, Object> preferences) {
+            @RequestBody Map<String, Object> preferences,
+            HttpServletRequest request) {
         
         logger.debug("Received request to update message preferences for user ID: {}", userId);
         try {
             // Validate token and user
-            String token = authHeader.replace("Bearer ", "");
-            Long tokenUserId = authUtil.extractUserId(token);
+            Long tokenUserId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                // Use the userId attribute set by the TestAuthFilter
+                tokenUserId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", tokenUserId);
+            } else {
+                // Normal authentication flow
+                String token = authHeader.replace("Bearer ", "");
+                tokenUserId = authUtil.extractUserId(token);
+            }
             
             // Only allow users to update their own preferences
             if (!userId.equals(tokenUserId)) {

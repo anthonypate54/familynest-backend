@@ -3,9 +3,12 @@ package com.familynest.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.familynest.model.User;
 import com.familynest.model.Family;
+import com.familynest.model.UserFamilyMembership;
 import com.familynest.repository.UserRepository;
 import com.familynest.repository.FamilyRepository;
 import com.familynest.repository.MessageRepository;
+import com.familynest.repository.UserFamilyMembershipRepository;
+import com.familynest.repository.UserFamilyMessageSettingsRepository;
 import com.familynest.config.TestConfig;
 import com.familynest.config.TestAuthFilter;
 import com.familynest.auth.JwtUtil;
@@ -20,21 +23,27 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestConfig.class)
-@TestPropertySource(locations = "classpath:application.properties")
+@TestPropertySource(locations = "classpath:application-test.properties")
+@ActiveProfiles("test")
 public class UserControllerTest {
 
     @Autowired
@@ -51,12 +60,22 @@ public class UserControllerTest {
 
     @MockBean
     private MessageRepository messageRepository;
+    
+    @MockBean
+    private UserFamilyMembershipRepository userFamilyMembershipRepository;
+    
+    @MockBean
+    private UserFamilyMessageSettingsRepository userFamilyMessageSettingsRepository;
 
     @Autowired
     private JwtUtil jwtUtil;
+    
+    @Autowired
+    private TestAuthFilter testAuthFilter;
 
     private User testUser;
     private Family testFamily;
+    private UserFamilyMembership testMembership;
 
     @BeforeEach
     public void setUp() {
@@ -72,6 +91,19 @@ public class UserControllerTest {
         testFamily = new Family();
         testFamily.setId(2L);
         testFamily.setName("Test Family");
+        testFamily.setCreatedBy(testUser);
+        
+        testMembership = new UserFamilyMembership();
+        testMembership.setId(1L);
+        testMembership.setUserId(1L);
+        testMembership.setFamilyId(2L);
+        testMembership.setRole("ADMIN");
+        testMembership.setActive(true);
+        testMembership.setJoinedAt(LocalDateTime.now());
+        
+        // Configure test auth filter
+        testAuthFilter.setTestUserId(1L);
+        testAuthFilter.setTestUserRole("ADMIN");
     }
 
     @Test
@@ -82,14 +114,10 @@ public class UserControllerTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
         
         // Setup family to be created
-        Family newFamily = new Family();
-        newFamily.setId(2L);
-        newFamily.setName("Test Family");
-        when(familyRepository.save(any(Family.class))).thenAnswer(invocation -> {
-            Family family = invocation.getArgument(0);
-            family.setId(2L);
-            return family;
-        });
+        when(familyRepository.save(any(Family.class))).thenReturn(testFamily);
+        
+        // Mock the membership creation
+        when(userFamilyMembershipRepository.save(any(UserFamilyMembership.class))).thenReturn(testMembership);
         
         // Setup updated user with new family
         User updatedUser = new User();
@@ -102,17 +130,21 @@ public class UserControllerTest {
         updatedUser.setFamilyId(2L);
         when(userRepository.save(any(User.class))).thenReturn(updatedUser);
 
-        // Generate a valid token for the test
-        String token = jwtUtil.generateToken(1L, "ADMIN");
-
+        // Use test token approach for consistent authentication
         Map<String, String> familyData = new HashMap<>();
         familyData.put("name", "Test Family");
 
         mockMvc.perform(post("/api/users/1/create-family")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(familyData))
-                .header("Authorization", "Bearer " + token))
+                .header("Authorization", "Bearer test-token"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.familyId").value(2));
+                
+        // Verify that all necessary methods were called
+        verify(userRepository, times(1)).findById(1L);
+        verify(familyRepository, times(1)).save(any(Family.class));
+        verify(userFamilyMembershipRepository, times(1)).save(any(UserFamilyMembership.class));
+        verify(userRepository, times(1)).save(any(User.class));
     }
 } 

@@ -13,9 +13,19 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.beans.factory.annotation.Value;
 import com.familynest.auth.AuthFilter;
 import com.familynest.auth.JwtUtil;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.liquibase.LiquibaseAutoConfiguration;
 
+/**
+ * Test configuration for the application.
+ * This class:
+ * 1. Disables Liquibase for tests
+ * 2. Configures security to allow all requests
+ * 3. Sets up test authentication
+ */
 @TestConfiguration
 @EnableWebSecurity
+@EnableAutoConfiguration(exclude = {LiquibaseAutoConfiguration.class})
 @ComponentScan(basePackages = "com.familynest", 
     excludeFilters = @ComponentScan.Filter(
         type = FilterType.ASSIGNABLE_TYPE, 

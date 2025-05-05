@@ -1,5 +1,5 @@
--- V28__Add_test_data.sql
--- Migration to populate the database with test data for development and testing
+-- populate_test_data.sql
+-- Script to populate the test database with sample data for development and testing
 
 -- Create 20 test users (testuser1 through testuser20)
 DO $$
