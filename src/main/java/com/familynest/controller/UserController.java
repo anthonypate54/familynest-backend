@@ -572,6 +572,7 @@ public class UserController {
             
             List<Map<String, Object>> response = messages.stream().map(message -> {
                 Map<String, Object> messageMap = new HashMap<>();
+                messageMap.put("id", message.getId());
                 messageMap.put("content", message.getContent());
                 messageMap.put("senderUsername", message.getSenderUsername());
                 messageMap.put("senderId", message.getSenderId());

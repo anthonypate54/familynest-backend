@@ -146,6 +146,11 @@ public class EngagementService {
         return commentRepository.findByParentCommentId(commentId);
     }
     
+    public long getCommentReplyCount(Long commentId) {
+        logger.info("Getting reply count for comment: {}", commentId);
+        return commentRepository.countByParentCommentId(commentId);
+    }
+    
     @Transactional
     public MessageComment updateComment(Long commentId, Long userId, String newContent) {
         logger.info("Updating comment: {} by user: {}", commentId, userId);
