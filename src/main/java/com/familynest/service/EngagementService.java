@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -16,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.Collections;
 
 @Service
 public class EngagementService {
@@ -42,6 +45,9 @@ public class EngagementService {
     
     @Autowired
     private UserRepository userRepository;
+    
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     
     // ----- Reaction methods -----
     
@@ -325,5 +331,128 @@ public class EngagementService {
         data.put("shareCount", shareRepository.countByOriginalMessageId(messageId));
         
         return data;
+    }
+    
+    /**
+     * Get engagement data for multiple messages in one efficient database query
+     * This is much more optimized than calling getMessageEngagementData() multiple times
+     */
+    @Cacheable(value = "messageEngagement", key = "#messageIds.hashCode()")
+    public Map<Long, Map<String, Object>> getBatchMessageEngagementData(List<Long> messageIds) {
+        if (messageIds == null || messageIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        
+        logger.info("Getting batch engagement data for {} messages", messageIds.size());
+        
+        // Limit to a reasonable batch size
+        List<Long> limitedIds = messageIds.size() <= 50 ? messageIds : messageIds.subList(0, 50);
+        
+        // Use the array constructor for better performance with arrays
+        StringBuilder idArray = new StringBuilder("ARRAY[");
+        for (int i = 0; i < limitedIds.size(); i++) {
+            if (i > 0) idArray.append(",");
+            idArray.append(limitedIds.get(i));
+        }
+        idArray.append("]");
+        
+        // Create optimized query using more efficient array handling
+        String sql = "WITH message_ids AS (" +
+                   "  SELECT UNNEST(" + idArray.toString() + ") AS id" +
+                   "), " +
+                   "engagement_data AS (" +
+                   "  -- Views" +
+                   "  SELECT 'view' AS type, message_id, COUNT(*) AS count " +
+                   "  FROM message_view " +
+                   "  WHERE message_id IN (SELECT id FROM message_ids) " +
+                   "  GROUP BY message_id " +
+                   "  " +
+                   "  UNION ALL " +
+                   "  " +
+                   "  -- Reactions " +
+                   "  SELECT 'reaction' AS type, message_id, COUNT(*) AS count " +
+                   "  FROM message_reaction " +
+                   "  WHERE message_id IN (SELECT id FROM message_ids) " +
+                   "  GROUP BY message_id " +
+                   "  " +
+                   "  UNION ALL " +
+                   "  " +
+                   "  -- Comments " +
+                   "  SELECT 'comment' AS type, message_id, COUNT(*) AS count " +
+                   "  FROM message_comment " +
+                   "  WHERE message_id IN (SELECT id FROM message_ids) " +
+                   "  GROUP BY message_id " +
+                   "  " +
+                   "  UNION ALL " +
+                   "  " +
+                   "  -- Shares " +
+                   "  SELECT 'share' AS type, original_message_id AS message_id, COUNT(*) AS count " +
+                   "  FROM message_share " +
+                   "  WHERE original_message_id IN (SELECT id FROM message_ids) " +
+                   "  GROUP BY original_message_id " +
+                   "), " +
+                   "engagement_summary AS (" +
+                   "  SELECT " +
+                   "    message_id, " +
+                   "    SUM(CASE WHEN type = 'view' THEN count ELSE 0 END) AS view_count, " +
+                   "    SUM(CASE WHEN type = 'reaction' THEN count ELSE 0 END) AS reaction_count, " +
+                   "    SUM(CASE WHEN type = 'comment' THEN count ELSE 0 END) AS comment_count, " +
+                   "    SUM(CASE WHEN type = 'share' THEN count ELSE 0 END) AS share_count " +
+                   "  FROM engagement_data " +
+                   "  GROUP BY message_id" +
+                   "), " +
+                   "reactions_detail AS (" +
+                   "  SELECT message_id, reaction_type, COUNT(*) AS count " +
+                   "  FROM message_reaction " +
+                   "  WHERE message_id IN (SELECT id FROM message_ids) " +
+                   "  GROUP BY message_id, reaction_type" +
+                   ")" +
+                   "SELECT " +
+                   "  mi.id AS message_id, " +
+                   "  COALESCE(es.view_count, 0) AS view_count, " +
+                   "  COALESCE(es.comment_count, 0) AS comment_count, " +
+                   "  COALESCE(es.share_count, 0) AS share_count, " +
+                   "  COALESCE(es.reaction_count, 0) AS total_reaction_count, " +
+                   "  rd.reaction_type, " +
+                   "  COALESCE(rd.count, 0) AS reaction_type_count " +
+                   "FROM message_ids mi " +
+                   "LEFT JOIN engagement_summary es ON mi.id = es.message_id " +
+                   "LEFT JOIN reactions_detail rd ON mi.id = rd.message_id";
+        
+        // Execute query directly with no parameters needed (ids are in the query itself)
+        List<Map<String, Object>> results = jdbcTemplate.queryForList(sql);
+        
+        // Process results
+        Map<Long, Map<String, Object>> messageEngagementMap = new HashMap<>();
+        Map<Long, Map<String, Integer>> reactionsMap = new HashMap<>();
+        
+        for (Map<String, Object> row : results) {
+            Long messageId = ((Number) row.get("message_id")).longValue();
+            
+            // Initialize data structures for this message if not exist
+            if (!messageEngagementMap.containsKey(messageId)) {
+                Map<String, Object> messageData = new HashMap<>();
+                messageData.put("viewCount", row.get("view_count"));
+                messageData.put("commentCount", row.get("comment_count"));
+                messageData.put("shareCount", row.get("share_count"));
+                messageData.put("reactions", new HashMap<String, Integer>());
+                messageEngagementMap.put(messageId, messageData);
+                reactionsMap.put(messageId, new HashMap<>());
+            }
+            
+            // Add reaction data if present
+            if (row.get("reaction_type") != null) {
+                String reactionType = (String) row.get("reaction_type");
+                Integer count = ((Number) row.get("reaction_type_count")).intValue();
+                reactionsMap.get(messageId).put(reactionType, count);
+            }
+        }
+        
+        // Add reactions to each message
+        for (Long messageId : messageEngagementMap.keySet()) {
+            messageEngagementMap.get(messageId).put("reactions", reactionsMap.get(messageId));
+        }
+        
+        return messageEngagementMap;
     }
 } 

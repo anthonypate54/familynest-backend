@@ -50,6 +50,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/users")
@@ -84,6 +86,9 @@ public class UserController {
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @GetMapping("/test")
     public ResponseEntity<String> testEndpoint(HttpServletRequest request) {
         logger.debug("Received test request from: {}", request.getRemoteAddr());
@@ -100,40 +105,90 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
+    @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getUserById(@PathVariable Long id) {
         logger.debug("Received request for user ID: {}", id);
-        logger.debug("Querying user with ID: {}", id);
-        User user = userRepository.findById(id).orElse(null);
-        logger.debug("Finished querying user with ID: {}", id);
-        if (user == null) {
-            logger.debug("User not found for ID: {}", id);
-            return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
+        
+        try {
+            // Use a single optimized SQL query to get user data with all related information
+            // Avoid using u.family_id which doesn't exist
+            String sql = "WITH user_data AS (" +
+                        "  SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.role, " +
+                        "         u.photo, u.phone_number, u.address, u.city, " +
+                        "         u.state, u.zip_code, u.country, u.birth_date, u.bio, u.show_demographics, " +
+                        "         (SELECT family_id FROM user_family_membership WHERE user_id = u.id LIMIT 1) as family_id " +
+                        "  FROM app_user u WHERE u.id = ? " +
+                        "), " +
+                        "family_data AS (" +
+                        "  SELECT f.id, f.name, f.created_by, " +
+                        "         (SELECT COUNT(*) FROM user_family_membership ufm WHERE ufm.family_id = f.id) as member_count " +
+                        "  FROM family f " +
+                        "  JOIN user_family_membership ufm ON f.id = ufm.family_id " +
+                        "  WHERE ufm.user_id = ? " +
+                        "), " +
+                        "membership_data AS (" +
+                        "  SELECT ufm.family_id, ufm.role as membership_role, ufm.is_active " +
+                        "  FROM user_family_membership ufm " +
+                        "  WHERE ufm.user_id = ? " +
+                        ") " +
+                        "SELECT ud.*, fd.id as family_id, fd.name as family_name, " +
+                        "       fd.created_by as family_created_by, fd.member_count, " +
+                        "       md.membership_role, md.is_active " +
+                        "FROM user_data ud " +
+                        "LEFT JOIN family_data fd ON 1=1 " +
+                        "LEFT JOIN membership_data md ON fd.id = md.family_id";
+                        
+            logger.debug("Executing optimized query for user ID: {}", id);
+            
+            // Execute the optimized query
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
+            
+            if (results.isEmpty()) {
+                logger.debug("User not found for ID: {}", id);
+                return ResponseEntity.notFound().build();
+            }
+            
+            // Process the first row for user data
+            Map<String, Object> userData = results.get(0);
+            
+            // Create a sanitized response without sensitive data
+            Map<String, Object> sanitizedUser = new HashMap<>();
+            sanitizedUser.put("id", userData.get("id"));
+            sanitizedUser.put("username", userData.get("username"));
+            sanitizedUser.put("email", userData.get("email"));
+            sanitizedUser.put("firstName", userData.get("first_name"));
+            sanitizedUser.put("lastName", userData.get("last_name"));
+            sanitizedUser.put("role", userData.get("role"));
+            sanitizedUser.put("photo", userData.get("photo"));
+            sanitizedUser.put("familyId", userData.get("family_id"));
+            sanitizedUser.put("phoneNumber", userData.get("phone_number"));
+            sanitizedUser.put("address", userData.get("address"));
+            sanitizedUser.put("city", userData.get("city"));
+            sanitizedUser.put("state", userData.get("state"));
+            sanitizedUser.put("zipCode", userData.get("zip_code"));
+            sanitizedUser.put("country", userData.get("country"));
+            sanitizedUser.put("birthDate", userData.get("birth_date"));
+            sanitizedUser.put("bio", userData.get("bio"));
+            sanitizedUser.put("showDemographics", userData.get("show_demographics"));
+            
+            // Add family data if present
+            if (userData.get("family_id") != null) {
+                Map<String, Object> familyInfo = new HashMap<>();
+                familyInfo.put("id", userData.get("family_id"));
+                familyInfo.put("name", userData.get("family_name"));
+                familyInfo.put("memberCount", userData.get("member_count"));
+                familyInfo.put("isOwner", id.equals(userData.get("family_created_by")));
+                familyInfo.put("membershipRole", userData.get("membership_role"));
+                familyInfo.put("isActive", userData.get("is_active"));
+                sanitizedUser.put("familyDetails", familyInfo);
+            }
+            
+            logger.debug("Returning sanitized user data with all related information in a single query");
+            return ResponseEntity.ok(sanitizedUser);
+        } catch (Exception e) {
+            logger.error("Error retrieving user: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
         }
-        logger.debug("Found user with username: {}, firstName: {}, lastName: {}, password: {}, role: {}, photo: {}, familyId: {}", 
-                    user.getUsername(), user.getFirstName(), user.getLastName(), user.getPassword(), user.getRole(), user.getPhoto(), user.getFamilyId());
-        Map<String, Object> response = new HashMap<>();
-        response.put("username", user.getUsername());
-        response.put("firstName", user.getFirstName());
-        response.put("lastName", user.getLastName());
-        response.put("email", user.getEmail());
-        response.put("password", user.getPassword());
-        response.put("role", user.getRole());
-        response.put("photo", user.getPhoto());
-        response.put("familyId", user.getFamilyId());
-        
-        // Add demographic information
-        response.put("phoneNumber", user.getPhoneNumber());
-        response.put("address", user.getAddress());
-        response.put("city", user.getCity());
-        response.put("state", user.getState());
-        response.put("zipCode", user.getZipCode());
-        response.put("country", user.getCountry());
-        response.put("birthDate", user.getBirthDate() != null ? user.getBirthDate().toString() : null);
-        response.put("bio", user.getBio());
-        response.put("showDemographics", user.getShowDemographics());
-        
-        logger.debug("Returning response: {}", response);
-        return ResponseEntity.ok(response);
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -225,21 +280,41 @@ public class UserController {
             if (email == null || password == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Email and password are required"));
             }
-
-            Optional<User> userOpt = userRepository.findByEmail(email);
-            if (userOpt.isEmpty() || !authUtil.verifyPassword(password, userOpt.get().getPassword())) {
-                logger.debug("Invalid credentials for email: {}", email);
+            
+            // Convert email to lowercase for case-insensitive comparison
+            email = email.toLowerCase();
+            
+            // First get the user with password to verify
+            String userSql = "SELECT id, email, username, password, role FROM app_user WHERE LOWER(email) = ?";
+            List<Map<String, Object>> userResults = jdbcTemplate.queryForList(userSql, email);
+            
+            if (userResults.isEmpty()) {
+                logger.debug("User not found for email: {}", email);
                 return ResponseEntity.status(401)
                     .body(Map.of("error", "Invalid email or password"));
             }
             
-            User user = userOpt.get();
+            // Get user data and verify password
+            Map<String, Object> userData = userResults.get(0);
+            String hashedPassword = (String) userData.get("password");
+            Long userId = ((Number) userData.get("id")).longValue();
+            String role = (String) userData.get("role");
+            
+            if (!authUtil.verifyPassword(password, hashedPassword)) {
+                logger.debug("Invalid password for email: {}", email);
+                return ResponseEntity.status(401)
+                    .body(Map.of("error", "Invalid email or password"));
+            }
+            
+            // Password is verified - generate token and return login data
             logger.debug("Login successful for email: {}", email);
-            String token = authUtil.generateToken(user.getId(), user.getRole());
+            String token = authUtil.generateToken(userId, role);
+            
             Map<String, Object> response = new HashMap<>();
-            response.put("userId", user.getId());
+            response.put("userId", userId);
             response.put("token", token);
-            response.put("role", user.getRole() != null ? user.getRole() : "USER");
+            response.put("role", role != null ? role : "USER");
+            
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error during login: {}", e.getMessage());
@@ -532,73 +607,106 @@ public class UserController {
     public ResponseEntity<List<Map<String, Object>>> getMessages(@PathVariable Long id) {
         logger.debug("Received request to get messages for user ID: {}", id);
         try {
-            User user = userRepository.findById(id).orElse(null);
-            if (user == null) {
+            // Use a single optimized SQL query that:
+            // 1. Checks if user exists
+            // 2. Gets all families user belongs to
+            // 3. Filters out muted families
+            // 4. Gets messages from all remaining families
+            // 5. Joins with sender data for display
+            // 6. Pre-aggregates engagement metrics in separate CTEs to avoid N+1 queries
+            String sql = "WITH user_check AS (" +
+                        "  SELECT id FROM app_user WHERE id = ?" +
+                        "), " +
+                        "user_families AS (" +
+                        "  SELECT ufm.family_id " +
+                        "  FROM user_family_membership ufm " +
+                        "  WHERE ufm.user_id = ? " +
+                        "), " +
+                        "muted_families AS (" +
+                        "  SELECT ufms.family_id " +
+                        "  FROM user_family_message_settings ufms " +
+                        "  WHERE ufms.user_id = ? AND ufms.receive_messages = false" +
+                        "), " +
+                        "active_families AS (" +
+                        "  SELECT uf.family_id " +
+                        "  FROM user_families uf " +
+                        "  LEFT JOIN muted_families mf ON uf.family_id = mf.family_id " +
+                        "  WHERE mf.family_id IS NULL" +
+                        "), " +
+                        "message_subset AS (" +
+                        "  SELECT m.id " +
+                        "  FROM message m " +
+                        "  JOIN active_families af ON m.family_id = af.family_id " +
+                        "  ORDER BY m.timestamp DESC " +
+                        "  LIMIT 100" +
+                        "), " +
+                        "view_counts AS (" +
+                        "  SELECT message_id, COUNT(*) as count " +
+                        "  FROM message_view " +
+                        "  WHERE message_id IN (SELECT id FROM message_subset) " +
+                        "  GROUP BY message_id " +
+                        "), " +
+                        "reaction_counts AS (" +
+                        "  SELECT message_id, COUNT(*) as count " +
+                        "  FROM message_reaction " +
+                        "  WHERE message_id IN (SELECT id FROM message_subset) " +
+                        "  GROUP BY message_id " +
+                        "), " +
+                        "comment_counts AS (" +
+                        "  SELECT message_id, COUNT(*) as count " +
+                        "  FROM message_comment " +
+                        "  WHERE message_id IN (SELECT id FROM message_subset) " +
+                        "  GROUP BY message_id " +
+                        ") " +
+                        "SELECT " +
+                        "  m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
+                        "  m.timestamp, m.media_type, m.media_url, " +
+                        "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
+                        "  f.name as family_name, " +
+                        "  COALESCE(vc.count, 0) as view_count, " +
+                        "  COALESCE(rc.count, 0) as reaction_count, " +
+                        "  COALESCE(cc.count, 0) as comment_count " +
+                        "FROM message m " +
+                        "JOIN message_subset ms ON m.id = ms.id " +
+                        "LEFT JOIN app_user s ON m.sender_id = s.id " +
+                        "LEFT JOIN family f ON m.family_id = f.id " +
+                        "LEFT JOIN view_counts vc ON m.id = vc.message_id " +
+                        "LEFT JOIN reaction_counts rc ON m.id = rc.message_id " +
+                        "LEFT JOIN comment_counts cc ON m.id = cc.message_id " +
+                        "ORDER BY m.timestamp DESC ";
+
+            // Check if user exists first for a better error message
+            if (!userRepository.existsById(id)) {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().body(null);
             }
+         
+            logger.debug("Executing optimized query for messages for user ID: {}", id);
             
-            // Get all families the user belongs to
-            List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(id);
-            if (memberships.isEmpty()) {
-                logger.debug("User ID {} is not a member of any family", id);
-                return ResponseEntity.ok(List.of());
-            }
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
             
-            // Get active family ID (for backward compatibility)
-            Long activeFamilyId = user.getFamilyId();
-            logger.debug("User's active family ID: {}", activeFamilyId);
-            
-            // Get muted families (where receiveMessages = false)
-            List<Long> mutedFamilyIds = userFamilyMessageSettingsRepository.findMutedFamilyIdsByUserId(id);
-            logger.debug("User has muted {} families: {}", mutedFamilyIds.size(), mutedFamilyIds);
-            
-            // Get family IDs user wants to receive messages from
-            List<Long> familyIds = memberships.stream()
-                    .map(UserFamilyMembership::getFamilyId)
-                    .filter(familyId -> !mutedFamilyIds.contains(familyId))
-                    .collect(Collectors.toList());
-            
-            if (familyIds.isEmpty()) {
-                logger.debug("No families to fetch messages from after filtering by preferences");
-                return ResponseEntity.ok(List.of());
-            }
-            
-            logger.debug("Fetching messages from {} families: {}", familyIds.size(), familyIds);
-            
-            // Get messages from all included families
-            List<Message> messages = messageRepository.findByFamilyIdIn(familyIds);
-            logger.debug("Found {} messages from all families", messages.size());
-            
-            List<Map<String, Object>> response = messages.stream().map(message -> {
+            // Transform results to the response format
+            List<Map<String, Object>> response = results.stream().map(message -> {
                 Map<String, Object> messageMap = new HashMap<>();
-                messageMap.put("id", message.getId());
-                messageMap.put("content", message.getContent());
-                messageMap.put("senderUsername", message.getSenderUsername());
-                messageMap.put("senderId", message.getSenderId());
-                
-                // Get sender's photo if available
-                if (message.getSenderId() != null) {
-                    logger.debug("Looking up sender with ID: {}", message.getSenderId());
-                    User sender = userRepository.findById(message.getSenderId()).orElse(null);
-                    if (sender != null) {
-                        logger.debug("Found sender: username={}, photo={}", sender.getUsername(), sender.getPhoto());
-                        messageMap.put("senderPhoto", sender.getPhoto());
-                    } else {
-                        logger.debug("No sender found for ID: {}", message.getSenderId());
-                    }
-                } else {
-                    logger.debug("Message has no senderId: {}", message.getContent());
-                }
-                
-                messageMap.put("familyId", message.getFamilyId());
-                messageMap.put("timestamp", message.getTimestamp().toString());
-                messageMap.put("mediaType", message.getMediaType());
-                messageMap.put("mediaUrl", message.getMediaUrl());
+                messageMap.put("id", message.get("id"));
+                messageMap.put("content", message.get("content"));
+                messageMap.put("senderUsername", message.get("sender_username"));
+                messageMap.put("senderId", message.get("sender_id"));
+                messageMap.put("senderPhoto", message.get("sender_photo"));
+                messageMap.put("senderFirstName", message.get("sender_first_name"));
+                messageMap.put("senderLastName", message.get("sender_last_name"));
+                messageMap.put("familyId", message.get("family_id"));
+                messageMap.put("familyName", message.get("family_name"));
+                messageMap.put("timestamp", message.get("timestamp").toString());
+                messageMap.put("mediaType", message.get("media_type"));
+                messageMap.put("mediaUrl", message.get("media_url"));
+                messageMap.put("viewCount", message.get("view_count"));
+                messageMap.put("reactionCount", message.get("reaction_count"));
+                messageMap.put("commentCount", message.get("comment_count"));
                 return messageMap;
             }).collect(Collectors.toList());
             
-            logger.debug("Returning {} messages after filtering by message preferences", response.size());
+            logger.debug("Returning {} messages for user {} using a single optimized query", response.size(), id);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error retrieving messages: {}", e.getMessage(), e);
@@ -620,98 +728,77 @@ public class UserController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
             }
             
-            // Only allow a user to get their own family members or members of a family they belong to
-            if (!tokenUserId.equals(id)) {
-                logger.debug("Token user ID {} does not match requested ID {}", tokenUserId, id);
-                // Check if the token user is a member of the same family as the requested user
-                User requestedUser = userRepository.findById(id).orElse(null);
-                User tokenUser = userRepository.findById(tokenUserId).orElse(null);
-                
-                if (requestedUser == null || tokenUser == null) {
-                    logger.debug("User not found for ID: {} or {}", id, tokenUserId);
-                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
-                }
-                
-                Long requestedFamilyId = requestedUser.getFamilyId();
-                
-                // Check if tokenUser is a member of the requested user's family
-                boolean isMemberOfSameFamily = false;
-                if (requestedFamilyId != null) {
-                    List<UserFamilyMembership> tokenUserMemberships = userFamilyMembershipRepository.findByUserId(tokenUserId);
-                    isMemberOfSameFamily = tokenUserMemberships.stream()
-                        .anyMatch(membership -> membership.getFamilyId().equals(requestedFamilyId));
-                }
-                
-                if (!isMemberOfSameFamily) {
-                    logger.debug("User {} is not authorized to view members of family for user {}", tokenUserId, id);
-                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
-                }
+            // Use a single optimized SQL query to get all family data and members
+            // Avoid using family_id column which doesn't exist in app_user table
+            String sql = "WITH requested_user AS (" +
+                        "  SELECT u.id FROM app_user u WHERE u.id = ?" +
+                        "), " +
+                        "user_family AS (" +
+                        "  SELECT ufm.family_id " +
+                        "  FROM user_family_membership ufm " +
+                        "  WHERE ufm.user_id = ? " +
+                        "  LIMIT 1" +
+                        "), " +
+                        "token_user_memberships AS (" +
+                        "  SELECT ufm.family_id FROM user_family_membership ufm WHERE ufm.user_id = ?" +
+                        "), " +
+                        "authorized AS (" +
+                        "  SELECT CASE " +
+                        "    WHEN ? = ? THEN true " + // tokenUserId = requestedUserId
+                        "    WHEN EXISTS (SELECT 1 FROM token_user_memberships tum JOIN user_family uf ON tum.family_id = uf.family_id) THEN true " +
+                        "    ELSE false " +
+                        "  END as is_authorized" +
+                        "), " +
+                        "family_members AS (" +
+                        "  SELECT " +
+                        "    u.id, u.username, u.first_name, u.last_name, u.photo, ufm2.family_id, " +
+                        "    f.name as family_name, f.created_by as family_owner_id, " +
+                        "    ufm.role as membership_role, " +
+                        "    CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
+                        "    of.name as owned_family_name " +
+                        "  FROM user_family uf " +
+                        "  JOIN user_family_membership ufm2 ON ufm2.family_id = uf.family_id " + 
+                        "  JOIN app_user u ON u.id = ufm2.user_id " +
+                        "  JOIN family f ON f.id = uf.family_id " +
+                        "  LEFT JOIN user_family_membership ufm ON ufm.user_id = u.id AND ufm.family_id = uf.family_id " +
+                        "  LEFT JOIN family of ON of.created_by = u.id " +
+                        ") " +
+                        "SELECT a.is_authorized, fm.* " +
+                        "FROM authorized a " +
+                        "CROSS JOIN family_members fm " +
+                        "WHERE a.is_authorized = true";
+                        
+            logger.debug("Executing optimized query for family members for user ID: {}", id);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, tokenUserId, tokenUserId, id);
+            
+            // Check authorization from first row
+            if (results.isEmpty() || !(boolean)results.get(0).get("is_authorized")) {
+                logger.debug("User {} is not authorized to view members of family for user {}", tokenUserId, id);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
             }
             
-            logger.debug("Querying user with ID: {}", id);
-            User user = userRepository.findById(id).orElse(null);
-            logger.debug("Finished querying user with ID: {}", id);
-            if (user == null) {
-                logger.debug("User not found for ID: {}", id);
-                return ResponseEntity.badRequest().body(null);
-            }
-            if (user.getFamilyId() == null) {
-                logger.debug("User ID {} has no familyId", id);
-                return ResponseEntity.badRequest().body(null);
-            }
-            logger.debug("Querying family members for family ID: {}", user.getFamilyId());
-            List<User> familyMembers = userRepository.findByFamilyId(user.getFamilyId());
-            logger.debug("Finished querying family members for family ID: {}", user.getFamilyId());
-            List<Map<String, Object>> response = familyMembers.stream().map(member -> {
+            // Transform results into the response format
+            List<Map<String, Object>> response = results.stream().map(member -> {
                 Map<String, Object> memberMap = new HashMap<>();
-                memberMap.put("id", member.getId());
-                memberMap.put("userId", member.getId()); // Add userId field for consistency
-                memberMap.put("username", member.getUsername());
-                memberMap.put("firstName", member.getFirstName());
-                memberMap.put("lastName", member.getLastName());
-                memberMap.put("photo", member.getPhoto());
+                memberMap.put("id", member.get("id"));
+                memberMap.put("userId", member.get("id")); // Add userId field for consistency
+                memberMap.put("username", member.get("username"));
+                memberMap.put("firstName", member.get("first_name"));
+                memberMap.put("lastName", member.get("last_name"));
+                memberMap.put("photo", member.get("photo"));
+                memberMap.put("familyName", member.get("family_name"));
+                memberMap.put("isOwner", member.get("is_owner"));
                 
-                // Get each member's individual family name from their family ID
-                String familyName = null;
-                Long memberFamilyId = member.getFamilyId();
-                
-                // Only include familyName in the response if the member actually has their own family
-                if (memberFamilyId != null) {
-                    // Get family name from the family entity
-                    Family memberFamily = familyRepository.findById(memberFamilyId).orElse(null);
-                    if (memberFamily != null) {
-                        familyName = memberFamily.getName();
-                        // Only include familyName if we actually found one
-                        if (familyName != null && !familyName.isEmpty()) {
-                            memberMap.put("familyName", familyName);
-                        }
-                    }
-                }
-                
-                // Check if the member is a family owner
-                boolean isOwner = false;
-                String ownedFamilyName = null;
-                
-                // Find if this member has created their own family
-                Family ownedFamily = familyRepository.findByCreatedById(member.getId());
-                if (ownedFamily != null) {
-                    isOwner = true;
-                    ownedFamilyName = ownedFamily.getName();
-                    
-                    // Add ownership information to response
-                    memberMap.put("isOwner", true);
-                    memberMap.put("ownedFamilyName", ownedFamilyName);
-                    
-                    logger.debug("User {} is a family owner. Owned family: {}", member.getId(), ownedFamilyName);
-                } else {
-                    // Not an owner
-                    memberMap.put("isOwner", false);
-                    logger.debug("User {} is not a family owner", member.getId());
+                // Only include ownedFamilyName if user is an owner
+                if ((boolean)member.get("is_owner") && member.get("owned_family_name") != null) {
+                    memberMap.put("ownedFamilyName", member.get("owned_family_name"));
                 }
                 
                 return memberMap;
             }).collect(Collectors.toList());
-            logger.debug("Returning {} family members for family ID: {}", response.size(), user.getFamilyId());
+            
+            logger.debug("Returning {} family members in a single query", response.size());
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error retrieving family members: {}", e.getMessage(), e);
@@ -723,18 +810,34 @@ public class UserController {
     public ResponseEntity<Void> leaveFamily(@PathVariable Long id) {
         logger.debug("Received request for user ID: {} to leave family", id);
         try {
+            // Check if user exists
             User user = userRepository.findById(id).orElse(null);
             if (user == null) {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().build();
             }
-            if (user.getFamilyId() == null) {
+            
+            // Check if user is in any family
+            List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(id);
+            if (memberships.isEmpty()) {
                 logger.debug("User ID {} is not in a family", id);
                 return ResponseEntity.badRequest().build();
             }
-            user.setFamilyId(null);
-            userRepository.save(user);
-            logger.debug("User ID: {} left their family", id);
+            
+            // Get the current active family (just the first one for simplicity)
+            Long familyId = memberships.get(0).getFamilyId();
+            
+            // Update or delete the membership as needed
+            // For this implementation, we'll set is_active to false instead of deleting
+            for (UserFamilyMembership membership : memberships) {
+                if (membership.getFamilyId().equals(familyId)) {
+                    membership.setActive(false);
+                    userFamilyMembershipRepository.save(membership);
+                    break;
+                }
+            }
+            
+            logger.debug("User ID: {} left their family (ID: {})", id, familyId);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             logger.error("Error leaving family: {}", e.getMessage());
@@ -742,370 +845,114 @@ public class UserController {
         }
     }
     @GetMapping("/current")
+    @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getCurrentUser() {
         logger.debug("Received request to get current user");
-        HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
-        Long userId = (Long) request.getAttribute("userId");
-        if (userId == null) {
-            logger.debug("No userId found in request");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
-        }
-        logger.debug("Querying user with ID: {}", userId);
-        User user = userRepository.findById(userId).orElse(null);
-        logger.debug("Finished querying user with ID: {}", userId);
-        if (user == null) {
-            logger.debug("User not found for ID: {}", userId);
-            return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
-        }
-        logger.debug("Found user with username: {}, firstName: {}, lastName: {}, password: {}, role: {}, photo: {}, familyId: {}", 
-                    user.getUsername(), user.getFirstName(), user.getLastName(), user.getPassword(), user.getRole(), user.getPhoto(), user.getFamilyId());
-        Map<String, Object> response = new HashMap<>();
-        response.put("userId", user.getId());
-        response.put("username", user.getUsername());
-        response.put("firstName", user.getFirstName());
-        response.put("lastName", user.getLastName());
-        response.put("email", user.getEmail());
-        response.put("password", user.getPassword());
-        response.put("role", user.getRole() != null ? user.getRole() : "USER");
-        response.put("photo", user.getPhoto());
-        response.put("familyId", user.getFamilyId());
-        logger.debug("Returning response: {}", response);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/photos/{filename:.+}")
-    public ResponseEntity<Resource> servePhoto(@PathVariable String filename, HttpServletRequest request) {
         try {
-            logger.debug("Received media request for: {}", filename);
-            logger.debug("Request URI: {}", request.getRequestURI());
-            logger.debug("Request method: {}", request.getMethod());
-            
-            Path filePath = Paths.get(uploadDir, filename);
-            logger.debug("Full file path: {}", filePath);
-            
-            if (!Files.exists(filePath)) {
-                logger.error("File does not exist: {}", filePath);
-                return ResponseEntity.notFound().build();
-            }
-            
-            if (!Files.isReadable(filePath)) {
-                logger.error("File is not readable: {}", filePath);
-                return ResponseEntity.notFound().build();
-            }
-            
-            Resource resource = new UrlResource(filePath.toUri());
-            String contentType = determineContentType(filename);
-            logger.debug("Serving file with content type: {}", contentType);
-            
-            return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header("Content-Disposition", "inline; filename=\"" + resource.getFilename() + "\"")
-                .body(resource);
-        } catch (Exception e) {
-            logger.error("Error serving media file: {}", e.getMessage(), e);
-            return ResponseEntity.notFound().build();
-        }
-    }
-
-    private String determineContentType(String filename) {
-        String extension = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
-        return switch (extension) {
-            case "jpg", "jpeg" -> "image/jpeg";
-            case "png" -> "image/png";
-            case "gif" -> "image/gif";
-            case "mp4" -> "video/mp4";
-            case "mov" -> "video/quicktime";
-            case "avi" -> "video/x-msvideo";
-            case "wmv" -> "video/x-ms-wmv";
-            case "3gp" -> "video/3gpp";
-            case "webm" -> "video/webm";
-            case "mkv" -> "video/x-matroska";
-            case "flv" -> "video/x-flv";
-            default -> "application/octet-stream";
-        };
-    }
-
-    @PostMapping("/{userId}/invite")
-    public ResponseEntity<?> inviteUser(@PathVariable Long userId, @RequestBody Map<String, String> body) {
-        String email = body.get("email");
-        if (email == null || email.isEmpty()) {
-            return ResponseEntity.badRequest().body("Email is required");
-        }
-        
-        // Get the user's family
-        Optional<User> userOptional = userRepository.findById(userId);
-        if (userOptional.isEmpty()) {
-            return ResponseEntity.notFound().build();
-        }
-        
-        User user = userOptional.get();
-        Long familyId = user.getFamilyId();
-        
-        if (familyId == null) {
-            return ResponseEntity.badRequest().body("User is not part of a family");
-        }
-        
-        // Check if the invited email is already in the same family
-        Optional<User> invitedUserOpt = userRepository.findByEmail(email);
-        if (invitedUserOpt.isPresent()) {
-            User invitedUser = invitedUserOpt.get();
-            if (invitedUser.getFamilyId() != null && invitedUser.getFamilyId().equals(familyId)) {
-                return ResponseEntity.badRequest().body("User is already in your family");
-            }
-        }
-        
-        // Check if there's already a pending invitation for this email to this family
-        List<Invitation> pendingInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
-            email, familyId, "PENDING");
-        
-        if (!pendingInvitations.isEmpty()) {
-            return ResponseEntity.badRequest().body("An invitation is already pending for this email");
-        }
-        
-        // Create the invitation
-        Invitation invitation = new Invitation();
-        invitation.setEmail(email);
-        invitation.setFamilyId(familyId);
-        invitation.setSenderId(userId);
-        invitation.setStatus("PENDING");
-        
-        // Set expiration time to 7 days from now
-        LocalDateTime expiresAt = LocalDateTime.now().plusDays(7);
-        invitation.setExpiresAt(expiresAt);
-        
-        invitationRepository.save(invitation);
-        
-        return ResponseEntity.ok().build();
-    }
-
-    @GetMapping("/invitations")
-    public ResponseEntity<List<Map<String, Object>>> getInvitations(@RequestHeader("Authorization") String authHeader) {
-        logger.debug("Received request to get invitations");
-        try {
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);
+            HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+            Long userId = (Long) request.getAttribute("userId");
             if (userId == null) {
-                return ResponseEntity.status(403).body(List.of(Map.of("error", "Unauthorized access")));
+                logger.debug("No userId found in request");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
             }
-
-            User user = userRepository.findById(userId).orElse(null);
-            if (user == null) {
-                return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
-            }
-
-            List<Invitation> invitations = invitationRepository.findByEmail(user.getEmail());
-            List<Map<String, Object>> response = invitations.stream().map(inv -> {
-                Map<String, Object> invMap = new HashMap<>();
-                invMap.put("id", inv.getId());
-                invMap.put("familyId", inv.getFamilyId());
-                invMap.put("inviterId", inv.getSenderId());
-                invMap.put("status", inv.getStatus());
-                invMap.put("createdAt", inv.getCreatedAt().toString());
-                invMap.put("expiresAt", inv.getExpiresAt().toString());
-                return invMap;
-            }).collect(Collectors.toList());
-
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            logger.error("Error retrieving invitations: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
-        }
-    }
-
-    @PostMapping("/invitations/{invitationId}/accept")
-    public ResponseEntity<Map<String, Object>> acceptInvitation(
-            @PathVariable Long invitationId,
-            @RequestHeader("Authorization") String authHeader) {
-        logger.debug("Received request to accept invitation ID: {}", invitationId);
-        try {
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);
-            if (userId == null) {
-                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
-            }
-
-            User user = userRepository.findById(userId).orElse(null);
-            if (user == null) {
+            
+            // Use a single optimized SQL query that returns everything in one go
+            String sql = "WITH user_data AS (" +
+                        "  SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.role, u.photo " +
+                        "  FROM app_user u WHERE u.id = ? " +
+                        "), " +
+                        "membership_data AS (" +
+                        "  SELECT ufm.family_id, ufm.role as membership_role, ufm.is_active, " +
+                        "         f.name as family_name, f.created_by as family_created_by " +
+                        "  FROM user_family_membership ufm " +
+                        "  JOIN family f ON ufm.family_id = f.id " +
+                        "  WHERE ufm.user_id = ? " +
+                        "  ORDER BY ufm.is_active DESC, ufm.id ASC " +
+                        "  LIMIT 1 " +
+                        ") " +
+                        "SELECT ud.*, md.family_id, md.family_name, " +
+                        "       md.membership_role, md.is_active, " +
+                        "       (md.family_created_by = ud.id) as is_family_owner " +
+                        "FROM user_data ud " +
+                        "LEFT JOIN membership_data md ON 1=1";
+            
+            logger.debug("Executing optimized single query for current user ID: {}", userId);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId);
+            
+            if (results.isEmpty()) {
+                logger.debug("User not found for ID: {}", userId);
                 return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
             }
-
-            Invitation invitation = invitationRepository.findByIdAndEmail(invitationId, user.getEmail()).orElse(null);
-            if (invitation == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Invitation not found or not intended for this user"));
-            }
-
-            if (!invitation.getStatus().equals("PENDING")) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Invitation is no longer pending"));
-            }
-
-            if (invitation.getExpiresAt().isBefore(LocalDateTime.now())) {
-                invitation.setStatus("EXPIRED");
-                invitationRepository.save(invitation);
-                return ResponseEntity.badRequest().body(Map.of("error", "Invitation has expired"));
-            }
-
-            // Check if user is already a member of this family
-            Long familyId = invitation.getFamilyId();
-            List<UserFamilyMembership> existingMemberships = userFamilyMembershipRepository.findByUserId(userId);
-            boolean alreadyMember = existingMemberships.stream()
-                .anyMatch(membership -> membership.getFamilyId().equals(familyId));
             
-            if (alreadyMember) {
-                logger.debug("User ID: {} is already in family ID: {}", userId, familyId);
-                invitation.setStatus("ACCEPTED");
-                invitationRepository.save(invitation);
-                return ResponseEntity.ok(Map.of("message", "User is already a member of this family", "familyId", familyId));
-            }
-
-            // Create a UserFamilyMembership entry to track this membership
-            UserFamilyMembership membership = new UserFamilyMembership();
-            membership.setUserId(userId);
-            membership.setFamilyId(familyId);
-            membership.setActive(true);
-            membership.setRole("MEMBER");
-            membership.setJoinedAt(LocalDateTime.now());
-            userFamilyMembershipRepository.save(membership);
-
-            // If user doesn't have an active family yet, set this as their active family
-            if (user.getFamilyId() == null) {
-                user.setFamilyId(familyId);
-                userRepository.save(user);
-                logger.debug("Set family ID {} as active family for user {}", familyId, userId);
-            }
-            
-            // Create message settings (default: receive messages = true)
-            logger.debug("Creating message settings for user ID: {} and family ID: {}", userId, familyId);
-            try {
-                com.familynest.model.UserFamilyMessageSettings settings = 
-                    new com.familynest.model.UserFamilyMessageSettings(userId, familyId, true);
-                userFamilyMessageSettingsRepository.save(settings);
-                logger.debug("Message settings created successfully");
-            } catch (Exception e) {
-                logger.error("Error creating message settings: {}", e.getMessage());
-                // Continue anyway, don't fail the whole operation
-            }
-
-            invitation.setStatus("ACCEPTED");
-            invitationRepository.save(invitation);
-
-            return ResponseEntity.ok(Map.of("message", "Invitation accepted", "familyId", familyId));
-        } catch (Exception e) {
-            logger.error("Error accepting invitation: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Error accepting invitation: " + e.getMessage()));
-        }
-    }
-
-    @PostMapping("/invitations/{invitationId}/reject")
-    public ResponseEntity<Map<String, Object>> rejectInvitation(
-            @PathVariable Long invitationId,
-            @RequestHeader("Authorization") String authHeader) {
-        logger.debug("Received request to reject invitation ID: {}", invitationId);
-        try {
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);
-            if (userId == null) {
-                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
-            }
-
-            User user = userRepository.findById(userId).orElse(null);
-            if (user == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
-            }
-
-            Invitation invitation = invitationRepository.findByIdAndEmail(invitationId, user.getEmail()).orElse(null);
-            if (invitation == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Invitation not found or not intended for this user"));
-            }
-
-            if (!invitation.getStatus().equals("PENDING")) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Invitation is no longer pending"));
-            }
-
-            invitation.setStatus("REJECTED");
-            invitationRepository.save(invitation);
-
-            return ResponseEntity.ok(Map.of("message", "Invitation rejected"));
-        } catch (Exception e) {
-            logger.error("Error rejecting invitation: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Error rejecting invitation: " + e.getMessage()));
-        }
-    }
-    
-    @GetMapping("/families/{familyId}")
-    public ResponseEntity<Map<String, Object>> getFamilyById(@PathVariable Long familyId) {
-        logger.debug("Received request to get family details for ID: {}", familyId);
-        try {
-            Family family = familyRepository.findById(familyId).orElse(null);
-            if (family == null) {
-                logger.debug("Family not found for ID: {}", familyId);
-                return ResponseEntity.notFound().build();
-            }
-            
+            // Transform the results into a response
+            Map<String, Object> userData = results.get(0);
             Map<String, Object> response = new HashMap<>();
-            response.put("id", family.getId());
-            response.put("name", family.getName());
+            response.put("userId", userData.get("id"));
+            response.put("username", userData.get("username"));
+            response.put("firstName", userData.get("first_name"));
+            response.put("lastName", userData.get("last_name"));
+            response.put("email", userData.get("email"));
+            response.put("role", userData.get("role") != null ? userData.get("role") : "USER");
+            response.put("photo", userData.get("photo"));
+            response.put("familyId", userData.get("family_id"));
             
-            // Get number of members in this family
-            List<User> members = userRepository.findByFamilyId(familyId);
-            response.put("memberCount", members.size());
-            
-            logger.debug("Returning family details: {}", response);
+            logger.debug("Returning current user data from single query: {}", response);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Error retrieving family: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Error retrieving family: " + e.getMessage()));
+            logger.error("Error retrieving current user: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Error retrieving current user: " + e.getMessage()));
         }
     }
 
     @GetMapping("/{id}/families")
+    @Transactional(readOnly = true)
     public ResponseEntity<List<Map<String, Object>>> getUserFamilies(@PathVariable Long id) {
         logger.debug("Getting families for user ID: {}", id);
         try {
-            // Check if the user exists
-            User user = userRepository.findById(id).orElse(null);
-            if (user == null) {
+            // Check if the user exists using a lightweight check
+            if (!userRepository.existsById(id)) {
                 return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
             }
             
-            List<Map<String, Object>> families = new ArrayList<>();
+            // Use a single optimized SQL query to get all family data with one database call
+            // Avoid using the non-existent family_id column
+            String sql = "WITH user_active_family AS (" +
+                        "  SELECT family_id FROM user_family_membership WHERE user_id = ? LIMIT 1" +
+                        "), " +
+                        "user_memberships AS (" +
+                        "  SELECT " +
+                        "    ufm.family_id, ufm.role, " +
+                        "    CASE WHEN uaf.family_id = ufm.family_id THEN true ELSE false END as is_active " +
+                        "  FROM user_family_membership ufm " +
+                        "  LEFT JOIN user_active_family uaf ON 1=1 " +
+                        "  WHERE ufm.user_id = ? " +
+                        ") " +
+                        "SELECT " +
+                        "  f.id as family_id, f.name as family_name, f.created_by as owner_id, " +
+                        "  (SELECT COUNT(*) FROM user_family_membership ufm WHERE ufm.family_id = f.id) as member_count, " +
+                        "  um.role, um.is_active, " +
+                        "  CASE WHEN f.created_by = ? THEN true ELSE false END as is_owner " +
+                        "FROM family f " +
+                        "JOIN user_memberships um ON f.id = um.family_id";
             
-            // Get all family memberships for this user from the user_family_membership table
-            List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(id);
-            logger.debug("Found {} family memberships for user {}", memberships.size(), id);
+            logger.debug("Executing optimized query for families for user ID: {}", id);
             
-            // Convert each membership to a family info object
-            for (UserFamilyMembership membership : memberships) {
-                Long familyId = membership.getFamilyId();
-                if (familyId != null) {
-                    Family family = familyRepository.findById(familyId).orElse(null);
-                    if (family != null) {
-                        Map<String, Object> familyInfo = new HashMap<>();
-                        familyInfo.put("familyId", family.getId());
-                        familyInfo.put("familyName", family.getName());
-                        familyInfo.put("memberCount", userRepository.findByFamilyId(familyId).size());
-                        
-                        // Check if user is the owner/admin of this family
-                        boolean isOwner = (family.getCreatedBy() != null && family.getCreatedBy().getId().equals(id));
-                        familyInfo.put("isOwner", isOwner);
-                        familyInfo.put("role", membership.getRole());
-                        
-                        // Check if this is the user's active family
-                        boolean isActive = (user.getFamilyId() != null && user.getFamilyId().equals(familyId));
-                        familyInfo.put("isActive", isActive);
-                        
-                        families.add(familyInfo);
-                    }
-                }
-            }
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
             
-            // Log the results for debugging
-            logger.debug("Returning {} families for user {}", families.size(), id);
-            for (Map<String, Object> family : families) {
-                logger.debug("Family: id={}, name={}, isOwner={}, role={}, isActive={}", 
-                    family.get("familyId"), family.get("familyName"), 
-                    family.get("isOwner"), family.get("role"), family.get("isActive"));
-            }
+            // Transform results into the response format  
+            List<Map<String, Object>> families = results.stream().map(family -> {
+                Map<String, Object> familyInfo = new HashMap<>();
+                familyInfo.put("familyId", family.get("family_id"));
+                familyInfo.put("familyName", family.get("family_name"));
+                familyInfo.put("memberCount", family.get("member_count"));
+                familyInfo.put("isOwner", family.get("is_owner"));
+                familyInfo.put("role", family.get("role"));
+                familyInfo.put("isActive", family.get("is_active"));
+                return familyInfo;
+            }).collect(Collectors.toList());
             
+            logger.debug("Returning {} families for user {} with a single optimized query", families.size(), id);
             return ResponseEntity.ok(families);
         } catch (Exception e) {
             logger.error("Error getting families for user {}: {}", id, e.getMessage(), e);
@@ -1117,41 +964,50 @@ public class UserController {
     public ResponseEntity<Map<String, Object>> fixFamilyMemberships() {
         logger.debug("Received request to fix family memberships");
         try {
+            // This method needs to be completely reimplemented since the app_user table no longer has a family_id column
+            // Instead, we'll ensure that users have at most one active family membership
+            
             // Get all users
             List<User> allUsers = userRepository.findAll();
             int fixedCount = 0;
             
             for (User user : allUsers) {
-                Long familyId = user.getFamilyId();
-                if (familyId != null) {
-                    // Check if user has a membership record
-                    List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(user.getId());
-                    boolean hasMembership = memberships.stream()
-                            .anyMatch(m -> m.getFamilyId().equals(familyId));
-                    
-                    if (!hasMembership) {
-                        logger.debug("Fixing family membership for user ID: {} and family ID: {}", user.getId(), familyId);
-                        
-                        // Get the family
-                        Optional<Family> familyOpt = familyRepository.findById(familyId);
-                        if (familyOpt.isPresent()) {
-                            Family family = familyOpt.get();
-                            
-                            // Create a membership
-                            UserFamilyMembership membership = new UserFamilyMembership();
-                            membership.setUserId(user.getId());
-                            membership.setFamilyId(familyId);
-                            membership.setActive(true);
-                            
-                            // If this user is the creator of the family, set as ADMIN
-                            if (family.getCreatedBy() != null && family.getCreatedBy().getId().equals(user.getId())) {
-                                membership.setRole("ADMIN");
+                // Get all family memberships for this user
+                List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(user.getId());
+                
+                // Skip users with no memberships
+                if (memberships.isEmpty()) {
+                    continue;
+                }
+                
+                // Count active memberships
+                long activeCount = memberships.stream()
+                    .filter(UserFamilyMembership::isActive)
+                    .count();
+                
+                // If user has no active memberships but has memberships, make the first one active
+                if (activeCount == 0) {
+                    UserFamilyMembership firstMembership = memberships.get(0);
+                    firstMembership.setActive(true);
+                    userFamilyMembershipRepository.save(firstMembership);
+                    fixedCount++;
+                    logger.debug("Fixed: Set active membership for user ID: {} to family ID: {}", 
+                        user.getId(), firstMembership.getFamilyId());
+                } 
+                // If user has multiple active memberships, keep only the first one active
+                else if (activeCount > 1) {
+                    boolean foundFirst = false;
+                    for (UserFamilyMembership membership : memberships) {
+                        if (membership.isActive()) {
+                            if (!foundFirst) {
+                                foundFirst = true;
                             } else {
-                                membership.setRole("MEMBER");
+                                membership.setActive(false);
+                                userFamilyMembershipRepository.save(membership);
+                                fixedCount++;
+                                logger.debug("Fixed: Deactivated extra membership for user ID: {} in family ID: {}", 
+                                    user.getId(), membership.getFamilyId());
                             }
-                            
-                            userFamilyMembershipRepository.save(membership);
-                            fixedCount++;
                         }
                     }
                 }
@@ -1299,6 +1155,59 @@ public class UserController {
         } catch (Exception e) {
             logger.error("Error updating family: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error updating family: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/invitations")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getInvitations(@RequestHeader("Authorization") String authHeader) {
+        logger.debug("Received request to get invitations");
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(403).body(List.of(Map.of("error", "Unauthorized access")));
+            }
+
+            // Optimized single SQL query to get user's email and invitations
+            String sql = "WITH user_email AS (" +
+                        "  SELECT u.email FROM app_user u WHERE u.id = ?" +
+                        ")" +
+                        "SELECT i.id, i.family_id, i.sender_id, i.status, i.created_at, i.expires_at, " +
+                        "       f.name as family_name, " +
+                        "       s.username as sender_username, s.first_name as sender_first_name, s.last_name as sender_last_name " +
+                        "FROM invitation i " +
+                        "JOIN user_email ue ON i.email = ue.email " +
+                        "LEFT JOIN family f ON i.family_id = f.id " +
+                        "LEFT JOIN app_user s ON i.sender_id = s.id";
+            
+            logger.debug("Executing optimized query for invitations for user ID: {}", userId);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId);
+            
+            // Transform results into the response format
+            List<Map<String, Object>> response = results.stream().map(inv -> {
+                Map<String, Object> invMap = new HashMap<>();
+                invMap.put("id", inv.get("id"));
+                invMap.put("familyId", inv.get("family_id"));
+                invMap.put("inviterId", inv.get("sender_id"));
+                invMap.put("status", inv.get("status"));
+                invMap.put("createdAt", inv.get("created_at").toString());
+                invMap.put("expiresAt", inv.get("expires_at").toString());
+                
+                // Add additional information
+                invMap.put("familyName", inv.get("family_name"));
+                invMap.put("senderName", inv.get("sender_first_name") + " " + inv.get("sender_last_name"));
+                invMap.put("senderUsername", inv.get("sender_username"));
+                
+                return invMap;
+            }).collect(Collectors.toList());
+
+            logger.debug("Returning {} invitations for user ID: {}", response.size(), userId);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error retrieving invitations: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
         }
     }
 }

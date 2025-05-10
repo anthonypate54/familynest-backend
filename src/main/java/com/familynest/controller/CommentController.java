@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -23,6 +24,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import org.springframework.cache.annotation.Cacheable;
 
 @RestController
 @RequestMapping("/api/messages")
@@ -39,66 +42,113 @@ public class CommentController {
     @Autowired
     private JwtUtil jwtUtil;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     /**
-     * Get comments for a message with pagination
+     * Get comments for a message with efficient pagination
+     * Uses a single optimized SQL query instead of multiple Hibernate queries
      */
     @GetMapping("/{messageId}/comments")
+    @Cacheable(value = "messageComments", key = "#messageId + '-' + #page + '-' + #size")
     public ResponseEntity<Map<String, Object>> getComments(
             @PathVariable Long messageId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir) {
-        logger.debug("Getting comments for message ID: {}", messageId);
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "20") int size) {
+        
+        logger.debug("Getting comments for message: {}, page: {}, size: {}", messageId, page, size);
         
         try {
-            Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
-            Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+            // Limit page size to prevent abuse
+            int pageSize = Math.min(size, 50);
+            int offset = page * pageSize;
             
-            Page<MessageComment> commentsPage = engagementService.getMessageComments(messageId, pageable);
-            List<MessageComment> comments = commentsPage.getContent();
+            // Use a single optimized query to get comments with user data
+            String sql = "WITH comment_count AS (" +
+                       "  SELECT COUNT(*) as total FROM message_comment WHERE message_id = ?" +
+                       ") " +
+                       "SELECT mc.id, mc.message_id, mc.user_id, mc.content, mc.media_url, mc.media_type, " +
+                       "       mc.created_at, mc.updated_at, mc.parent_comment_id, " +
+                       "       u.username, u.first_name, u.last_name, u.photo, " +
+                       "       cc.total as total_count " +
+                       "FROM message_comment mc " +
+                       "JOIN app_user u ON mc.user_id = u.id " +
+                       "CROSS JOIN comment_count cc " +
+                       "WHERE mc.message_id = ? " +
+                       "ORDER BY mc.created_at ASC " +
+                       "LIMIT ? OFFSET ?";
             
-            // Get user details for each comment
-            List<Map<String, Object>> commentDetails = new ArrayList<>();
-            for (MessageComment comment : comments) {
-                Map<String, Object> detail = new HashMap<>();
-                detail.put("id", comment.getId());
-                detail.put("messageId", comment.getMessageId());
-                detail.put("userId", comment.getUserId());
-                detail.put("content", comment.getContent());
-                detail.put("mediaUrl", comment.getMediaUrl());
-                detail.put("mediaType", comment.getMediaType());
-                detail.put("createdAt", comment.getCreatedAt());
-                detail.put("updatedAt", comment.getUpdatedAt());
-                detail.put("parentCommentId", comment.getParentCommentId());
+            // Execute query
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(
+                sql, messageId, messageId, pageSize, offset);
+            
+            // Check if we got any results
+            if (results.isEmpty()) {
+                // If no comments, let's at least check if the message exists
+                String checkSql = "SELECT EXISTS(SELECT 1 FROM message WHERE id = ?)";
+                boolean messageExists = jdbcTemplate.queryForObject(checkSql, Boolean.class, messageId);
                 
-                // Add reply count
-                long replyCount = engagementService.getCommentReplyCount(comment.getId());
-                detail.put("replyCount", replyCount);
-                
-                // Add basic user info
-                User user = userRepository.findById(comment.getUserId()).orElse(null);
-                if (user != null) {
-                    detail.put("username", user.getUsername());
-                    detail.put("firstName", user.getFirstName());
-                    detail.put("lastName", user.getLastName());
-                    detail.put("photo", user.getPhoto());
+                if (!messageExists) {
+                    logger.debug("Message not found: {}", messageId);
+                    return ResponseEntity.notFound().build();
                 }
                 
-                commentDetails.add(detail);
+                // Message exists but no comments
+                return ResponseEntity.ok(Map.of(
+                    "comments", List.of(),
+                    "totalCount", 0,
+                    "totalPages", 0,
+                    "currentPage", page,
+                    "pageSize", pageSize,
+                    "hasNext", false
+                ));
             }
             
-            Map<String, Object> response = new HashMap<>();
-            response.put("comments", commentDetails);
-            response.put("currentPage", commentsPage.getNumber());
-            response.put("totalItems", commentsPage.getTotalElements());
-            response.put("totalPages", commentsPage.getTotalPages());
+            // Get total count from first result
+            int totalCount = ((Number) results.get(0).get("total_count")).intValue();
+            int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+            boolean hasNext = (page + 1) < totalPages;
             
+            // Transform results
+            List<Map<String, Object>> comments = results.stream().map(row -> {
+                Map<String, Object> comment = new HashMap<>();
+                comment.put("id", row.get("id"));
+                comment.put("messageId", row.get("message_id"));
+                comment.put("content", row.get("content"));
+                comment.put("createdAt", row.get("created_at"));
+                comment.put("updatedAt", row.get("updated_at"));
+                comment.put("parentCommentId", row.get("parent_comment_id"));
+                comment.put("mediaUrl", row.get("media_url"));
+                comment.put("mediaType", row.get("media_type"));
+                
+                // Add user data
+                Map<String, Object> user = new HashMap<>();
+                user.put("id", row.get("user_id"));
+                user.put("username", row.get("username"));
+                user.put("firstName", row.get("first_name"));
+                user.put("lastName", row.get("last_name"));
+                user.put("photo", row.get("photo"));
+                comment.put("user", user);
+                
+                return comment;
+            }).collect(Collectors.toList());
+            
+            // Create response
+            Map<String, Object> response = new HashMap<>();
+            response.put("comments", comments);
+            response.put("totalCount", totalCount);
+            response.put("totalPages", totalPages);
+            response.put("currentPage", page);
+            response.put("pageSize", pageSize);
+            response.put("hasNext", hasNext);
+            
+            logger.debug("Returning {} comments for message {} (total {})", comments.size(), messageId, totalCount);
             return ResponseEntity.ok(response);
+            
         } catch (Exception e) {
-            logger.error("Error getting comments: {}", e.getMessage(), e);
+            logger.error("Error getting comments for message {}: {}", messageId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to get comments: " + e.getMessage()));
+                   .body(Map.of("error", "Failed to get comments: " + e.getMessage()));
         }
     }
     
@@ -156,62 +206,85 @@ public class CommentController {
     @PostMapping("/{messageId}/comments")
     public ResponseEntity<Map<String, Object>> addComment(
             @PathVariable Long messageId,
-            @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, Object> commentData,
             HttpServletRequest request) {
-        logger.debug("Adding comment to message ID: {}", messageId);
+        
+        logger.debug("Adding comment to message: {}", messageId);
         
         try {
-            // Get the user ID either from test attributes or from JWT
-            Long userId;
-            Object userIdAttr = request.getAttribute("userId");
-            if (userIdAttr != null) {
-                // Use the userId attribute set by the TestAuthFilter
-                userId = (Long) userIdAttr;
-                logger.debug("Using test userId: {}", userId);
-            } else {
-                // Normal authentication flow
-                String token = authHeader.replace("Bearer ", "");
-                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
-                userId = Long.parseLong(claims.get("userId").toString());
+            // Extract user ID from request
+            Long userId = (Long) request.getAttribute("userId");
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                       .body(Map.of("error", "User not authenticated"));
             }
             
+            // Extract comment data
             String content = (String) commentData.get("content");
-            if (content == null || content.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Comment content is required"));
+            if (content == null || content.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                       .body(Map.of("error", "Comment content cannot be empty"));
             }
             
-            // Check if this is a reply to another comment
+            // Get optional parent comment ID
             Long parentCommentId = null;
             if (commentData.containsKey("parentCommentId") && commentData.get("parentCommentId") != null) {
                 parentCommentId = Long.valueOf(commentData.get("parentCommentId").toString());
             }
             
-            MessageComment comment = engagementService.addComment(messageId, userId, content, parentCommentId);
+            // Create and save the comment
+            MessageComment comment = new MessageComment();
+            comment.setMessageId(messageId);
+            comment.setUserId(userId);
+            comment.setContent(content);
+            comment.setCreatedAt(LocalDateTime.now());
             
-            Map<String, Object> response = new HashMap<>();
-            response.put("id", comment.getId());
-            response.put("messageId", comment.getMessageId());
-            response.put("userId", comment.getUserId());
-            response.put("content", comment.getContent());
-            response.put("createdAt", comment.getCreatedAt());
-            response.put("parentCommentId", comment.getParentCommentId());
-            
-            // Add user details
-            User user = userRepository.findById(userId).orElse(null);
-            if (user != null) {
-                response.put("username", user.getUsername());
-                response.put("photo", user.getPhoto());
+            // Set optional fields
+            if (commentData.containsKey("mediaUrl")) {
+                comment.setMediaUrl((String) commentData.get("mediaUrl"));
             }
             
+            if (commentData.containsKey("mediaType")) {
+                comment.setMediaType((String) commentData.get("mediaType"));
+            }
+            
+            if (parentCommentId != null) {
+                comment.setParentCommentId(parentCommentId);
+            }
+            
+            // Save comment
+            MessageComment savedComment = engagementService.addComment(messageId, userId, content, parentCommentId);
+            
+            // Get user data for the response
+            String sql = "SELECT username, first_name, last_name, photo FROM app_user WHERE id = ?";
+            Map<String, Object> userData = jdbcTemplate.queryForMap(sql, userId);
+            
+            // Create response
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", savedComment.getId());
+            response.put("messageId", savedComment.getMessageId());
+            response.put("content", savedComment.getContent());
+            response.put("createdAt", savedComment.getCreatedAt());
+            response.put("parentCommentId", savedComment.getParentCommentId());
+            response.put("mediaUrl", savedComment.getMediaUrl());
+            response.put("mediaType", savedComment.getMediaType());
+            
+            // Add user data
+            Map<String, Object> user = new HashMap<>();
+            user.put("id", userId);
+            user.put("username", userData.get("username"));
+            user.put("firstName", userData.get("first_name"));
+            user.put("lastName", userData.get("last_name"));
+            user.put("photo", userData.get("photo"));
+            response.put("user", user);
+            
+            logger.debug("Comment added successfully to message {}: {}", messageId, savedComment.getId());
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
-        } catch (IllegalArgumentException e) {
-            logger.error("Error adding comment: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            
         } catch (Exception e) {
-            logger.error("Error adding comment: {}", e.getMessage(), e);
+            logger.error("Error adding comment to message {}: {}", messageId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to add comment: " + e.getMessage()));
+                   .body(Map.of("error", "Failed to add comment: " + e.getMessage()));
         }
     }
     

@@ -14,8 +14,16 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 @Entity
 @Table(name = "app_user")
+@JsonIdentityInfo(
+  generator = ObjectIdGenerators.PropertyGenerator.class, 
+  property = "id")
 public class User {
 
     @Id
@@ -41,10 +49,12 @@ public class User {
     
     // One family that the user owns (created)
     @OneToOne(mappedBy = "createdBy", fetch = FetchType.LAZY)
+    @JsonBackReference
     private Family ownedFamily;
 
     // Many families that the user is a member of
     @OneToMany(mappedBy = "userId", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference
     private List<UserFamilyMembership> familyMemberships = new ArrayList<>();
     
     // Demographic information

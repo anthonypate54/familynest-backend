@@ -10,7 +10,10 @@ import java.util.Optional;
 
 public interface UserRepository extends JpaRepository<User, Long> {
     User findByUsername(String username);
-    Optional<User> findByEmail(String email);
+    
+    // Use LOWER to perform case-insensitive email lookup
+    @Query("SELECT u FROM User u WHERE LOWER(u.email) = LOWER(:email)")
+    Optional<User> findByEmail(@Param("email") String email);
     
     // Replace the direct familyId access with a query that joins through the UserFamilyMembership table
     @Query("SELECT u FROM User u JOIN u.familyMemberships m WHERE m.familyId = :familyId")
@@ -24,5 +27,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query("SELECT u FROM User u WHERE u.ownedFamily IS NOT NULL")
     List<User> findFamilyOwners();
     
-    boolean existsByEmail(String email);
+    // Also make this case-insensitive
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.email) = LOWER(:email)")
+    boolean existsByEmail(@Param("email") String email);
 }

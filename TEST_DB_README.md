@@ -49,6 +49,19 @@ cd familynest-backend
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=testdb
 ```
 
+## Flutter App Testing
+
+When testing with the Flutter app, use this dedicated test user:
+
+```
+Email: testuser@example.com
+Password: user2123
+```
+
+The testuser account has been set up with the same password hash as user2 from the main database, ensuring consistent login behavior. This user has access to the family that contains the large thread for testing metrics.
+
+When the Flutter app configuration is set to use localhost:8080, it will connect to the test database when the backend is running with the testdb profile.
+
 ## Testing API Endpoints
 
 The application uses JWT tokens for authentication. You can test the API endpoints in two ways:
@@ -117,7 +130,9 @@ psql -U postgres -d familynest_test -c "SELECT id, content, timestamp
 
 The test database includes:
 
-1. **Users**: ~10 test users with password "password" (BCrypt hashed)
+1. **Users**: 
+   - Regular test users with varied profiles
+   - A special user (testuser@example.com) with password "user2123" for Flutter testing
 2. **Families**: 3 families with different sizes and relationships
 3. **Messages**: 
    - ~50 message threads with varied engagement

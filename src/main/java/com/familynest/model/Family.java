@@ -13,8 +13,16 @@ import jakarta.persistence.FetchType;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 @Entity
 @Table(name = "family")
+@JsonIdentityInfo(
+  generator = ObjectIdGenerators.PropertyGenerator.class, 
+  property = "id")
 public class Family {
 
     @Id
@@ -25,9 +33,11 @@ public class Family {
     
     @OneToOne
     @JoinColumn(name = "created_by", referencedColumnName = "id")
+    @JsonManagedReference
     private User createdBy;
     
     @OneToMany(mappedBy = "familyId", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonBackReference
     private List<UserFamilyMembership> members = new ArrayList<>();
 
     // Getters and setters

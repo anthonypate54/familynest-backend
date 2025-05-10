@@ -25,4 +25,9 @@ public interface UserFamilyMembershipRepository extends JpaRepository<UserFamily
     // Custom query to get all families for a user with details
     @Query("SELECT m FROM UserFamilyMembership m JOIN Family f ON m.familyId = f.id WHERE m.userId = :userId")
     List<UserFamilyMembership> findUserFamiliesWithDetails(@Param("userId") Long userId);
+
+    // Add the findFamilyIdsByUserId method to the UserFamilyMembershipRepository interface
+    // This method will return just the family IDs without loading the entire entities
+    @Query("SELECT m.familyId FROM UserFamilyMembership m WHERE m.userId = :userId")
+    List<Long> findFamilyIdsByUserId(@Param("userId") Long userId);
 } 

@@ -10,8 +10,15 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Column;
 import java.time.LocalDateTime;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 @Entity
 @Table(name = "user_family_membership")
+@JsonIdentityInfo(
+  generator = ObjectIdGenerators.PropertyGenerator.class, 
+  property = "id")
 public class UserFamilyMembership {
 
     @Id
@@ -26,10 +33,12 @@ public class UserFamilyMembership {
     
     @ManyToOne
     @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    @JsonBackReference
     private User user;
     
     @ManyToOne
     @JoinColumn(name = "family_id", insertable = false, updatable = false)
+    @JsonBackReference
     private Family family;
     
     private boolean isActive; // Indicates if this is the active family for posting messages
