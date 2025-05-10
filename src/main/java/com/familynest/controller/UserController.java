@@ -552,6 +552,21 @@ public class UserController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
             
+            // Verify the user is authorized to post messages to this family
+            boolean isAuthorized = false;
+            if (familyId.equals(user.getFamilyId())) {
+                isAuthorized = true;
+            } else {
+                // Check if user is an admin of the family
+                Optional<UserFamilyMembership> adminMembership = userFamilyMembershipRepository.findByUserIdAndFamilyId(id, familyId);
+                isAuthorized = adminMembership.isPresent() && "ADMIN".equals(adminMembership.get().getRole());
+            }
+            
+            if (!isAuthorized) {
+                logger.debug("User {} is not authorized to post messages to family {}", id, familyId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+            
             Message message = new Message();
             message.setContent(content != null ? content : "");
             message.setSenderUsername(user.getUsername());
@@ -572,22 +587,44 @@ public class UserController {
                     Path filePath = Paths.get(uploadDir, fileName);
                     logger.debug("Saving media to: {}", filePath);
                     
-                    Files.createDirectories(filePath.getParent());
-                    Files.write(filePath, media.getBytes());
+                    // Check file size
+                    long fileSizeBytes = media.getSize();
+                    long fileSizeMB = fileSizeBytes / (1024 * 1024);
+                    logger.debug("File size: {} bytes ({} MB)", fileSizeBytes, fileSizeMB);
                     
-                    // Set permissions to ensure file is accessible
-                    Files.setPosixFilePermissions(filePath, 
-                        java.util.Set.of(
-                            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-                            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
-                            java.nio.file.attribute.PosixFilePermission.GROUP_READ,
-                            java.nio.file.attribute.PosixFilePermission.OTHERS_READ
-                        )
-                    );
+                    // Size limit for videos: 20MB, for photos: 5MB
+                    long sizeLimit = "video".equals(mediaType) ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
                     
-                    message.setMediaType(mediaType);
-                    message.setMediaUrl("/api/users/photos/" + fileName);
-                    logger.debug("Media saved successfully: {}, type: {}", fileName, mediaType);
+                    if (fileSizeBytes > sizeLimit) {
+                        // For large files, create a placeholder and set a flag
+                        logger.debug("File size {} exceeds limit {}, creating link-only entry", fileSizeBytes, sizeLimit);
+                        
+                        // We still save the file, but mark it in the message
+                        Files.createDirectories(filePath.getParent());
+                        Files.write(filePath, media.getBytes());
+                        
+                        message.setMediaType(mediaType + "_large");
+                        message.setMediaUrl("/api/users/photos/" + fileName);
+                        logger.debug("Large media link created: {}, type: {}", fileName, message.getMediaType());
+                    } else {
+                        // Normal file handling for files within size limits
+                        Files.createDirectories(filePath.getParent());
+                        Files.write(filePath, media.getBytes());
+                        
+                        // Set permissions to ensure file is accessible
+                        Files.setPosixFilePermissions(filePath, 
+                            java.util.Set.of(
+                                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+                                java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+                                java.nio.file.attribute.PosixFilePermission.OTHERS_READ
+                            )
+                        );
+                        
+                        message.setMediaType(mediaType);
+                        message.setMediaUrl("/api/users/photos/" + fileName);
+                        logger.debug("Media saved successfully: {}, type: {}", fileName, mediaType);
+                    }
                 } catch (IOException e) {
                     logger.error("Error saving media file: {}", e.getMessage(), e);
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
@@ -1208,6 +1245,46 @@ public class UserController {
         } catch (Exception e) {
             logger.error("Error retrieving invitations: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
+        }
+    }
+
+    @GetMapping("/photos/{filename:.+}")
+    public ResponseEntity<Resource> servePhoto(@PathVariable String filename, 
+                                              HttpServletRequest request) {
+        logger.debug("Received request to serve photo: {}", filename);
+        try {
+            // Resolve the file path
+            Path filePath = Paths.get(uploadDir).resolve(filename).normalize();
+            Resource resource = new UrlResource(filePath.toUri());
+            
+            // Check if the file exists
+            if (!resource.exists()) {
+                logger.debug("Photo not found: {}", filename);
+                return ResponseEntity.notFound().build();
+            }
+            
+            // Determine content type
+            String contentType = null;
+            try {
+                contentType = request.getServletContext().getMimeType(resource.getFile().getAbsolutePath());
+            } catch (IOException ex) {
+                logger.debug("Could not determine file type for: {}", filename);
+            }
+            
+            // Fallback to the default content type if type could not be determined
+            if (contentType == null) {
+                contentType = "application/octet-stream";
+            }
+            
+            logger.debug("Serving photo: {} with content type: {}", filename, contentType);
+            
+            // Return the resource with appropriate headers
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .body(resource);
+        } catch (Exception e) {
+            logger.error("Error serving photo: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().build();
         }
     }
 }

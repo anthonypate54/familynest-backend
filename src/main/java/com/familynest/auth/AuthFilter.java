@@ -52,7 +52,8 @@ public class AuthFilter extends OncePerRequestFilter {
         }
         
         // Check other public endpoints
-        if (path.equals("/api/users/login") || path.equals("/api/users") || path.equals("/api/users/test")) {
+        if (path.equals("/api/users/login") || path.equals("/api/users") || path.equals("/api/users/test") ||
+            path.startsWith("/api/test/")) {  // Add test endpoints as public
             logger.debug("Allowing public request to: {}", path);
             chain.doFilter(request, response);
             return;

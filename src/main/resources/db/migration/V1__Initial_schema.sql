@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS app_user (
     first_name VARCHAR(255),
     last_name VARCHAR(255),
     role VARCHAR(50) NOT NULL,
-    family_id BIGINT,
     photo VARCHAR(255),
     phone_number VARCHAR(20),
     address VARCHAR(255),
@@ -52,10 +51,11 @@ CREATE TABLE IF NOT EXISTS invitation (
 );
 
 -- Add foreign key constraints
-ALTER TABLE app_user 
-    ADD CONSTRAINT fk_user_family 
-    FOREIGN KEY (family_id) 
-    REFERENCES family(id);
+-- Removing the family_id constraint since that column doesn't exist in app_user
+-- ALTER TABLE app_user 
+--    ADD CONSTRAINT fk_user_family 
+--    FOREIGN KEY (family_id) 
+--    REFERENCES family(id);
 
 ALTER TABLE family 
     ADD CONSTRAINT fk_family_creator 
@@ -85,7 +85,6 @@ ALTER TABLE invitation
 -- Create indexes for better search performance
 CREATE INDEX IF NOT EXISTS idx_app_user_username ON app_user(username);
 CREATE INDEX IF NOT EXISTS idx_app_user_email ON app_user(email);
-CREATE INDEX IF NOT EXISTS idx_app_user_family ON app_user(family_id);
 CREATE INDEX IF NOT EXISTS idx_app_user_state ON app_user(state);
 CREATE INDEX IF NOT EXISTS idx_app_user_country ON app_user(country);
 CREATE INDEX IF NOT EXISTS idx_message_user ON message(user_id);
