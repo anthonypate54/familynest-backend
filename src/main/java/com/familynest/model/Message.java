@@ -5,6 +5,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Column;
 import java.time.LocalDateTime;
 
@@ -13,7 +14,8 @@ import java.time.LocalDateTime;
 public class Message {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "message_id_seq")
+    @SequenceGenerator(name = "message_id_seq", sequenceName = "message_id_seq", allocationSize = 1)
     private Long id;
 
     private String content;
@@ -32,6 +34,8 @@ public class Message {
     private String mediaType;
 
     private String mediaUrl;
+    
+    private String thumbnailUrl;
 
     // Getters and setters
     public Long getId() {
@@ -104,5 +108,13 @@ public class Message {
 
     public void setMediaUrl(String mediaUrl) {
         this.mediaUrl = mediaUrl;
+    }
+    
+    public String getThumbnailUrl() {
+        return thumbnailUrl;
+    }
+
+    public void setThumbnailUrl(String thumbnailUrl) {
+        this.thumbnailUrl = thumbnailUrl;
     }
 }

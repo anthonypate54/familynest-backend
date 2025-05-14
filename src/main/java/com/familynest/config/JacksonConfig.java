@@ -18,8 +18,8 @@ public class JacksonConfig {
         // Prevent infinite recursion in bidirectional relationships
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         
-        // Only include non-null values
-        mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        // Include null values in JSON output
+        mapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);
         
         return mapper;
     }

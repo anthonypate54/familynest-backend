@@ -4,9 +4,12 @@ import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.SignatureException;
 import java.security.Key;
 import java.util.Date;
 import java.util.Map;
@@ -50,21 +53,46 @@ public class AuthUtil {
 
     public String generateToken(Long userId, String role) {
         logger.debug("Generating token for userId: {}", userId);
-        return Jwts.builder()
+        Date now = new Date();
+        Date expiration = new Date(now.getTime() + expirationTime);
+        logger.debug("Token will expire at: {} (in {} ms)", expiration, expirationTime);
+        
+        String token = Jwts.builder()
             .setSubject(userId.toString())
+            .claim("userId", userId.toString())  // Duplicate for compatibility
             .claim("role", role)
-            .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
+            .setIssuedAt(now)
+            .setExpiration(expiration)
             .signWith(key)
             .compact();
+            
+        logger.debug("Generated token: {} (length: {})", 
+                   token.substring(0, Math.min(10, token.length())) + "...", 
+                   token.length());
+        return token;
     }
 
     public Map<String, Object> validateTokenAndGetClaims(String token) {
-        Claims claims = Jwts.parserBuilder()
-            .setSigningKey(key)
-            .build()
-            .parseClaimsJws(token)
-            .getBody();
-        return claims;
+        logger.debug("Extracting claims from token starting with: {}...", 
+                   token.substring(0, Math.min(10, token.length())));
+        try {
+            Claims claims = Jwts.parserBuilder()
+                .setSigningKey(key)
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+                
+            if (claims.getExpiration().before(new Date())) {
+                logger.error("Token is expired! Expiration: {}, Current time: {}", 
+                           claims.getExpiration(), new Date());
+                throw new ExpiredJwtException(null, claims, "Token is expired");
+            }
+            
+            return claims;
+        } catch (Exception e) {
+            logger.error("Failed to extract claims from token: {}", e.getMessage());
+            throw e;
+        }
     }
 
     public String hashPassword(String rawPassword) {
@@ -76,48 +104,113 @@ public class AuthUtil {
     }
 
     public Long extractUserId(String token) {
-        logger.debug("Extracting userId from token: {}", token);
+        logger.debug("Extracting userId from token: {}", maskToken(token));
         try {
-            String userIdStr = Jwts.parserBuilder()
+            Claims claims = Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
                 .parseClaimsJws(token)
-                .getBody()
-                .getSubject();
+                .getBody();
+                
+            String userIdStr;
+            
+            // Try to get userId from two places for compatibility
+            // First from "userId" claim
+            Object userIdObj = claims.get("userId");
+            if (userIdObj != null) {
+                userIdStr = userIdObj.toString();
+            } else {
+                // Then fall back to "sub" (subject)
+                userIdStr = claims.getSubject();
+            }
+            
+            logger.debug("Extracted userId: {} from token", userIdStr);
             return Long.parseLong(userIdStr);
+        } catch (ExpiredJwtException e) {
+            logger.error("Token expired: {}", e.getMessage());
+            return null;
+        } catch (UnsupportedJwtException e) {
+            logger.error("Unsupported JWT: {}", e.getMessage());
+            return null;
+        } catch (MalformedJwtException e) {
+            logger.error("Malformed JWT: {}", e.getMessage());
+            return null;
+        } catch (SignatureException e) {
+            logger.error("JWT signature verification failed: {}", e.getMessage());
+            return null;
         } catch (Exception e) {
-            logger.debug("Failed to extract userId from token: {}", e.getMessage());
+            logger.error("Failed to extract userId from token: {}", e.getMessage());
             return null;
         }
     }
 
     public boolean validateToken(String token) {
-        logger.debug("Validating token: {}", token);
+        logger.error("🔍 Validating token: {}", maskToken(token));
         try {
-            Jwts.parserBuilder()
+            Claims claims = Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
-                .parseClaimsJws(token);
-            logger.debug("Token validated successfully");
+                .parseClaimsJws(token)
+                .getBody();
+                
+            // Check if token has expired
+            Date expiration = claims.getExpiration();
+            Date now = new Date();
+            if (expiration.before(now)) {
+                logger.error("🔍 Token has expired! Expiration: {}, Current time: {}", 
+                          expiration, now);
+                return false;
+            }
+            
+            // Get key claims for logging
+            String subject = claims.getSubject();
+            Object userId = claims.get("userId");
+            Object role = claims.get("role");
+            Date issuedAt = claims.getIssuedAt();
+            
+            logger.error("🔍 Token is valid! Subject: {}, UserId: {}, Role: {}, IssuedAt: {}, Expiration: {}", 
+                      subject, userId, role, issuedAt, expiration);
             return true;
+        } catch (ExpiredJwtException e) {
+            logger.error("🔍 Token expired: {}", e.getMessage());
+            return false;
+        } catch (UnsupportedJwtException e) {
+            logger.error("🔍 Unsupported JWT: {}", e.getMessage());
+            return false;
+        } catch (MalformedJwtException e) {
+            logger.error("🔍 Malformed JWT: {}", e.getMessage());
+            return false;
+        } catch (SignatureException e) {
+            logger.error("🔍 JWT signature verification failed: {}", e.getMessage());
+            return false;
         } catch (Exception e) {
-            logger.debug("Token validation failed: {}", e.getMessage());
+            logger.error("🔍 Token validation failed: {} ({})", e.getMessage(), e.getClass().getName());
             return false;
         }
     }
 
     public String getUserRole(String token) {
-        logger.debug("Extracting role from token: {}", token);
+        logger.debug("Extracting role from token: {}", maskToken(token));
         try {
-            return Jwts.parserBuilder()
+            Claims claims = Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
                 .parseClaimsJws(token)
-                .getBody()
-                .get("role", String.class);
+                .getBody();
+                
+            String role = claims.get("role", String.class);
+            logger.debug("Extracted role: {} from token", role);
+            return role;
         } catch (Exception e) {
-            logger.debug("Failed to extract role from token: {}", e.getMessage());
+            logger.error("Failed to extract role from token: {}", e.getMessage());
             return null;
         }
+    }
+    
+    // Helper method to partially mask token for logging
+    private String maskToken(String token) {
+        if (token == null) return "null";
+        if (token.length() <= 10) return token.substring(0, 3) + "...";
+        return token.substring(0, 5) + "..." + token.substring(token.length() - 5);
     }
 }

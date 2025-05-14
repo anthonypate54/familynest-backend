@@ -7,6 +7,8 @@ import com.familynest.repository.MessageRepository;
 import com.familynest.repository.UserRepository;
 import com.familynest.repository.FamilyRepository;
 import com.familynest.auth.AuthUtil; // Add this import
+import com.familynest.service.ThumbnailService; // Add ThumbnailService import
+import com.familynest.service.MediaService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,7 +54,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
-
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.CrossOrigin;
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
@@ -83,11 +86,20 @@ public class UserController {
     @Autowired
     private UserFamilyMessageSettingsRepository userFamilyMessageSettingsRepository;
 
+    @Autowired
+    private VideoController videoController;
+
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ThumbnailService thumbnailService;
+
+    @Autowired
+    private MediaService mediaService;
 
     @GetMapping("/test")
     public ResponseEntity<String> testEndpoint(HttpServletRequest request) {
@@ -102,6 +114,113 @@ public class UserController {
             logger.debug("  {}: {}", headerName, request.getHeader(headerName));
         }
         return ResponseEntity.ok("Test successful");
+    }
+
+    /**
+     * Public connection test endpoint that doesn't require authentication
+     * Used to debug connection issues from the Flutter app
+     */
+    @GetMapping("/connection-test")
+    @CrossOrigin(origins = "*")
+    public ResponseEntity<Map<String, Object>> connectionTest() {
+        logger.info("PUBLIC CONNECTION TEST ENDPOINT ACCESSED");
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "success");
+        response.put("message", "Backend connection successful");
+        response.put("timestamp", System.currentTimeMillis());
+        response.put("server", "FamilyNest Backend");
+        
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Test token endpoint to help debug auth issues
+     * Generates a valid token for user 101 for testing
+     */
+    @GetMapping("/test-token")
+    @CrossOrigin(origins = "*")
+    public ResponseEntity<Map<String, Object>> getTestToken() {
+        logger.info("TEST TOKEN ENDPOINT ACCESSED");
+        
+        try {
+            // Create a test token for user ID 101 with role USER
+            String token = authUtil.generateToken(101L, "USER");
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Test token generated");
+            response.put("userId", 101);
+            response.put("token", token);
+            response.put("role", "USER");
+            
+            logger.info("Generated test token for userId 101");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error generating test token: {}", e.getMessage(), e);
+            
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", "Failed to generate test token");
+            errorResponse.put("error", e.getMessage());
+            
+            return ResponseEntity.status(500).body(errorResponse);
+        }
+    }
+
+    /**
+     * Public test token endpoint for debugging authentication issues
+     */
+    @GetMapping("/test-token-101")
+    @CrossOrigin(origins = "*")
+    public ResponseEntity<Map<String, String>> getTestToken101() {
+        logger.info("TEST TOKEN FOR USER 101 ENDPOINT ACCESSED");
+        
+        // Generate token for test user 101
+        String token = authUtil.generateToken(101L, "ADMIN");
+        
+        Map<String, String> response = new HashMap<>();
+        response.put("userId", "101");
+        response.put("token", token);
+        response.put("role", "ADMIN");
+        response.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        
+        logger.error("Generated fresh test token for user 101: {}", token);
+        logger.error("Use this token for authentication in the app, it's freshly generated");
+        
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Token debug endpoint
+     */
+    @GetMapping("/debug-token")
+    @CrossOrigin(origins = "*")
+    public ResponseEntity<Map<String, Object>> debugToken(@RequestParam String token) {
+        logger.error("Debug token endpoint called with token: {}", token);
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", System.currentTimeMillis());
+        
+        try {
+            // Check if token is valid
+            boolean valid = authUtil.validateToken(token);
+            response.put("valid", valid);
+            
+            // Get claims from token 
+            if (valid) {
+                Map<String, Object> claims = authUtil.validateTokenAndGetClaims(token);
+                response.put("claims", claims);
+                response.put("userId", authUtil.extractUserId(token));
+                response.put("role", authUtil.getUserRole(token));
+            }
+        } catch (Exception e) {
+            response.put("error", e.getMessage());
+            response.put("exceptionType", e.getClass().getName());
+        }
+        
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{id}")
@@ -470,13 +589,22 @@ public class UserController {
             membership.setFamilyId(familyId);
             membership.setActive(true);
             membership.setRole("MEMBER");
-            userFamilyMembershipRepository.save(membership);
-
+            
             // If this is the user's first family, or they have no active family, set this as active
-            if (user.getFamilyId() == null) {
-                user.setFamilyId(familyId);
-                userRepository.save(user);
+            // First, deactivate any other active memberships
+            Optional<UserFamilyMembership> activeMembership = userFamilyMembershipRepository.findByUserIdAndIsActiveTrue(id);
+            if (activeMembership.isPresent()) {
+                // Deactivate the existing active membership
+                UserFamilyMembership existingActive = activeMembership.get();
+                existingActive.setActive(false);
+                userFamilyMembershipRepository.save(existingActive);
+                logger.debug("Deactivated previous active membership for user ID: {} in family ID: {}", 
+                             id, existingActive.getFamilyId());
             }
+            
+            // Save the new membership as active
+            userFamilyMembershipRepository.save(membership);
+            logger.debug("Created and activated new membership for user ID: {} in family ID: {}", id, familyId);
             
             // Create message settings (default: receive messages = true)
             logger.debug("Creating message settings for user ID: {} and family ID: {}", id, familyId);
@@ -501,18 +629,22 @@ public class UserController {
     @PostMapping(value = "/{id}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Void> postMessage(
         @PathVariable Long id,
-        @RequestPart(value = "content", required = false) String content,
+        @RequestParam(value = "content", required = false) String content,
         @RequestPart(value = "media", required = false) MultipartFile media,
-        @RequestPart(value = "mediaType", required = false) String mediaType,
-        @RequestPart(value = "familyId", required = false) String familyIdStr) {
+        @RequestParam(value = "mediaType", required = false) String mediaType,
+        @RequestParam(value = "familyId", required = false) String familyIdStr,
+        @RequestParam(value = "videoUrl", required = false) String videoUrl,
+        @RequestParam(value = "thumbnailUrl", required = false) String thumbnailUrl) {
+        
         logger.debug("Received request to post message for user ID: {}", id);
         logger.debug("Content: {}, Media: {}, MediaType: {}, FamilyId: {}", 
-                    content, 
-                    media != null ? media.getOriginalFilename() + " (" + media.getSize() + " bytes)" : "null", 
-                    mediaType,
-                    familyIdStr);
-        
+                content, 
+                media != null ? media.getOriginalFilename() + " (" + media.getSize() + " bytes)" : "null", 
+                mediaType,
+                familyIdStr);
+                
         try {
+            logger.debug("Step 1: Finding user with ID: {}", id);
             User user = userRepository.findById(id).orElse(null);
             if (user == null) {
                 logger.debug("User not found for ID: {}", id);
@@ -532,9 +664,19 @@ public class UserController {
                     return ResponseEntity.badRequest().build();
                 }
             } else {
-                // Otherwise use the user's active family
-                familyId = user.getFamilyId();
-                logger.debug("Using user's active family ID: {}", familyId);
+                // Direct query for active family ID 
+                List<Long> activeFamilyIds = userFamilyMembershipRepository.findActiveFamilyIdByUserId(id);
+                
+                if (!activeFamilyIds.isEmpty()) {
+                    // Use the first active family ID if available
+                    familyId = activeFamilyIds.get(0);
+                    logger.debug("Using user's first active family ID from direct query: {}", familyId);
+                } else {
+                    // Fallback to any family ID
+                    List<Long> familyIds = userFamilyMembershipRepository.findFamilyIdsByUserId(id);
+                    familyId = !familyIds.isEmpty() ? familyIds.get(0) : null;
+                    logger.debug("No active family IDs found, using first family ID: {}", familyId);
+                }
             }
             
             if (familyId == null) {
@@ -554,7 +696,10 @@ public class UserController {
             
             // Verify the user is authorized to post messages to this family
             boolean isAuthorized = false;
-            if (familyId.equals(user.getFamilyId())) {
+            
+            // Check if this is one of the user's active families
+            List<Long> userActiveFamilyIds = userFamilyMembershipRepository.findActiveFamilyIdByUserId(id);
+            if (userActiveFamilyIds.contains(familyId)) {
                 isAuthorized = true;
             } else {
                 // Check if user is an admin of the family
@@ -567,6 +712,7 @@ public class UserController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
             
+            // Create the message
             Message message = new Message();
             message.setContent(content != null ? content : "");
             message.setSenderUsername(user.getUsername());
@@ -574,69 +720,105 @@ public class UserController {
             message.setUserId(user.getId());
             message.setFamilyId(familyId);
             message.setTimestamp(LocalDateTime.now());
+            
+            logger.debug("BEFORE   if (media != null && mediaType != null ", media, mediaType);
 
+            if(media != null) {
+                logger.debug("MEDIA IS NOT NULL", media);
+            }
+            else {
+                logger.debug("MEDIA IS NULL", media);
+            }
+            if(mediaType != null) {
+                logger.debug("MEDIA TYPEIS NOT NULL", mediaType);
+            }
+            else {
+                logger.debug("MEDIA TYPE IS NULL", mediaType);
+            }
+            // Handle media if present
             if (media != null && mediaType != null) {
+                logger.debug("MEDIA HANDLER: Processing media of type: {}", mediaType);
+                logger.debug("Media details: name={}, size={} bytes, contentType={}", 
+                            media.getOriginalFilename(), 
+                            media.getSize(),
+                            media.getContentType());
+                
                 try {
-                    String originalFilename = media.getOriginalFilename();
-                    String extension = "";
-                    if (originalFilename != null && originalFilename.contains(".")) {
-                        extension = originalFilename.substring(originalFilename.lastIndexOf("."));
-                    }
+                    // Use MediaService to handle all media uploads
+                    Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
+                    logger.debug("MediaService returned result: {}", mediaResult);
                     
-                    String fileName = System.currentTimeMillis() + "_" + (originalFilename != null ? originalFilename : "media" + extension);
-                    Path filePath = Paths.get(uploadDir, fileName);
-                    logger.debug("Saving media to: {}", filePath);
+                    // Get the URLs from the result
+                    String mediaUrl = mediaResult.get("mediaUrl");
+                    logger.debug("Media URL from service: {}", mediaUrl);
                     
-                    // Check file size
-                    long fileSizeBytes = media.getSize();
-                    long fileSizeMB = fileSizeBytes / (1024 * 1024);
-                    logger.debug("File size: {} bytes ({} MB)", fileSizeBytes, fileSizeMB);
+                    // Set media properties on the message
+                    message.setMediaType(mediaType);
+                    message.setMediaUrl(mediaUrl);
+                    logger.debug("Media saved successfully: {}", mediaUrl);
                     
-                    // Size limit for videos: 20MB, for photos: 5MB
-                    long sizeLimit = "video".equals(mediaType) ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
-                    
-                    if (fileSizeBytes > sizeLimit) {
-                        // For large files, create a placeholder and set a flag
-                        logger.debug("File size {} exceeds limit {}, creating link-only entry", fileSizeBytes, sizeLimit);
-                        
-                        // We still save the file, but mark it in the message
-                        Files.createDirectories(filePath.getParent());
-                        Files.write(filePath, media.getBytes());
-                        
-                        message.setMediaType(mediaType + "_large");
-                        message.setMediaUrl("/api/users/photos/" + fileName);
-                        logger.debug("Large media link created: {}, type: {}", fileName, message.getMediaType());
-                    } else {
-                        // Normal file handling for files within size limits
-                        Files.createDirectories(filePath.getParent());
-                        Files.write(filePath, media.getBytes());
-                        
-                        // Set permissions to ensure file is accessible
-                        Files.setPosixFilePermissions(filePath, 
-                            java.util.Set.of(
-                                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-                                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
-                                java.nio.file.attribute.PosixFilePermission.GROUP_READ,
-                                java.nio.file.attribute.PosixFilePermission.OTHERS_READ
-                            )
-                        );
-                        
-                        message.setMediaType(mediaType);
-                        message.setMediaUrl("/api/users/photos/" + fileName);
-                        logger.debug("Media saved successfully: {}, type: {}", fileName, mediaType);
+                    logger.debug("BEFORE   ", "video".equals(mediaType));
+                    // For videos, also set the thumbnail URL
+                    if ("video".equals(mediaType)) {
+                        logger.error("!!!!! INSIDE THE VIDEO IF STATEMENT !!!!!");
+                        // Always use VideoController for thumbnails - single source of truth
+                        String generatedThumbnailUrl = videoController.getThumbnailForVideo(mediaUrl);
+                        logger.error("!!!!! GOT THUMBNAIL URL FROM VIDEOCONTROLLER: {} !!!!!", generatedThumbnailUrl);
+                        message.setThumbnailUrl(generatedThumbnailUrl);
                     }
                 } catch (IOException e) {
                     logger.error("Error saving media file: {}", e.getMessage(), e);
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
                 }
+            } else if (videoUrl != null && "video".equals(mediaType)) {
+                // Handle pre-processed video using the parameters
+                logger.debug("Processing pre-uploaded video: {}", videoUrl);
+                message.setMediaType("video");
+                message.setMediaUrl(videoUrl);
+                
+                if (thumbnailUrl != null) {
+                    logger.debug("Setting thumbnail URL: {}", thumbnailUrl);
+                    message.setThumbnailUrl(thumbnailUrl);
+                } else {
+                    // Use centralized method in VideoController to get the thumbnail
+                    String generatedThumbnailUrl = videoController.getThumbnailForVideo(videoUrl);
+                    logger.debug("Generated thumbnail URL from VideoController: {}", generatedThumbnailUrl);
+                    message.setThumbnailUrl(generatedThumbnailUrl);                   
+                }
+            } else {
+                logger.debug("No media to process: media={}, mediaType={}, videoUrl={}", media, mediaType, videoUrl);
+            }
+ 
+            // DEBUG LOG: Always log all relevant parameters for pre-processed videos
+            logger.error("VIDEO DEBUG: media={}, mediaType='{}', videoUrl='{}', thumbnailUrl='{}'", 
+                        media != null ? "present" : "null",
+                        mediaType,
+                        videoUrl,
+                        thumbnailUrl);
+                        
+            // Check for pre-processed video parameters without any conditions
+            if (mediaType != null) {
+                logger.error("VIDEO DEBUG: mediaType is not null: '{}'", mediaType);
+                logger.error("VIDEO DEBUG: mediaType equals 'video': {}", "video".equals(mediaType));
+                logger.error("VIDEO DEBUG: mediaType equalsIgnoreCase 'video': {}", "video".equalsIgnoreCase(mediaType));
+            }
+            
+            if (videoUrl != null) {
+                logger.error("VIDEO DEBUG: videoUrl is not null: '{}'", videoUrl);
             }
 
-            messageRepository.save(message);
-            logger.debug("Message posted successfully for family ID: {}", familyId);
+            // Use a repository method that doesn't involve transactions
+            logger.error("!!! BEFORE SAVING, MESSAGE OBJECT: mediaType={}, mediaUrl={}, thumbnailUrl={} !!!", 
+                      message.getMediaType(), message.getMediaUrl(), message.getThumbnailUrl());
+            logger.debug("Saving message: {}", message);
+            Message savedMessage = messageRepository.save(message);
+            logger.error("!!! AFTER SAVING, MESSAGE ID: {}, THUMBNAIL URL: {} !!!", 
+                      savedMessage.getId(), savedMessage.getThumbnailUrl());
+            
             return ResponseEntity.status(201).build();
         } catch (Exception e) {
             logger.error("Error posting message: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.status(500).build();
         }
     }
 
@@ -697,7 +879,7 @@ public class UserController {
                         ") " +
                         "SELECT " +
                         "  m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
-                        "  m.timestamp, m.media_type, m.media_url, " +
+                        "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
                         "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                         "  f.name as family_name, " +
                         "  COALESCE(vc.count, 0) as view_count, " +
@@ -712,6 +894,8 @@ public class UserController {
                         "LEFT JOIN comment_counts cc ON m.id = cc.message_id " +
                         "ORDER BY m.timestamp DESC ";
 
+            logger.error("DEBUG SQL QUERY: \n{}", sql);
+
             // Check if user exists first for a better error message
             if (!userRepository.existsById(id)) {
                 logger.debug("User not found for ID: {}", id);
@@ -721,6 +905,22 @@ public class UserController {
             logger.debug("Executing optimized query for messages for user ID: {}", id);
             
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
+            
+            // Debug output for all keys and values in the first result
+            if (!results.isEmpty() && results.size() > 0) {
+                logger.error("DEBUG: Number of results: {}", results.size());
+                Map<String, Object> firstResult = results.get(0);
+                logger.error("DEBUG: Keys in first result: {}", firstResult.keySet());
+                
+                // Specifically look for thumbnail_url
+                logger.error("DEBUG: Has thumbnail_url? {}", firstResult.containsKey("thumbnail_url"));
+                logger.error("DEBUG: thumbnail_url value: {}", firstResult.get("thumbnail_url"));
+                
+                // Print all key-value pairs
+                for (Map.Entry<String, Object> entry : firstResult.entrySet()) {
+                    logger.error("DEBUG: {} = {}", entry.getKey(), entry.getValue());
+                }
+            }
             
             // Transform results to the response format
             List<Map<String, Object>> response = results.stream().map(message -> {
@@ -737,11 +937,31 @@ public class UserController {
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
+                
+                // Add detailed logging for thumbnail_url
+                Object thumbnailUrlValue = message.get("thumbnail_url");
+                logger.error("DEBUG: Message ID: {}, thumbnail_url value: {}", message.get("id"), thumbnailUrlValue);
+                messageMap.put("thumbnailUrl", thumbnailUrlValue); 
+                
+                // If there's no thumbnailUrl but there is a media_type of video, log a warning
+                if (thumbnailUrlValue == null && "video".equals(message.get("media_type"))) {
+                    logger.error("WARNING: Video message ID {} has no thumbnail_url", message.get("id"));
+                }
+                
                 messageMap.put("viewCount", message.get("view_count"));
                 messageMap.put("reactionCount", message.get("reaction_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
+                
                 return messageMap;
             }).collect(Collectors.toList());
+            
+            // Add explicit debug logging for video messages
+            for (Map<String, Object> msg : response) {
+                if ("video".equals(msg.get("mediaType"))) {
+                    logger.error("DEBUG: Video Message ID: {}, Has thumbnailUrl key: {}, thumbnailUrl value: {}", 
+                               msg.get("id"), msg.containsKey("thumbnailUrl"), msg.get("thumbnailUrl"));
+                }
+            }
             
             logger.debug("Returning {} messages for user {} using a single optimized query", response.size(), id);
             return ResponseEntity.ok(response);
@@ -1209,7 +1429,7 @@ public class UserController {
             // Optimized single SQL query to get user's email and invitations
             String sql = "WITH user_email AS (" +
                         "  SELECT u.email FROM app_user u WHERE u.id = ?" +
-                        ")" +
+                        ") " +
                         "SELECT i.id, i.family_id, i.sender_id, i.status, i.created_at, i.expires_at, " +
                         "       f.name as family_name, " +
                         "       s.username as sender_username, s.first_name as sender_first_name, s.last_name as sender_last_name " +

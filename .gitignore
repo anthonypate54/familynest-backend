@@ -50,3 +50,20 @@ target/
 *.zip
 *.tar.gz
 *.rar
+
+### SQL Files - Keep only essential migration files ###
+# Ignore SQL files directly in src/main
+src/main/*.sql
+
+# Keep Flyway migration files
+!src/main/resources/db/migration/*.sql
+
+# Ignore SQL test files and backups
+src/main/resources/*test*.sql
+src/main/resources/*backup*.sql
+src/main/resources/large-ui-dataset.sql
+src/main/resources/test-*.sql
+src/main/resources/*optimized*.sql
+src/main/resources/performance_*.sql
+src/main/resources/db/migration_archive/
+src/main/resources/db/migration_backup/

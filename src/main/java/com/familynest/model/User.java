@@ -153,34 +153,12 @@ public class User {
     
     // Method to get active family ID (for backward compatibility)
     public Long getFamilyId() {
-        return familyMemberships.stream()
-                .filter(UserFamilyMembership::isActive)
-                .findFirst()
-                .map(UserFamilyMembership::getFamilyId)
-                .orElse(null);
+        throw new UnsupportedOperationException("This method is no longer supported - use userFamilyMembershipRepository.findActiveFamilyIdByUserId(userId) instead");
     }
     
     // Method to set active family ID (for backward compatibility)
     public void setFamilyId(Long familyId) {
-        // This is maintained for backward compatibility
-        if (familyId == null) {
-            return;
-        }
-        
-        // Check if already a member of this family
-        UserFamilyMembership existingMembership = familyMemberships.stream()
-                .filter(m -> familyId.equals(m.getFamilyId()))
-                .findFirst()
-                .orElse(null);
-                
-        if (existingMembership != null) {
-            // Set this membership as active
-            familyMemberships.forEach(m -> m.setActive(false));
-            existingMembership.setActive(true);
-        } else {
-            // Add new membership and set as active
-            addFamilyMembership(familyId, true);
-        }
+        throw new UnsupportedOperationException("This method is no longer supported - manage UserFamilyMembership relationships directly");
     }
     
     // Get the family this user has created/owns (if any)

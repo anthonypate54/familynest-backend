@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "user_member_message_settings")
+@Table(name = "user_member_message_settings", schema = "public")
 @IdClass(UserMemberMessageSettingsId.class)
 public class UserMemberMessageSettings {
 

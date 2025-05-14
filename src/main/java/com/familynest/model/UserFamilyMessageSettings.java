@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  * Uses a composite key of user_id and family_id.
  */
 @Entity
-@Table(name = "user_family_message_settings")
+@Table(name = "user_family_message_settings", schema = "public")
 @IdClass(UserFamilyMessageSettingsId.class)
 public class UserFamilyMessageSettings {
     

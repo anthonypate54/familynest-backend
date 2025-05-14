@@ -1,0 +1,197 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------< com.familynest:familynest-backend >------------------
+[INFO] Building familynest-backend 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] >>> spring-boot:3.2.5:run (default-cli) > test-compile @ familynest-backend >>>
+[WARNING] The artifact org.hibernate:hibernate-jcache:jar:6.4.4.Final has been relocated to org.hibernate.orm:hibernate-jcache:jar:6.4.4.Final
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ familynest-backend ---
+[INFO] Copying 4 resources from src/main/resources to target/classes
+[INFO] Copying 43 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ familynest-backend ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ familynest-backend ---
+[INFO] Copying 7 resources from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ familynest-backend ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] <<< spring-boot:3.2.5:run (default-cli) < test-compile @ familynest-backend <<<
+[INFO] 
+[INFO] 
+[INFO] --- spring-boot:3.2.5:run (default-cli) @ familynest-backend ---
+[INFO] Attaching agents: []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+ :: Spring Boot ::                (v3.2.5)
+
+2025-05-11T13:16:45.245-07:00  INFO 86032 --- [           main] c.f.FamilynestBackendApplication         : Starting FamilynestBackendApplication using Java 20.0.2 with PID 86032 (/Users/Anthony/projects/familynest-project/familynest-backend/target/classes started by Anthony in /Users/Anthony/projects/familynest-project/familynest-backend)
+2025-05-11T13:16:45.246-07:00 DEBUG 86032 --- [           main] c.f.FamilynestBackendApplication         : Running with Spring Boot v3.2.5, Spring v6.1.6
+2025-05-11T13:16:45.247-07:00  INFO 86032 --- [           main] c.f.FamilynestBackendApplication         : The following 1 profile is active: "testdb"
+2025-05-11T13:16:46.607-07:00  INFO 86032 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2025-05-11T13:16:46.619-07:00  INFO 86032 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2025-05-11T13:16:46.619-07:00  INFO 86032 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.20]
+2025-05-11T13:16:46.664-07:00  INFO 86032 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2025-05-11T13:16:46.664-07:00  INFO 86032 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1389 ms
+2025-05-11T13:16:46.673-07:00  INFO 86032 --- [           main] com.familynest.auth.AuthUtil             : AuthUtil initialized with expiration time: 86400000 ms
+2025-05-11T13:16:46.729-07:00  INFO 86032 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2025-05-11T13:16:46.836-07:00  INFO 86032 --- [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@37d3e140
+2025-05-11T13:16:46.837-07:00  INFO 86032 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2025-05-11T13:16:46.896-07:00  INFO 86032 --- [           main] o.f.c.internal.license.VersionPrinter    : Flyway Community Edition 9.22.3 by Redgate
+2025-05-11T13:16:46.896-07:00  INFO 86032 --- [           main] o.f.c.internal.license.VersionPrinter    : See release notes here: https://rd.gt/416ObMi
+2025-05-11T13:16:46.896-07:00  INFO 86032 --- [           main] o.f.c.internal.license.VersionPrinter    : 
+2025-05-11T13:16:46.898-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning for classpath resources at 'classpath:db/callback' ...
+2025-05-11T13:16:46.898-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Determining location urls for classpath:db/callback using ClassLoader TomcatEmbeddedWebappClassLoader
+  context: ROOT
+  delegate: true
+----------> Parent Classloader:
+jdk.internal.loader.ClassLoaders$AppClassLoader@7e32c033
+ ...
+2025-05-11T13:16:46.898-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Unable to resolve location classpath:db/callback.
+2025-05-11T13:16:46.898-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning for classpath resources at 'classpath:db/migration' ...
+2025-05-11T13:16:46.898-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Determining location urls for classpath:db/migration using ClassLoader TomcatEmbeddedWebappClassLoader
+  context: ROOT
+  delegate: true
+----------> Parent Classloader:
+jdk.internal.loader.ClassLoaders$AppClassLoader@7e32c033
+ ...
+2025-05-11T13:16:46.898-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning URL: file:/Users/Anthony/projects/familynest-project/familynest-backend/target/classes/db/migration
+2025-05-11T13:16:46.899-07:00 DEBUG 86032 --- [           main] i.s.c.FileSystemClassPathLocationScanner : Scanning starting at classpath root in filesystem: /Users/Anthony/projects/familynest-project/familynest-backend/target/classes/
+2025-05-11T13:16:46.899-07:00 DEBUG 86032 --- [           main] i.s.c.FileSystemClassPathLocationScanner : Scanning for resources in path: /Users/Anthony/projects/familynest-project/familynest-backend/target/classes/db/migration (db/migration)
+2025-05-11T13:16:46.900-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Found resource: db/migration/V1__Initial_schema.sql
+2025-05-11T13:16:46.900-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning for classes at classpath:db/migration
+2025-05-11T13:16:46.902-07:00 DEBUG 86032 --- [           main] o.f.c.i.resource.ResourceNameValidator   : Validating V1__Initial_schema.sql
+2025-05-11T13:16:46.906-07:00  INFO 86032 --- [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:5432/familynest_test (PostgreSQL 16.8)
+2025-05-11T13:16:46.906-07:00 DEBUG 86032 --- [           main] org.flywaydb.core.FlywayExecutor         : Driver: PostgreSQL JDBC Driver 42.6.2
+2025-05-11T13:16:46.907-07:00 DEBUG 86032 --- [           main] org.flywaydb.core.FlywayExecutor         : DDL Transactions Supported: true
+2025-05-11T13:16:46.908-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.SchemaHistoryFactory           : Schemas: 
+2025-05-11T13:16:46.908-07:00 DEBUG 86032 --- [           main] o.f.c.i.s.SchemaHistoryFactory           : Default schema: null
+2025-05-11T13:16:46.911-07:00  WARN 86032 --- [           main] o.f.c.internal.database.base.Database    : Flyway upgrade recommended: PostgreSQL 16.8 is newer than this version of Flyway and support has not been tested. The latest supported version of PostgreSQL is 15.
+2025-05-11T13:16:46.912-07:00 DEBUG 86032 --- [           main] o.f.c.i.c.SqlScriptCallbackFactory       : Scanning for SQL callbacks ...
+2025-05-11T13:16:46.918-07:00 DEBUG 86032 --- [           main] o.f.core.internal.command.DbSchemas      : Skipping creation of existing schema: "public"
+2025-05-11T13:16:46.938-07:00 DEBUG 86032 --- [           main] o.f.core.internal.scanner.Scanner        : Filtering out resource: db/migration/V1__Initial_schema.sql (filename: V1__Initial_schema.sql)
+2025-05-11T13:16:46.939-07:00 DEBUG 86032 --- [           main] o.f.core.internal.scanner.Scanner        : Filtering out resource: db/migration/V1__Initial_schema.sql (filename: V1__Initial_schema.sql)
+2025-05-11T13:16:46.945-07:00  INFO 86032 --- [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 1
+2025-05-11T13:16:46.945-07:00  WARN 86032 --- [           main] o.f.core.internal.command.DbMigrate      : outOfOrder mode is active. Migration of schema "public" may not be reproducible.
+2025-05-11T13:16:46.946-07:00  INFO 86032 --- [           main] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2025-05-11T13:16:46.949-07:00 DEBUG 86032 --- [           main] org.flywaydb.core.FlywayExecutor         : Memory usage: 34 of 94M
+2025-05-11T13:16:47.004-07:00  INFO 86032 --- [           main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2025-05-11T13:16:47.043-07:00  INFO 86032 --- [           main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.4.4.Final
+2025-05-11T13:16:47.067-07:00  INFO 86032 --- [           main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2025-05-11T13:16:47.264-07:00  WARN 86032 --- [           main] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2025-05-11T13:16:48.112-07:00  INFO 86032 --- [           main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2025-05-11T13:16:48.615-07:00 DEBUG 86032 --- [           main] com.familynest.auth.AuthFilter           : Filter 'filterRegistrationBean' configured for use
+2025-05-11T13:16:49.163-07:00 TRACE 86032 --- [           main] eGlobalAuthenticationAutowiredConfigurer : Eagerly initializing {securityConfig=com.familynest.config.SecurityConfig$$SpringCGLIB$$0@c04a1ca}
+2025-05-11T13:16:49.284-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.CommentController:
+	{GET [/api/messages/comments/{commentId}/replies]}: getCommentReplies(Long)
+	{PUT [/api/messages/comments/{commentId}]}: updateComment(Long,String,Map,HttpServletRequest)
+	{DELETE [/api/messages/comments/{commentId}]}: deleteComment(Long,String,HttpServletRequest)
+	{GET [/api/messages/{messageId}/comments]}: getComments(Long,int,int)
+	{POST [/api/messages/{messageId}/comments]}: addComment(Long,Map,HttpServletRequest)
+2025-05-11T13:16:49.291-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.MemberMessagePreferencesController:
+	{GET [/api/member-message-preferences/{userId}]}: getMemberMessagePreferences(Long,String,HttpServletRequest)
+	{POST [/api/member-message-preferences/{userId}/update]}: updateMemberMessagePreferences(Long,String,Map,HttpServletRequest)
+2025-05-11T13:16:49.292-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.MessageController:
+	{GET [/api/messages/user/{userId}]}: getMessagesForUser(Long,int,int)
+2025-05-11T13:16:49.293-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.MessagePreferencesController:
+	{GET [/api/message-preferences/{userId}]}: getMessagePreferences(Long,String,HttpServletRequest)
+	{POST [/api/message-preferences/{userId}/update]}: updateMessagePreferences(Long,String,Map,HttpServletRequest)
+	{POST [/api/message-preferences/create-for-membership]}: createForMembership(Map)
+2025-05-11T13:16:49.295-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.ReactionController:
+	{DELETE [/api/messages/{messageId}/reactions/{reactionType}]}: removeReaction(Long,String,String,HttpServletRequest)
+	{GET [/api/messages/{messageId}/reactions]}: getReactions(Long)
+	{POST [/api/messages/{messageId}/reactions]}: addReaction(Long,String,Map,HttpServletRequest)
+2025-05-11T13:16:49.296-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.TestUploadController:
+	{GET [/api/test/photo-test]}: testPhotoEndpoint()
+	{POST [/api/test/upload-test]}: testPhotoUpload(MultipartFile)
+2025-05-11T13:16:49.301-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.UserController:
+	{GET [/api/users/test]}: testEndpoint(HttpServletRequest)
+	{GET [/api/users/{id}]}: getUserById(Long)
+	{POST [/api/users], consumes [multipart/form-data]}: createUser(String,MultipartFile)
+	{POST [/api/users/login]}: loginUser(Map)
+	{POST [/api/users/{id}/update-photo]}: updatePhoto(Long,MultipartFile)
+	{POST [/api/users/{id}/create-family]}: createFamily(Long,String,Map,HttpServletRequest)
+	{POST [/api/users/{id}/join-family/{familyId}]}: joinFamily(Long,Long)
+	{POST [/api/users/{id}/messages], consumes [multipart/form-data]}: postMessage(Long,String,MultipartFile,String,String)
+	{GET [/api/users/{id}/messages]}: getMessages(Long)
+	{GET [/api/users/{id}/family-members]}: getFamilyMembers(Long,String)
+	{POST [/api/users/{id}/leave-family]}: leaveFamily(Long)
+	{GET [/api/users/current]}: getCurrentUser()
+	{GET [/api/users/{id}/families]}: getUserFamilies(Long)
+	{POST [/api/users/fix-family-memberships]}: fixFamilyMemberships()
+	{POST [/api/users/{id}/profile]}: updateUserProfile(Long,Map)
+	{POST [/api/users/families/{familyId}/update]}: updateFamily(Long,String,Map)
+	{GET [/api/users/invitations]}: getInvitations(String)
+	{GET [/api/users/photos/{filename:.+}]}: servePhoto(String,HttpServletRequest)
+2025-05-11T13:16:49.305-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.ViewTrackingController:
+	{POST [/api/messages/{messageId}/views]}: markMessageAsViewed(Long,String,HttpServletRequest)
+	{GET [/api/messages/{messageId}/views]}: getMessageViews(Long)
+	{GET [/api/messages/{messageId}/engagement]}: getMessageEngagementData(Long,HttpServletRequest)
+	{GET [/api/messages/{messageId}/views/check]}: checkIfMessageViewed(Long,String,HttpServletRequest)
+	{GET [/api/messages/batch-engagement]}: getBatchMessageEngagementData(List,HttpServletRequest)
+2025-05-11T13:16:49.310-07:00 TRACE 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	o.s.b.a.w.s.e.BasicErrorController:
+	{ [/error]}: error(HttpServletRequest)
+	{ [/error], produces [text/html]}: errorHtml(HttpServletRequest,HttpServletResponse)
+2025-05-11T13:16:49.312-07:00 DEBUG 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 41 mappings in 'requestMappingHandlerMapping'
+2025-05-11T13:16:49.317-07:00 DEBUG 86032 --- [           main] o.s.w.s.h.BeanNameUrlHandlerMapping      : Detected 0 mappings in 'beanNameHandlerMapping'
+2025-05-11T13:16:49.322-07:00 TRACE 86032 --- [           main] o.s.w.s.f.support.RouterFunctionMapping  : 0 RouterFunction(s) in 'routerFunctionMapping'
+2025-05-11T13:16:49.328-07:00 DEBUG 86032 --- [           main] com.familynest.config.SecurityConfig     : Configuring security filter chain
+2025-05-11T13:16:49.328-07:00 DEBUG 86032 --- [           main] com.familynest.config.SecurityConfig     : Configuring CORS
+2025-05-11T13:16:49.329-07:00 DEBUG 86032 --- [           main] com.familynest.config.SecurityConfig     : Configuring session management
+2025-05-11T13:16:49.333-07:00 DEBUG 86032 --- [           main] com.familynest.config.SecurityConfig     : Configuring authorization
+2025-05-11T13:16:49.333-07:00 DEBUG 86032 --- [           main] com.familynest.config.SecurityConfig     : Configuring security headers
+2025-05-11T13:16:49.349-07:00  INFO 86032 --- [           main] o.s.s.web.DefaultSecurityFilterChain     : Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@4bdb5933, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@75931d62, org.springframework.security.web.context.SecurityContextHolderFilter@29957fe0, org.springframework.security.web.header.HeaderWriterFilter@761b4581, org.springframework.web.filter.CorsFilter@6e26d0b3, org.springframework.security.web.authentication.logout.LogoutFilter@11a0e10, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@5d98216c, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@76312df9, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@4ae8de09, org.springframework.security.web.session.SessionManagementFilter@571f6b61, org.springframework.security.web.access.ExceptionTranslationFilter@4ff4478, org.springframework.security.web.access.intercept.AuthorizationFilter@b420d9e]
+2025-05-11T13:16:49.389-07:00 DEBUG 86032 --- [           main] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2025-05-11T13:16:49.416-07:00 DEBUG 86032 --- [           main] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2025-05-11T13:16:49.601-07:00  WARN 86032 --- [           main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'
+2025-05-11T13:16:49.614-07:00  INFO 86032 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2025-05-11T13:16:49.616-07:00  INFO 86032 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+2025-05-11T13:16:49.625-07:00  INFO 86032 --- [           main] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2025-05-11T13:16:49.639-07:00 ERROR 86032 --- [           main] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Web server failed to start. Port 8080 was already in use.
+
+Action:
+
+Identify and stop the process that's listening on port 8080 or configure this application to listen on another port.
+
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  6.768 s
+[INFO] Finished at: 2025-05-11T13:16:49-07:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:3.2.5:run (default-cli) on project familynest-backend: Process terminated with exit code: 1 -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException

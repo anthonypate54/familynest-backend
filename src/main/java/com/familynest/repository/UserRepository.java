@@ -16,15 +16,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(@Param("email") String email);
     
     // Replace the direct familyId access with a query that joins through the UserFamilyMembership table
-    @Query("SELECT u FROM User u JOIN u.familyMemberships m WHERE m.familyId = :familyId")
+    @Query(value = "SELECT u.* FROM app_user u JOIN user_family_membership m ON u.id = m.user_id WHERE m.family_id = :familyId", nativeQuery = true)
     List<User> findByFamilyId(@Param("familyId") Long familyId);
     
-    // Find users who are members of a specific family
-    @Query("SELECT u FROM User u JOIN u.familyMemberships m WHERE m.familyId = :familyId")
+    // Find users who are members of a specific family - using native SQL to avoid lazy loading issues
+    @Query(value = "SELECT u.* FROM app_user u JOIN user_family_membership m ON u.id = m.user_id WHERE m.family_id = :familyId", nativeQuery = true)
     List<User> findMembersOfFamily(@Param("familyId") Long familyId);
     
     // Find users who have created (own) a family
-    @Query("SELECT u FROM User u WHERE u.ownedFamily IS NOT NULL")
+    @Query(value = "SELECT u.* FROM app_user u JOIN family f ON u.id = f.created_by WHERE f.created_by IS NOT NULL", nativeQuery = true)
     List<User> findFamilyOwners();
     
     // Also make this case-insensitive

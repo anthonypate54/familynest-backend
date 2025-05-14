@@ -1,0 +1,315 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------< com.familynest:familynest-backend >------------------
+[INFO] Building familynest-backend 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] >>> spring-boot:3.2.5:run (default-cli) > test-compile @ familynest-backend >>>
+[WARNING] The artifact org.hibernate:hibernate-jcache:jar:6.4.4.Final has been relocated to org.hibernate.orm:hibernate-jcache:jar:6.4.4.Final
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ familynest-backend ---
+[INFO] Copying 4 resources from src/main/resources to target/classes
+[INFO] Copying 44 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ familynest-backend ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ familynest-backend ---
+[INFO] Copying 7 resources from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ familynest-backend ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] <<< spring-boot:3.2.5:run (default-cli) < test-compile @ familynest-backend <<<
+[INFO] 
+[INFO] 
+[INFO] --- spring-boot:3.2.5:run (default-cli) @ familynest-backend ---
+[INFO] Attaching agents: []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+ :: Spring Boot ::                (v3.2.5)
+
+2025-05-11T13:30:20.841-07:00  INFO 91831 --- [           main] c.f.FamilynestBackendApplication         : Starting FamilynestBackendApplication using Java 20.0.2 with PID 91831 (/Users/Anthony/projects/familynest-project/familynest-backend/target/classes started by Anthony in /Users/Anthony/projects/familynest-project/familynest-backend)
+2025-05-11T13:30:20.843-07:00 DEBUG 91831 --- [           main] c.f.FamilynestBackendApplication         : Running with Spring Boot v3.2.5, Spring v6.1.6
+2025-05-11T13:30:20.843-07:00  INFO 91831 --- [           main] c.f.FamilynestBackendApplication         : The following 1 profile is active: "testdb"
+2025-05-11T13:30:21.937-07:00  INFO 91831 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2025-05-11T13:30:21.946-07:00  INFO 91831 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2025-05-11T13:30:21.947-07:00  INFO 91831 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.20]
+2025-05-11T13:30:21.983-07:00  INFO 91831 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2025-05-11T13:30:21.984-07:00  INFO 91831 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1114 ms
+2025-05-11T13:30:21.992-07:00  INFO 91831 --- [           main] com.familynest.auth.AuthUtil             : AuthUtil initialized with expiration time: 86400000 ms
+2025-05-11T13:30:22.041-07:00  INFO 91831 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2025-05-11T13:30:22.132-07:00  INFO 91831 --- [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@3e53c4ad
+2025-05-11T13:30:22.133-07:00  INFO 91831 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2025-05-11T13:30:22.184-07:00  INFO 91831 --- [           main] o.f.c.internal.license.VersionPrinter    : Flyway Community Edition 9.22.3 by Redgate
+2025-05-11T13:30:22.184-07:00  INFO 91831 --- [           main] o.f.c.internal.license.VersionPrinter    : See release notes here: https://rd.gt/416ObMi
+2025-05-11T13:30:22.184-07:00  INFO 91831 --- [           main] o.f.c.internal.license.VersionPrinter    : 
+2025-05-11T13:30:22.186-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning for classpath resources at 'classpath:db/callback' ...
+2025-05-11T13:30:22.186-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Determining location urls for classpath:db/callback using ClassLoader TomcatEmbeddedWebappClassLoader
+  context: ROOT
+  delegate: true
+----------> Parent Classloader:
+jdk.internal.loader.ClassLoaders$AppClassLoader@7e32c033
+ ...
+2025-05-11T13:30:22.186-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Unable to resolve location classpath:db/callback.
+2025-05-11T13:30:22.186-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning for classpath resources at 'classpath:db/migration' ...
+2025-05-11T13:30:22.186-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Determining location urls for classpath:db/migration using ClassLoader TomcatEmbeddedWebappClassLoader
+  context: ROOT
+  delegate: true
+----------> Parent Classloader:
+jdk.internal.loader.ClassLoaders$AppClassLoader@7e32c033
+ ...
+2025-05-11T13:30:22.186-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning URL: file:/Users/Anthony/projects/familynest-project/familynest-backend/target/classes/db/migration
+2025-05-11T13:30:22.187-07:00 DEBUG 91831 --- [           main] i.s.c.FileSystemClassPathLocationScanner : Scanning starting at classpath root in filesystem: /Users/Anthony/projects/familynest-project/familynest-backend/target/classes/
+2025-05-11T13:30:22.187-07:00 DEBUG 91831 --- [           main] i.s.c.FileSystemClassPathLocationScanner : Scanning for resources in path: /Users/Anthony/projects/familynest-project/familynest-backend/target/classes/db/migration (db/migration)
+2025-05-11T13:30:22.188-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Found resource: db/migration/V1__Initial_schema.sql
+2025-05-11T13:30:22.188-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Found resource: db/migration/V2__Add_status_to_invitation.sql
+2025-05-11T13:30:22.188-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.classpath.ClassPathScanner     : Scanning for classes at classpath:db/migration
+2025-05-11T13:30:22.190-07:00 DEBUG 91831 --- [           main] o.f.c.i.resource.ResourceNameValidator   : Validating V1__Initial_schema.sql
+2025-05-11T13:30:22.190-07:00 DEBUG 91831 --- [           main] o.f.c.i.resource.ResourceNameValidator   : Validating V2__Add_status_to_invitation.sql
+2025-05-11T13:30:22.194-07:00  INFO 91831 --- [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:5432/familynest_test (PostgreSQL 16.8)
+2025-05-11T13:30:22.194-07:00 DEBUG 91831 --- [           main] org.flywaydb.core.FlywayExecutor         : Driver: PostgreSQL JDBC Driver 42.6.2
+2025-05-11T13:30:22.194-07:00 DEBUG 91831 --- [           main] org.flywaydb.core.FlywayExecutor         : DDL Transactions Supported: true
+2025-05-11T13:30:22.195-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.SchemaHistoryFactory           : Schemas: 
+2025-05-11T13:30:22.195-07:00 DEBUG 91831 --- [           main] o.f.c.i.s.SchemaHistoryFactory           : Default schema: null
+2025-05-11T13:30:22.199-07:00  WARN 91831 --- [           main] o.f.c.internal.database.base.Database    : Flyway upgrade recommended: PostgreSQL 16.8 is newer than this version of Flyway and support has not been tested. The latest supported version of PostgreSQL is 15.
+2025-05-11T13:30:22.200-07:00 DEBUG 91831 --- [           main] o.f.c.i.c.SqlScriptCallbackFactory       : Scanning for SQL callbacks ...
+2025-05-11T13:30:22.205-07:00 DEBUG 91831 --- [           main] o.f.core.internal.command.DbSchemas      : Skipping creation of existing schema: "public"
+2025-05-11T13:30:22.225-07:00 DEBUG 91831 --- [           main] o.f.core.internal.scanner.Scanner        : Filtering out resource: db/migration/V1__Initial_schema.sql (filename: V1__Initial_schema.sql)
+2025-05-11T13:30:22.225-07:00 DEBUG 91831 --- [           main] o.f.core.internal.scanner.Scanner        : Filtering out resource: db/migration/V2__Add_status_to_invitation.sql (filename: V2__Add_status_to_invitation.sql)
+2025-05-11T13:30:22.225-07:00 DEBUG 91831 --- [           main] o.f.core.internal.scanner.Scanner        : Filtering out resource: db/migration/V1__Initial_schema.sql (filename: V1__Initial_schema.sql)
+2025-05-11T13:30:22.225-07:00 DEBUG 91831 --- [           main] o.f.core.internal.scanner.Scanner        : Filtering out resource: db/migration/V2__Add_status_to_invitation.sql (filename: V2__Add_status_to_invitation.sql)
+2025-05-11T13:30:22.232-07:00  INFO 91831 --- [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 2
+2025-05-11T13:30:22.232-07:00  WARN 91831 --- [           main] o.f.core.internal.command.DbMigrate      : outOfOrder mode is active. Migration of schema "public" may not be reproducible.
+2025-05-11T13:30:22.233-07:00  INFO 91831 --- [           main] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2025-05-11T13:30:22.235-07:00 DEBUG 91831 --- [           main] org.flywaydb.core.FlywayExecutor         : Memory usage: 34 of 94M
+2025-05-11T13:30:22.292-07:00  INFO 91831 --- [           main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2025-05-11T13:30:22.328-07:00  INFO 91831 --- [           main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.4.4.Final
+2025-05-11T13:30:22.350-07:00  INFO 91831 --- [           main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2025-05-11T13:30:22.522-07:00  WARN 91831 --- [           main] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2025-05-11T13:30:23.307-07:00  INFO 91831 --- [           main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2025-05-11T13:30:23.766-07:00 DEBUG 91831 --- [           main] com.familynest.auth.AuthFilter           : Filter 'filterRegistrationBean' configured for use
+2025-05-11T13:30:24.228-07:00 TRACE 91831 --- [           main] eGlobalAuthenticationAutowiredConfigurer : Eagerly initializing {securityConfig=com.familynest.config.SecurityConfig$$SpringCGLIB$$0@7c7caff1}
+2025-05-11T13:30:24.319-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.CommentController:
+	{POST [/api/messages/{messageId}/comments]}: addComment(Long,Map,HttpServletRequest)
+	{GET [/api/messages/comments/{commentId}/replies]}: getCommentReplies(Long)
+	{PUT [/api/messages/comments/{commentId}]}: updateComment(Long,String,Map,HttpServletRequest)
+	{DELETE [/api/messages/comments/{commentId}]}: deleteComment(Long,String,HttpServletRequest)
+	{GET [/api/messages/{messageId}/comments]}: getComments(Long,int,int)
+2025-05-11T13:30:24.327-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.MemberMessagePreferencesController:
+	{GET [/api/member-message-preferences/{userId}]}: getMemberMessagePreferences(Long,String,HttpServletRequest)
+	{POST [/api/member-message-preferences/{userId}/update]}: updateMemberMessagePreferences(Long,String,Map,HttpServletRequest)
+2025-05-11T13:30:24.328-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.MessageController:
+	{GET [/api/messages/user/{userId}]}: getMessagesForUser(Long,int,int)
+2025-05-11T13:30:24.329-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.MessagePreferencesController:
+	{GET [/api/message-preferences/{userId}]}: getMessagePreferences(Long,String,HttpServletRequest)
+	{POST [/api/message-preferences/{userId}/update]}: updateMessagePreferences(Long,String,Map,HttpServletRequest)
+	{POST [/api/message-preferences/create-for-membership]}: createForMembership(Map)
+2025-05-11T13:30:24.331-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.ReactionController:
+	{POST [/api/messages/{messageId}/reactions]}: addReaction(Long,String,Map,HttpServletRequest)
+	{DELETE [/api/messages/{messageId}/reactions/{reactionType}]}: removeReaction(Long,String,String,HttpServletRequest)
+	{GET [/api/messages/{messageId}/reactions]}: getReactions(Long)
+2025-05-11T13:30:24.332-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.TestUploadController:
+	{GET [/api/test/photo-test]}: testPhotoEndpoint()
+	{POST [/api/test/upload-test]}: testPhotoUpload(MultipartFile)
+2025-05-11T13:30:24.338-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.UserController:
+	{GET [/api/users/test]}: testEndpoint(HttpServletRequest)
+	{GET [/api/users/{id}]}: getUserById(Long)
+	{POST [/api/users], consumes [multipart/form-data]}: createUser(String,MultipartFile)
+	{POST [/api/users/login]}: loginUser(Map)
+	{POST [/api/users/{id}/update-photo]}: updatePhoto(Long,MultipartFile)
+	{POST [/api/users/{id}/create-family]}: createFamily(Long,String,Map,HttpServletRequest)
+	{POST [/api/users/{id}/join-family/{familyId}]}: joinFamily(Long,Long)
+	{POST [/api/users/{id}/messages], consumes [multipart/form-data]}: postMessage(Long,String,MultipartFile,String,String)
+	{GET [/api/users/{id}/messages]}: getMessages(Long)
+	{GET [/api/users/{id}/family-members]}: getFamilyMembers(Long,String)
+	{POST [/api/users/{id}/leave-family]}: leaveFamily(Long)
+	{GET [/api/users/current]}: getCurrentUser()
+	{GET [/api/users/{id}/families]}: getUserFamilies(Long)
+	{POST [/api/users/fix-family-memberships]}: fixFamilyMemberships()
+	{POST [/api/users/{id}/profile]}: updateUserProfile(Long,Map)
+	{POST [/api/users/families/{familyId}/update]}: updateFamily(Long,String,Map)
+	{GET [/api/users/invitations]}: getInvitations(String)
+	{GET [/api/users/photos/{filename:.+}]}: servePhoto(String,HttpServletRequest)
+2025-05-11T13:30:24.342-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	c.f.c.ViewTrackingController:
+	{POST [/api/messages/{messageId}/views]}: markMessageAsViewed(Long,String,HttpServletRequest)
+	{GET [/api/messages/{messageId}/views]}: getMessageViews(Long)
+	{GET [/api/messages/{messageId}/engagement]}: getMessageEngagementData(Long,HttpServletRequest)
+	{GET [/api/messages/{messageId}/views/check]}: checkIfMessageViewed(Long,String,HttpServletRequest)
+	{GET [/api/messages/batch-engagement]}: getBatchMessageEngagementData(List,HttpServletRequest)
+2025-05-11T13:30:24.347-07:00 TRACE 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 
+	o.s.b.a.w.s.e.BasicErrorController:
+	{ [/error]}: error(HttpServletRequest)
+	{ [/error], produces [text/html]}: errorHtml(HttpServletRequest,HttpServletResponse)
+2025-05-11T13:30:24.350-07:00 DEBUG 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 41 mappings in 'requestMappingHandlerMapping'
+2025-05-11T13:30:24.355-07:00 DEBUG 91831 --- [           main] o.s.w.s.h.BeanNameUrlHandlerMapping      : Detected 0 mappings in 'beanNameHandlerMapping'
+2025-05-11T13:30:24.360-07:00 TRACE 91831 --- [           main] o.s.w.s.f.support.RouterFunctionMapping  : 0 RouterFunction(s) in 'routerFunctionMapping'
+2025-05-11T13:30:24.366-07:00 DEBUG 91831 --- [           main] com.familynest.config.SecurityConfig     : Configuring security filter chain
+2025-05-11T13:30:24.366-07:00 DEBUG 91831 --- [           main] com.familynest.config.SecurityConfig     : Configuring CORS
+2025-05-11T13:30:24.367-07:00 DEBUG 91831 --- [           main] com.familynest.config.SecurityConfig     : Configuring session management
+2025-05-11T13:30:24.371-07:00 DEBUG 91831 --- [           main] com.familynest.config.SecurityConfig     : Configuring authorization
+2025-05-11T13:30:24.372-07:00 DEBUG 91831 --- [           main] com.familynest.config.SecurityConfig     : Configuring security headers
+2025-05-11T13:30:24.386-07:00  INFO 91831 --- [           main] o.s.s.web.DefaultSecurityFilterChain     : Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@4c60d61, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@557de967, org.springframework.security.web.context.SecurityContextHolderFilter@e7283dd, org.springframework.security.web.header.HeaderWriterFilter@113366e7, org.springframework.web.filter.CorsFilter@e2448b4, org.springframework.security.web.authentication.logout.LogoutFilter@6f20adb6, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@3aecbab2, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@10e57077, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@50e9b5f4, org.springframework.security.web.session.SessionManagementFilter@687dc7e6, org.springframework.security.web.access.ExceptionTranslationFilter@3af64136, org.springframework.security.web.access.intercept.AuthorizationFilter@3f8c91c5]
+2025-05-11T13:30:24.422-07:00 DEBUG 91831 --- [           main] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2025-05-11T13:30:24.447-07:00 DEBUG 91831 --- [           main] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 0 @ExceptionHandler, 1 ResponseBodyAdvice
+2025-05-11T13:30:24.634-07:00  INFO 91831 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path ''
+2025-05-11T13:30:24.640-07:00 TRACE 91831 --- [           main] o.s.w.s.resource.ResourceUrlProvider     : No resource handling mappings found
+2025-05-11T13:30:24.641-07:00  INFO 91831 --- [           main] c.f.FamilynestBackendApplication         : Started FamilynestBackendApplication in 4.111 seconds (process running for 4.335)
+2025-05-11T13:30:32.664-07:00  INFO 91831 --- [0.0-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2025-05-11T13:30:32.664-07:00  INFO 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2025-05-11T13:30:32.664-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected org.springframework.web.multipart.support.StandardServletMultipartResolver@1cf44346
+2025-05-11T13:30:32.664-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected org.springframework.web.servlet.i18n.AcceptHeaderLocaleResolver@6a94ccde
+2025-05-11T13:30:32.664-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected org.springframework.web.servlet.theme.FixedThemeResolver@2f22049d
+2025-05-11T13:30:32.665-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected DefaultRequestToViewNameTranslator
+2025-05-11T13:30:32.665-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected SessionFlashMapManager
+2025-05-11T13:30:32.665-07:00 DEBUG 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : enableLoggingRequestDetails='false': request parameters and headers will be masked to prevent unsafe logging of potentially sensitive data
+2025-05-11T13:30:32.665-07:00  INFO 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2025-05-11T13:30:32.676-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Trying to match request against DefaultSecurityFilterChain [RequestMatcher=any request, Filters=[org.springframework.security.web.session.DisableEncodeUrlFilter@4c60d61, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@557de967, org.springframework.security.web.context.SecurityContextHolderFilter@e7283dd, org.springframework.security.web.header.HeaderWriterFilter@113366e7, org.springframework.web.filter.CorsFilter@e2448b4, org.springframework.security.web.authentication.logout.LogoutFilter@6f20adb6, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@3aecbab2, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@10e57077, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@50e9b5f4, org.springframework.security.web.session.SessionManagementFilter@687dc7e6, org.springframework.security.web.access.ExceptionTranslationFilter@3af64136, org.springframework.security.web.access.intercept.AuthorizationFilter@3f8c91c5]] (1/1)
+2025-05-11T13:30:32.676-07:00 DEBUG 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Securing POST /api/users/login
+2025-05-11T13:30:32.677-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking DisableEncodeUrlFilter (1/12)
+2025-05-11T13:30:32.677-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking WebAsyncManagerIntegrationFilter (2/12)
+2025-05-11T13:30:32.679-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking SecurityContextHolderFilter (3/12)
+2025-05-11T13:30:32.680-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking HeaderWriterFilter (4/12)
+2025-05-11T13:30:32.680-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking CorsFilter (5/12)
+2025-05-11T13:30:32.682-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking LogoutFilter (6/12)
+2025-05-11T13:30:32.682-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.s.w.a.logout.LogoutFilter            : Did not match request to Or [Ant [pattern='/logout', GET], Ant [pattern='/logout', POST], Ant [pattern='/logout', PUT], Ant [pattern='/logout', DELETE]]
+2025-05-11T13:30:32.682-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking RequestCacheAwareFilter (7/12)
+2025-05-11T13:30:32.682-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking SecurityContextHolderAwareRequestFilter (8/12)
+2025-05-11T13:30:32.683-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking AnonymousAuthenticationFilter (9/12)
+2025-05-11T13:30:32.683-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking SessionManagementFilter (10/12)
+2025-05-11T13:30:32.683-07:00 TRACE 91831 --- [0.0-8080-exec-1] .s.s.w.c.SupplierDeferredSecurityContext : Created SecurityContextImpl [Null authentication]
+2025-05-11T13:30:32.684-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to AnonymousAuthenticationToken [Principal=anonymousUser, Credentials=[PROTECTED], Authenticated=true, Details=WebAuthenticationDetails [RemoteIpAddress=0:0:0:0:0:0:0:1, SessionId=null], Granted Authorities=[ROLE_ANONYMOUS]]
+2025-05-11T13:30:32.684-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking ExceptionTranslationFilter (11/12)
+2025-05-11T13:30:32.684-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Invoking AuthorizationFilter (12/12)
+2025-05-11T13:30:32.684-07:00 TRACE 91831 --- [0.0-8080-exec-1] estMatcherDelegatingAuthorizationManager : Authorizing SecurityContextHolderAwareRequestWrapper[ org.springframework.security.web.header.HeaderWriterFilter$HeaderWriterRequest@1344a2a0]
+2025-05-11T13:30:32.685-07:00 TRACE 91831 --- [0.0-8080-exec-1] estMatcherDelegatingAuthorizationManager : Checking authorization on SecurityContextHolderAwareRequestWrapper[ org.springframework.security.web.header.HeaderWriterFilter$HeaderWriterRequest@1344a2a0] using org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer$$Lambda$1747/0x000000011af187e0@1d28b644
+2025-05-11T13:30:32.685-07:00 DEBUG 91831 --- [0.0-8080-exec-1] o.s.security.web.FilterChainProxy        : Secured POST /api/users/login
+2025-05-11T13:30:32.685-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           : Processing request for URI: /api/users/login
+2025-05-11T13:30:32.685-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           : Request method: POST
+2025-05-11T13:30:32.685-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           : Request headers:
+2025-05-11T13:30:32.686-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           :   host: localhost:8080
+2025-05-11T13:30:32.686-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           :   user-agent: curl/8.7.1
+2025-05-11T13:30:32.686-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           :   accept: */*
+2025-05-11T13:30:32.686-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           :   content-type: application/json
+2025-05-11T13:30:32.686-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           :   content-length: 56
+2025-05-11T13:30:32.686-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthFilter           : Allowing public request to: /api/users/login
+2025-05-11T13:30:32.687-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : POST "/api/users/login", parameters={}, headers={masked} in DispatcherServlet 'dispatcherServlet'
+2025-05-11T13:30:32.688-07:00 TRACE 91831 --- [0.0-8080-exec-1] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to com.familynest.controller.UserController#loginUser(Map)
+2025-05-11T13:30:33.012-07:00 TRACE 91831 --- [0.0-8080-exec-1] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json;charset=UTF-8" to [{email=heavy.user@example.com, password=user2123}]
+2025-05-11T13:30:33.018-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.method.HandlerMethod             : Arguments: [{email=heavy.user@example.com, password=user2123}]
+2025-05-11T13:30:33.018-07:00 DEBUG 91831 --- [0.0-8080-exec-1] c.familynest.controller.UserController   : Received login request for email: heavy.user@example.com
+2025-05-11T13:30:33.020-07:00  INFO 91831 --- [0.0-8080-exec-1] c.familynest.config.SqlStatementMonitor  : SQL QUERY #1: SELECT id, email, username, password, role FROM app_user WHERE LOWER(email) = ?
+2025-05-11T13:30:33.026-07:00  INFO 91831 --- [0.0-8080-exec-1] c.familynest.config.SqlStatementMonitor  : SQL QUERY #1 completed in 6ms
+2025-05-11T13:30:33.254-07:00 DEBUG 91831 --- [0.0-8080-exec-1] c.familynest.controller.UserController   : Login successful for email: heavy.user@example.com
+2025-05-11T13:30:33.255-07:00 DEBUG 91831 --- [0.0-8080-exec-1] com.familynest.auth.AuthUtil             : Generating token for userId: 888
+2025-05-11T13:30:33.314-07:00 DEBUG 91831 --- [0.0-8080-exec-1] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2025-05-11T13:30:33.314-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{role=USER, userId=888, token=eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTgzM30.QFX4KrnprJoPp2gUuwXsVY6CGCGqboPoy0JnTNWBH7k7LpkW3dojeH4z19K8mNJMU5PAYOtMOZ62CBdg939D2Q}]
+2025-05-11T13:30:33.323-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.s.w.header.writers.HstsHeaderWriter  : Not injecting HSTS header since it did not match request to [Is Secure]
+2025-05-11T13:30:33.326-07:00 TRACE 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : No view rendering, null ModelAndView returned.
+2025-05-11T13:30:33.327-07:00 DEBUG 91831 --- [0.0-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed 200 OK, headers={masked}
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Trying to match request against DefaultSecurityFilterChain [RequestMatcher=any request, Filters=[org.springframework.security.web.session.DisableEncodeUrlFilter@4c60d61, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@557de967, org.springframework.security.web.context.SecurityContextHolderFilter@e7283dd, org.springframework.security.web.header.HeaderWriterFilter@113366e7, org.springframework.web.filter.CorsFilter@e2448b4, org.springframework.security.web.authentication.logout.LogoutFilter@6f20adb6, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@3aecbab2, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@10e57077, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@50e9b5f4, org.springframework.security.web.session.SessionManagementFilter@687dc7e6, org.springframework.security.web.access.ExceptionTranslationFilter@3af64136, org.springframework.security.web.access.intercept.AuthorizationFilter@3f8c91c5]] (1/1)
+2025-05-11T13:30:40.692-07:00 DEBUG 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Securing POST /api/users/login
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking DisableEncodeUrlFilter (1/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking WebAsyncManagerIntegrationFilter (2/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking SecurityContextHolderFilter (3/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking HeaderWriterFilter (4/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking CorsFilter (5/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking LogoutFilter (6/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.s.w.a.logout.LogoutFilter            : Did not match request to Or [Ant [pattern='/logout', GET], Ant [pattern='/logout', POST], Ant [pattern='/logout', PUT], Ant [pattern='/logout', DELETE]]
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking RequestCacheAwareFilter (7/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking SecurityContextHolderAwareRequestFilter (8/12)
+2025-05-11T13:30:40.692-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking AnonymousAuthenticationFilter (9/12)
+2025-05-11T13:30:40.693-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking SessionManagementFilter (10/12)
+2025-05-11T13:30:40.693-07:00 TRACE 91831 --- [0.0-8080-exec-2] .s.s.w.c.SupplierDeferredSecurityContext : Created SecurityContextImpl [Null authentication]
+2025-05-11T13:30:40.693-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to AnonymousAuthenticationToken [Principal=anonymousUser, Credentials=[PROTECTED], Authenticated=true, Details=WebAuthenticationDetails [RemoteIpAddress=0:0:0:0:0:0:0:1, SessionId=null], Granted Authorities=[ROLE_ANONYMOUS]]
+2025-05-11T13:30:40.693-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking ExceptionTranslationFilter (11/12)
+2025-05-11T13:30:40.693-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Invoking AuthorizationFilter (12/12)
+2025-05-11T13:30:40.693-07:00 TRACE 91831 --- [0.0-8080-exec-2] estMatcherDelegatingAuthorizationManager : Authorizing SecurityContextHolderAwareRequestWrapper[ org.springframework.security.web.header.HeaderWriterFilter$HeaderWriterRequest@4f62f01f]
+2025-05-11T13:30:40.693-07:00 TRACE 91831 --- [0.0-8080-exec-2] estMatcherDelegatingAuthorizationManager : Checking authorization on SecurityContextHolderAwareRequestWrapper[ org.springframework.security.web.header.HeaderWriterFilter$HeaderWriterRequest@4f62f01f] using org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer$$Lambda$1747/0x000000011af187e0@1d28b644
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] o.s.security.web.FilterChainProxy        : Secured POST /api/users/login
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           : Processing request for URI: /api/users/login
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           : Request method: POST
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           : Request headers:
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           :   host: localhost:8080
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           :   user-agent: curl/8.7.1
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           :   accept: */*
+2025-05-11T13:30:40.693-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           :   content-type: application/json
+2025-05-11T13:30:40.694-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           :   content-length: 56
+2025-05-11T13:30:40.694-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthFilter           : Allowing public request to: /api/users/login
+2025-05-11T13:30:40.694-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.web.servlet.DispatcherServlet        : POST "/api/users/login", parameters={}, headers={masked} in DispatcherServlet 'dispatcherServlet'
+2025-05-11T13:30:40.694-07:00 TRACE 91831 --- [0.0-8080-exec-2] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to com.familynest.controller.UserController#loginUser(Map)
+2025-05-11T13:30:40.695-07:00 TRACE 91831 --- [0.0-8080-exec-2] m.m.a.RequestResponseBodyMethodProcessor : Read "application/json;charset=UTF-8" to [{email=heavy.user@example.com, password=user2123}]
+2025-05-11T13:30:40.695-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.web.method.HandlerMethod             : Arguments: [{email=heavy.user@example.com, password=user2123}]
+2025-05-11T13:30:40.695-07:00 DEBUG 91831 --- [0.0-8080-exec-2] c.familynest.controller.UserController   : Received login request for email: heavy.user@example.com
+2025-05-11T13:30:40.695-07:00  INFO 91831 --- [0.0-8080-exec-2] c.familynest.config.SqlStatementMonitor  : SQL QUERY #2: SELECT id, email, username, password, role FROM app_user WHERE LOWER(email) = ?
+2025-05-11T13:30:40.696-07:00  INFO 91831 --- [0.0-8080-exec-2] c.familynest.config.SqlStatementMonitor  : SQL QUERY #2 completed in 0ms
+2025-05-11T13:30:40.773-07:00 DEBUG 91831 --- [0.0-8080-exec-2] c.familynest.controller.UserController   : Login successful for email: heavy.user@example.com
+2025-05-11T13:30:40.773-07:00 DEBUG 91831 --- [0.0-8080-exec-2] com.familynest.auth.AuthUtil             : Generating token for userId: 888
+2025-05-11T13:30:40.774-07:00 DEBUG 91831 --- [0.0-8080-exec-2] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2025-05-11T13:30:40.774-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [{role=USER, userId=888, token=eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTg0MH0.Z1SDFJ1_K8yPnNGtOVkYetBrzOhSg7lMznDcb3VWoU33iyFpwdAiSHJzojBJwYehTOtwNBTd2B2oiC3QSdeZOA}]
+2025-05-11T13:30:40.774-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.s.w.header.writers.HstsHeaderWriter  : Not injecting HSTS header since it did not match request to [Is Secure]
+2025-05-11T13:30:40.775-07:00 TRACE 91831 --- [0.0-8080-exec-2] o.s.web.servlet.DispatcherServlet        : No view rendering, null ModelAndView returned.
+2025-05-11T13:30:40.775-07:00 DEBUG 91831 --- [0.0-8080-exec-2] o.s.web.servlet.DispatcherServlet        : Completed 200 OK, headers={masked}
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Trying to match request against DefaultSecurityFilterChain [RequestMatcher=any request, Filters=[org.springframework.security.web.session.DisableEncodeUrlFilter@4c60d61, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@557de967, org.springframework.security.web.context.SecurityContextHolderFilter@e7283dd, org.springframework.security.web.header.HeaderWriterFilter@113366e7, org.springframework.web.filter.CorsFilter@e2448b4, org.springframework.security.web.authentication.logout.LogoutFilter@6f20adb6, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@3aecbab2, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@10e57077, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@50e9b5f4, org.springframework.security.web.session.SessionManagementFilter@687dc7e6, org.springframework.security.web.access.ExceptionTranslationFilter@3af64136, org.springframework.security.web.access.intercept.AuthorizationFilter@3f8c91c5]] (1/1)
+2025-05-11T13:30:40.790-07:00 DEBUG 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Securing GET /api/users/invitations
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking DisableEncodeUrlFilter (1/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking WebAsyncManagerIntegrationFilter (2/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking SecurityContextHolderFilter (3/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking HeaderWriterFilter (4/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking CorsFilter (5/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking LogoutFilter (6/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.s.w.a.logout.LogoutFilter            : Did not match request to Or [Ant [pattern='/logout', GET], Ant [pattern='/logout', POST], Ant [pattern='/logout', PUT], Ant [pattern='/logout', DELETE]]
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking RequestCacheAwareFilter (7/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking SecurityContextHolderAwareRequestFilter (8/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking AnonymousAuthenticationFilter (9/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking SessionManagementFilter (10/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] .s.s.w.c.SupplierDeferredSecurityContext : Created SecurityContextImpl [Null authentication]
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to AnonymousAuthenticationToken [Principal=anonymousUser, Credentials=[PROTECTED], Authenticated=true, Details=WebAuthenticationDetails [RemoteIpAddress=0:0:0:0:0:0:0:1, SessionId=null], Granted Authorities=[ROLE_ANONYMOUS]]
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking ExceptionTranslationFilter (11/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Invoking AuthorizationFilter (12/12)
+2025-05-11T13:30:40.790-07:00 TRACE 91831 --- [0.0-8080-exec-4] estMatcherDelegatingAuthorizationManager : Authorizing SecurityContextHolderAwareRequestWrapper[ org.springframework.security.web.header.HeaderWriterFilter$HeaderWriterRequest@7359e75d]
+2025-05-11T13:30:40.791-07:00 TRACE 91831 --- [0.0-8080-exec-4] estMatcherDelegatingAuthorizationManager : Checking authorization on SecurityContextHolderAwareRequestWrapper[ org.springframework.security.web.header.HeaderWriterFilter$HeaderWriterRequest@7359e75d] using org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer$$Lambda$1747/0x000000011af187e0@1d28b644
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] o.s.security.web.FilterChainProxy        : Secured GET /api/users/invitations
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           : Processing request for URI: /api/users/invitations
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           : Request method: GET
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           : Request headers:
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           :   host: localhost:8080
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           :   user-agent: curl/8.7.1
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           :   accept: */*
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           :   authorization: Bearer eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTg0MH0.Z1SDFJ1_K8yPnNGtOVkYetBrzOhSg7lMznDcb3VWoU33iyFpwdAiSHJzojBJwYehTOtwNBTd2B2oiC3QSdeZOA
+2025-05-11T13:30:40.791-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthUtil             : Validating token: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTg0MH0.Z1SDFJ1_K8yPnNGtOVkYetBrzOhSg7lMznDcb3VWoU33iyFpwdAiSHJzojBJwYehTOtwNBTd2B2oiC3QSdeZOA
+2025-05-11T13:30:40.805-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthUtil             : Token validated successfully
+2025-05-11T13:30:40.805-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthUtil             : Extracting userId from token: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTg0MH0.Z1SDFJ1_K8yPnNGtOVkYetBrzOhSg7lMznDcb3VWoU33iyFpwdAiSHJzojBJwYehTOtwNBTd2B2oiC3QSdeZOA
+2025-05-11T13:30:40.806-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthUtil             : Extracting role from token: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTg0MH0.Z1SDFJ1_K8yPnNGtOVkYetBrzOhSg7lMznDcb3VWoU33iyFpwdAiSHJzojBJwYehTOtwNBTd2B2oiC3QSdeZOA
+2025-05-11T13:30:40.807-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           : Extracted userId: 888, role: USER
+2025-05-11T13:30:40.807-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthFilter           : Valid token for userId: 888, role: USER, proceeding to controller
+2025-05-11T13:30:40.807-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.web.servlet.DispatcherServlet        : GET "/api/users/invitations", parameters={}, headers={masked} in DispatcherServlet 'dispatcherServlet'
+2025-05-11T13:30:40.808-07:00 TRACE 91831 --- [0.0-8080-exec-4] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to com.familynest.controller.UserController#getInvitations(String)
+2025-05-11T13:30:40.812-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.web.method.HandlerMethod             : Arguments: [Bearer eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTg0MH0.Z1SDFJ1_K8yPnNGtOVkYetBrzOhSg7lMznDcb3VWoU33iyFpwdAiSHJzojBJwYehTOtwNBTd2B2oiC3QSdeZOA]
+2025-05-11T13:30:40.817-07:00 DEBUG 91831 --- [0.0-8080-exec-4] c.familynest.controller.UserController   : Received request to get invitations
+2025-05-11T13:30:40.817-07:00 DEBUG 91831 --- [0.0-8080-exec-4] com.familynest.auth.AuthUtil             : Extracting userId from token: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiI4ODgiLCJyb2xlIjoiVVNFUiIsImV4cCI6MTc0NzA4MTg0MH0.Z1SDFJ1_K8yPnNGtOVkYetBrzOhSg7lMznDcb3VWoU33iyFpwdAiSHJzojBJwYehTOtwNBTd2B2oiC3QSdeZOA
+2025-05-11T13:30:40.818-07:00 DEBUG 91831 --- [0.0-8080-exec-4] c.familynest.controller.UserController   : Executing optimized query for invitations for user ID: 888
+2025-05-11T13:30:40.818-07:00  INFO 91831 --- [0.0-8080-exec-4] c.familynest.config.SqlStatementMonitor  : SQL QUERY #3: WITH user_email AS ( SELECT u.email FROM app_user u WHERE u.id = ?)SELECT i.id, i.family_id, i.sender_id, i.status, i.created_at, i.expires_at, f.name as family_name, s.username as sender_username, s.first_name as sender_first_name, s.last_name as sender_last_name FROM invitation i JOIN user_email ue ON i.email = ue.email LEFT JOIN family f ON i.family_id = f.id LEFT JOIN app_user s ON i.sender_id = s.id
+2025-05-11T13:30:40.849-07:00  INFO 91831 --- [0.0-8080-exec-4] c.familynest.config.SqlStatementMonitor  : SQL QUERY #3 completed in 31ms
+2025-05-11T13:30:40.850-07:00 DEBUG 91831 --- [0.0-8080-exec-4] c.familynest.controller.UserController   : Returning 0 invitations for user ID: 888
+2025-05-11T13:30:40.852-07:00 DEBUG 91831 --- [0.0-8080-exec-4] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Using 'application/json', given [*/*] and supported [application/json, application/*+json]
+2025-05-11T13:30:40.852-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.w.s.m.m.a.HttpEntityMethodProcessor  : Writing [[]]
+2025-05-11T13:30:40.853-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.s.w.header.writers.HstsHeaderWriter  : Not injecting HSTS header since it did not match request to [Is Secure]
+2025-05-11T13:30:40.853-07:00 TRACE 91831 --- [0.0-8080-exec-4] o.s.web.servlet.DispatcherServlet        : No view rendering, null ModelAndView returned.
+2025-05-11T13:30:40.853-07:00 DEBUG 91831 --- [0.0-8080-exec-4] o.s.web.servlet.DispatcherServlet        : Completed 200 OK, headers={masked}
+2025-05-11T13:30:48.887-07:00  INFO 91831 --- [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2025-05-11T13:30:48.888-07:00  INFO 91831 --- [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.

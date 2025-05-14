@@ -1,0 +1,15 @@
+-- Enforce that a user can only own one family
+-- This constraint ensures each user can only be the creator/owner of one family
+ALTER TABLE family ADD CONSTRAINT one_family_per_owner UNIQUE (created_by);
+
+-- Add comment to document the constraint
+COMMENT ON CONSTRAINT one_family_per_owner ON family IS
+'Ensures a user can only own one family';
+
+-- Additionally enforce that a user can only have one active family membership
+-- This constraint ensures each user can only be active in one family at a time
+ALTER TABLE user_family_membership ADD CONSTRAINT one_active_membership_per_user UNIQUE (user_id) WHERE (is_active = true);
+
+-- Add comment to document the constraint
+COMMENT ON CONSTRAINT one_active_membership_per_user ON user_family_membership IS
+'Ensures a user can only be active in one family at a time'; 

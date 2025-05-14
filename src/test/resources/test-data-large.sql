@@ -95,7 +95,7 @@ VALUES
 (205, 115, 'ADMIN', true, CURRENT_TIMESTAMP),    -- Michael
 (205, 116, 'MEMBER', true, CURRENT_TIMESTAMP),   -- Nancy
 (205, 117, 'MEMBER', true, CURRENT_TIMESTAMP),   -- Oliver
-(205, 101, 'MEMBER', true, CURRENT_TIMESTAMP);   -- John (member in this family)
+(205, 101, 'MEMBER', false, CURRENT_TIMESTAMP);   -- John (member in this family) - set to inactive
 
 -- Family message preferences (mix of enabled and disabled)
 INSERT INTO user_family_message_settings (user_id, family_id, receive_messages)
@@ -156,13 +156,13 @@ VALUES
 (209, 104, 'MEMBER', true, CURRENT_TIMESTAMP),
 -- Bob is also in Chen family
 (210, 103, 'ADMIN', true, CURRENT_TIMESTAMP),
--- John is in multiple families
-(202, 101, 'MEMBER', true, CURRENT_TIMESTAMP),
-(203, 101, 'MEMBER', true, CURRENT_TIMESTAMP),
--- Jessica is in multiple families
-(206, 112, 'MEMBER', true, CURRENT_TIMESTAMP),
-(207, 112, 'ADMIN', true, CURRENT_TIMESTAMP),
-(208, 112, 'MEMBER', true, CURRENT_TIMESTAMP);
+-- John is in multiple families (but only active in his own family)
+(202, 101, 'MEMBER', false, CURRENT_TIMESTAMP),
+(203, 101, 'MEMBER', false, CURRENT_TIMESTAMP),
+-- Jessica is in multiple families (but only active in Brown family)
+(206, 112, 'MEMBER', false, CURRENT_TIMESTAMP),
+(207, 112, 'ADMIN', false, CURRENT_TIMESTAMP),
+(208, 112, 'MEMBER', false, CURRENT_TIMESTAMP);
 
 -- Add family preferences for users in multiple families
 INSERT INTO user_family_message_settings (user_id, family_id, receive_messages)

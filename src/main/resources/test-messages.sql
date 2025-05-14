@@ -9,14 +9,11 @@ DELETE FROM message_view;
 DELETE FROM message_share;
 DELETE FROM message;
 
--- Create sequence for message IDs starting at 10000
+-- Create temporary sequence for message IDs starting at 10000
 DO $$
 BEGIN
-    -- Drop sequence if it exists
-    DROP SEQUENCE IF EXISTS message_id_seq;
-    
-    -- Create sequence
-    CREATE SEQUENCE message_id_seq START 10000;
+    -- Instead of dropping the existing sequence, create a temporary one for use in this script
+    CREATE TEMPORARY SEQUENCE IF NOT EXISTS temp_message_id_seq START 10000;
 END $$;
 
 -- Function to generate random timestamps within a date range
@@ -36,7 +33,7 @@ DECLARE
     message_count INT;
     thread_count INT := 0;
     total_messages INT := 0;
-    current_timestamp TIMESTAMP;
+    msg_timestamp TIMESTAMP;
     thread_start_timestamp TIMESTAMP;
     message_content TEXT;
     media_type TEXT;
@@ -147,7 +144,7 @@ BEGIN
             -- Skip if no user found (shouldn't happen with our test data)
             CONTINUE WHEN user_rec IS NULL;
             
-            -- Get next message ID
+            -- Get next message ID (use message_id_seq from the database, not our temporary one)
             SELECT nextval('message_id_seq') INTO message_id;
             
             -- Create a thread starter message
@@ -220,7 +217,7 @@ BEGIN
                 SELECT nextval('message_id_seq') INTO message_id;
                 
                 -- Create a reply message (1-48 hours after previous message)
-                current_timestamp := thread_start_timestamp + (random() * 48 * interval '1 hour');
+                msg_timestamp := thread_start_timestamp + (random() * 48 * interval '1 hour');
                 
                 -- 10% chance of having media in replies
                 has_media := random() < 0.1;
@@ -254,12 +251,12 @@ BEGIN
                     media_url,
                     reply_user_rec.id,
                     reply_user_rec.username,
-                    current_timestamp,
+                    msg_timestamp,
                     reply_user_rec.id
                 );
                 
                 total_messages := total_messages + 1;
-                thread_start_timestamp := current_timestamp; -- For next reply in thread
+                thread_start_timestamp := msg_timestamp; -- For next reply in thread
             END LOOP;
         END LOOP;
     END LOOP;

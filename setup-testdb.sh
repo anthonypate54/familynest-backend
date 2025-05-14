@@ -297,6 +297,12 @@ echo "=================================================================="
 echo "Applying performance indexes to the database..."
 PGPASSWORD=postgres psql -X -U postgres -d familynest_test -f src/main/resources/performance_indexes.sql
 
+# Fix message sequence value to ensure it's higher than any existing message ID
+echo "Fixing message sequence value to prevent duplicate key violations..."
+PGPASSWORD=postgres PAGER="" psql -X -U postgres -d familynest_test -c "
+SELECT setval('message_id_seq', COALESCE((SELECT MAX(id) FROM message), 0) + 100, true);
+"
+
 # List available test users
 echo ""
 echo "Available test users (all have the same password):"
