@@ -63,34 +63,14 @@ public class JwtUtil {
     public boolean validateToken(String token) {
         logger.debug("Validating token: {}", token);
         try {
-            logger.error("🔍 JWT DEBUG - Validating token starting with: {}...", token.substring(0, Math.min(20, token.length())));
-            Claims claims = Jwts.parserBuilder()
+            Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
-                
-            // Print all claims for debugging
-            logger.error("🔍 JWT DEBUG - Token is valid. Claims: {}", claims);
-            logger.error("🔍 JWT DEBUG - Subject: {}, Role: {}, Expiration: {}", 
-                      claims.getSubject(), claims.get("role"), claims.getExpiration());
-                
-            // Check if token has expired
-            if (claims.getExpiration().before(new Date())) {
-                logger.error("🔍 JWT DEBUG - Token has expired! Expiration: {}, Current time: {}", 
-                          claims.getExpiration(), new Date());
-                return false;
-            }
+                .parseClaimsJws(token);
             logger.debug("Token validated successfully");
             return true;
         } catch (Exception e) {
-            logger.error("🔍 JWT DEBUG - Token validation failed: {} ({})", e.getMessage(), e.getClass().getName());
-            logger.error("🔍 JWT DEBUG - Token: {}", token);
-            // Print a few characters of the token to help identify which token it is
-            if (token.length() > 10) {
-                logger.error("🔍 JWT DEBUG - Token starts with: {}..., ends with: ...{}", 
-                          token.substring(0, 10), token.substring(token.length() - 10));
-            }
+            logger.debug("Token validation failed: {}", e.getMessage());
             return false;
         }
     }

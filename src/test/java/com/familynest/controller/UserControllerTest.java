@@ -24,12 +24,15 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.time.LocalDateTime;
+import java.lang.reflect.Method;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -72,6 +75,9 @@ public class UserControllerTest {
     
     @Autowired
     private TestAuthFilter testAuthFilter;
+
+    @Autowired
+    private UserController userController;
 
     private User testUser;
     private Family testFamily;
@@ -146,5 +152,37 @@ public class UserControllerTest {
         verify(familyRepository, times(1)).save(any(Family.class));
         verify(userFamilyMembershipRepository, times(1)).save(any(UserFamilyMembership.class));
         verify(userRepository, times(1)).save(any(User.class));
+    }
+
+    @Test
+    public void testSanitizeThumbnailUrl() throws Exception {
+        // Access the private method using reflection
+        Method sanitizeMethod = UserController.class.getDeclaredMethod("sanitizeThumbnailUrl", String.class);
+        sanitizeMethod.setAccessible(true);
+        
+        // Test cases
+        // 1. Android emulator URL
+        String androidUrl = "http://10.0.2.2:8080/api/uploads/thumbnails/video123.jpg";
+        String sanitizedAndroidUrl = (String) sanitizeMethod.invoke(userController, androidUrl);
+        assertEquals("/api/uploads/thumbnails/video123.jpg", sanitizedAndroidUrl);
+        
+        // 2. Localhost URL
+        String localhostUrl = "http://localhost:8080/api/uploads/thumbnails/video456.jpg";
+        String sanitizedLocalhostUrl = (String) sanitizeMethod.invoke(userController, localhostUrl);
+        assertEquals("/api/uploads/thumbnails/video456.jpg", sanitizedLocalhostUrl);
+        
+        // 3. Already relative URL
+        String relativeUrl = "/api/uploads/thumbnails/video789.jpg";
+        String sanitizedRelativeUrl = (String) sanitizeMethod.invoke(userController, relativeUrl);
+        assertEquals("/api/uploads/thumbnails/video789.jpg", sanitizedRelativeUrl);
+        
+        // 4. URL with query parameters
+        String urlWithParams = "http://10.0.2.2:8080/api/uploads/thumbnails/video.jpg?width=300&height=200";
+        String sanitizedUrlWithParams = (String) sanitizeMethod.invoke(userController, urlWithParams);
+        assertEquals("/api/uploads/thumbnails/video.jpg", sanitizedUrlWithParams);
+        
+        // 5. Null URL
+        String nullResult = (String) sanitizeMethod.invoke(userController, (String)null);
+        assertEquals(null, nullResult);
     }
 } 

@@ -92,6 +92,21 @@ public class UserController {
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
 
+    @Value("${app.videos.dir:${file.upload-dir}/videos}")
+    private String videosDir;
+    
+    @Value("${app.thumbnail.dir:${file.upload-dir}/thumbnails}")
+    private String thumbnailDir;
+    
+    @Value("${app.url.videos:/uploads/videos}")
+    private String videosUrlPath;
+    
+    @Value("${app.url.thumbnails:/uploads/thumbnails}")
+    private String thumbnailsUrlPath;
+    
+    @Value("${app.url.images:/uploads/images}")
+    private String imagesUrlPath;
+
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -721,99 +736,92 @@ public class UserController {
             message.setFamilyId(familyId);
             message.setTimestamp(LocalDateTime.now());
             
-            logger.debug("BEFORE   if (media != null && mediaType != null ", media, mediaType);
-
-            if(media != null) {
-                logger.debug("MEDIA IS NOT NULL", media);
-            }
-            else {
-                logger.debug("MEDIA IS NULL", media);
-            }
-            if(mediaType != null) {
-                logger.debug("MEDIA TYPEIS NOT NULL", mediaType);
-            }
-            else {
-                logger.debug("MEDIA TYPE IS NULL", mediaType);
-            }
-            // Handle media if present
+            // Simplified media handling
             if (media != null && mediaType != null) {
-                logger.debug("MEDIA HANDLER: Processing media of type: {}", mediaType);
-                logger.debug("Media details: name={}, size={} bytes, contentType={}", 
-                            media.getOriginalFilename(), 
-                            media.getSize(),
-                            media.getContentType());
+                logger.debug("Processing media of type: {}", mediaType);
                 
                 try {
-                    // Use MediaService to handle all media uploads
-                    Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
-                    logger.debug("MediaService returned result: {}", mediaResult);
+                    // Create directory structure if it doesn't exist
+                    String subdir = "video".equals(mediaType) ? "videos" : "images";
+                    Path uploadPath = Paths.get(uploadDir, subdir);
+                    if (!Files.exists(uploadPath)) {
+                        Files.createDirectories(uploadPath);
+                    }
                     
-                    // Get the URLs from the result
-                    String mediaUrl = mediaResult.get("mediaUrl");
-                    logger.debug("Media URL from service: {}", mediaUrl);
+                    // Create filename with timestamp - using simple naming pattern
+                    String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
+                    Path mediaPath = uploadPath.resolve(mediaFileName);
                     
-                    // Set media properties on the message
+                    // Write the file
+                    Files.write(mediaPath, media.getBytes());
+                    logger.debug("Media file saved at: {}", mediaPath);
+                    
+                    // Set media URL (relative path)
+                    // Use URLs matching the static-path-pattern configuration
+                    String mediaUrl = "video".equals(mediaType) ? 
+                        videosUrlPath + "/" + mediaFileName : 
+                        imagesUrlPath + "/" + mediaFileName;
                     message.setMediaType(mediaType);
                     message.setMediaUrl(mediaUrl);
-                    logger.debug("Media saved successfully: {}", mediaUrl);
                     
-                    logger.debug("BEFORE   ", "video".equals(mediaType));
-                    // For videos, also set the thumbnail URL
+                    // For videos, generate thumbnail
                     if ("video".equals(mediaType)) {
-                        logger.error("!!!!! INSIDE THE VIDEO IF STATEMENT !!!!!");
-                        // Always use VideoController for thumbnails - single source of truth
-                        String generatedThumbnailUrl = videoController.getThumbnailForVideo(mediaUrl);
-                        logger.error("!!!!! GOT THUMBNAIL URL FROM VIDEOCONTROLLER: {} !!!!!", generatedThumbnailUrl);
-                        message.setThumbnailUrl(generatedThumbnailUrl);
+                        // Create thumbnails directory if needed
+                        Path thumbnailDirPath = Paths.get(thumbnailDir);
+                        if (!Files.exists(thumbnailDirPath)) {
+                            Files.createDirectories(thumbnailDirPath);
+                        }
+                        
+                        // Generate thumbnail filename - using simple replacement pattern
+                        String thumbnailFileName = mediaFileName.replace(".mp4", "_thumbnail.jpg");
+                        Path thumbnailPath = thumbnailDirPath.resolve(thumbnailFileName);
+                        
+                        // Generate thumbnail (delegate to ThumbnailService)
+                        boolean thumbnailCreated = false;
+                        try {
+                            // Use a relative file name, not an absolute path, to avoid path duplication
+                            logger.error("PATH DEBUG: Video path being used for thumbnail: {}", mediaPath.toString());
+                            logger.error("PATH DEBUG: Thumbnail path being used: {}", thumbnailPath.toString());
+                            
+                            // Just pass the filename to the thumbnail service, not the full path
+                            String generatedThumbnailPath = thumbnailService.generateThumbnail(
+                                mediaPath.toString(), thumbnailFileName);
+                                
+                            logger.error("PATH DEBUG: Generated thumbnail result: {}", generatedThumbnailPath);
+                            thumbnailCreated = generatedThumbnailPath != null;
+                        } catch (Exception ex) {
+                            logger.error("Error generating thumbnail: {}", ex.getMessage(), ex);
+                        }
+                        
+                        if (thumbnailCreated) {
+                            // Set thumbnail URL (relative path) with leading slash for client consumption
+                            String thumbnailRelativeUrl = thumbnailsUrlPath + "/" + thumbnailFileName;
+                            message.setThumbnailUrl(thumbnailRelativeUrl);
+                            logger.debug("Thumbnail created at: {}", thumbnailPath);
+                        } else {
+                            logger.warn("Failed to create thumbnail for video");
+                        }
                     }
                 } catch (IOException e) {
                     logger.error("Error saving media file: {}", e.getMessage(), e);
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
                 }
             } else if (videoUrl != null && "video".equals(mediaType)) {
-                // Handle pre-processed video using the parameters
-                logger.debug("Processing pre-uploaded video: {}", videoUrl);
+                // Handle pre-uploaded video URLs
+                logger.debug("Using pre-uploaded video URL: {}", videoUrl);
                 message.setMediaType("video");
                 message.setMediaUrl(videoUrl);
                 
                 if (thumbnailUrl != null) {
-                    logger.debug("Setting thumbnail URL: {}", thumbnailUrl);
+                    logger.debug("Using provided thumbnail URL: {}", thumbnailUrl);
                     message.setThumbnailUrl(thumbnailUrl);
-                } else {
-                    // Use centralized method in VideoController to get the thumbnail
-                    String generatedThumbnailUrl = videoController.getThumbnailForVideo(videoUrl);
-                    logger.debug("Generated thumbnail URL from VideoController: {}", generatedThumbnailUrl);
-                    message.setThumbnailUrl(generatedThumbnailUrl);                   
                 }
-            } else {
-                logger.debug("No media to process: media={}, mediaType={}, videoUrl={}", media, mediaType, videoUrl);
-            }
- 
-            // DEBUG LOG: Always log all relevant parameters for pre-processed videos
-            logger.error("VIDEO DEBUG: media={}, mediaType='{}', videoUrl='{}', thumbnailUrl='{}'", 
-                        media != null ? "present" : "null",
-                        mediaType,
-                        videoUrl,
-                        thumbnailUrl);
-                        
-            // Check for pre-processed video parameters without any conditions
-            if (mediaType != null) {
-                logger.error("VIDEO DEBUG: mediaType is not null: '{}'", mediaType);
-                logger.error("VIDEO DEBUG: mediaType equals 'video': {}", "video".equals(mediaType));
-                logger.error("VIDEO DEBUG: mediaType equalsIgnoreCase 'video': {}", "video".equalsIgnoreCase(mediaType));
             }
             
-            if (videoUrl != null) {
-                logger.error("VIDEO DEBUG: videoUrl is not null: '{}'", videoUrl);
-            }
-
-            // Use a repository method that doesn't involve transactions
-            logger.error("!!! BEFORE SAVING, MESSAGE OBJECT: mediaType={}, mediaUrl={}, thumbnailUrl={} !!!", 
-                      message.getMediaType(), message.getMediaUrl(), message.getThumbnailUrl());
+            // Save the message
             logger.debug("Saving message: {}", message);
             Message savedMessage = messageRepository.save(message);
-            logger.error("!!! AFTER SAVING, MESSAGE ID: {}, THUMBNAIL URL: {} !!!", 
-                      savedMessage.getId(), savedMessage.getThumbnailUrl());
+            logger.debug("Message saved with ID: {}", savedMessage.getId());
             
             return ResponseEntity.status(201).build();
         } catch (Exception e) {
@@ -832,7 +840,7 @@ public class UserController {
             // 3. Filters out muted families
             // 4. Gets messages from all remaining families
             // 5. Joins with sender data for display
-            // 6. Pre-aggregates engagement metrics in separate CTEs to avoid N+1 queries
+            // 6. Uses subqueries for aggregates to avoid CTE reference issues
             String sql = "WITH user_check AS (" +
                         "  SELECT id FROM app_user WHERE id = ?" +
                         "), " +
@@ -856,26 +864,8 @@ public class UserController {
                         "  SELECT m.id " +
                         "  FROM message m " +
                         "  JOIN active_families af ON m.family_id = af.family_id " +
-                        "  ORDER BY m.timestamp DESC " +
+                        "  ORDER BY m.id DESC " + 
                         "  LIMIT 100" +
-                        "), " +
-                        "view_counts AS (" +
-                        "  SELECT message_id, COUNT(*) as count " +
-                        "  FROM message_view " +
-                        "  WHERE message_id IN (SELECT id FROM message_subset) " +
-                        "  GROUP BY message_id " +
-                        "), " +
-                        "reaction_counts AS (" +
-                        "  SELECT message_id, COUNT(*) as count " +
-                        "  FROM message_reaction " +
-                        "  WHERE message_id IN (SELECT id FROM message_subset) " +
-                        "  GROUP BY message_id " +
-                        "), " +
-                        "comment_counts AS (" +
-                        "  SELECT message_id, COUNT(*) as count " +
-                        "  FROM message_comment " +
-                        "  WHERE message_id IN (SELECT id FROM message_subset) " +
-                        "  GROUP BY message_id " +
                         ") " +
                         "SELECT " +
                         "  m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
@@ -889,10 +879,13 @@ public class UserController {
                         "JOIN message_subset ms ON m.id = ms.id " +
                         "LEFT JOIN app_user s ON m.sender_id = s.id " +
                         "LEFT JOIN family f ON m.family_id = f.id " +
-                        "LEFT JOIN view_counts vc ON m.id = vc.message_id " +
-                        "LEFT JOIN reaction_counts rc ON m.id = rc.message_id " +
-                        "LEFT JOIN comment_counts cc ON m.id = cc.message_id " +
-                        "ORDER BY m.timestamp DESC ";
+                        "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
+                        "  ON m.id = vc.message_id " +
+                        "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_reaction GROUP BY message_id) rc " +
+                        "  ON m.id = rc.message_id " +
+                        "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_comment GROUP BY message_id) cc " +
+                        "  ON m.id = cc.message_id " +
+                        "ORDER BY m.id DESC";
 
             logger.error("DEBUG SQL QUERY: \n{}", sql);
 
@@ -911,6 +904,16 @@ public class UserController {
                 logger.error("DEBUG: Number of results: {}", results.size());
                 Map<String, Object> firstResult = results.get(0);
                 logger.error("DEBUG: Keys in first result: {}", firstResult.keySet());
+                
+                // Show timestamp values for debugging order
+                logger.error("FIRST MESSAGE TIMESTAMP: {}", firstResult.get("timestamp"));
+                if (results.size() > 1) {
+                    logger.error("SECOND MESSAGE TIMESTAMP: {}", results.get(1).get("timestamp"));
+                }
+                
+                if (results.size() > 2) {
+                    logger.error("LAST MESSAGE TIMESTAMP: {}", results.get(results.size()-1).get("timestamp"));
+                }
                 
                 // Specifically look for thumbnail_url
                 logger.error("DEBUG: Has thumbnail_url? {}", firstResult.containsKey("thumbnail_url"));
@@ -947,10 +950,6 @@ public class UserController {
                 if (thumbnailUrlValue == null && "video".equals(message.get("media_type"))) {
                     logger.error("WARNING: Video message ID {} has no thumbnail_url", message.get("id"));
                 }
-                
-                messageMap.put("viewCount", message.get("view_count"));
-                messageMap.put("reactionCount", message.get("reaction_count"));
-                messageMap.put("commentCount", message.get("comment_count"));
                 
                 return messageMap;
             }).collect(Collectors.toList());
@@ -1505,6 +1504,92 @@ public class UserController {
         } catch (Exception e) {
             logger.error("Error serving photo: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().build();
+        }
+    }
+
+    /**
+     * Public test endpoint for uploading videos without authentication
+     * ONLY FOR DEVELOPMENT TESTING - REMOVE IN PRODUCTION
+     */
+    @PostMapping(value = "/public-test-upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @CrossOrigin(origins = "*")
+    public ResponseEntity<Map<String, Object>> publicTestUpload(
+            @RequestPart(value = "media", required = true) MultipartFile media,
+            @RequestParam(value = "content", required = false) String content) {
+        
+        logger.info("PUBLIC TEST UPLOAD ENDPOINT ACCESSED");
+        
+        try {
+            // Create directory structure if it doesn't exist
+            String subdir = "videos";
+            Path uploadPath = Paths.get(videosDir);
+            if (!Files.exists(uploadPath)) {
+                Files.createDirectories(uploadPath);
+            }
+            
+            // Create filename with timestamp - using simple naming pattern
+            String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
+            Path mediaPath = uploadPath.resolve(mediaFileName);
+            
+            // Write the file
+            Files.write(mediaPath, media.getBytes());
+            logger.info("Test upload - Media file saved at: {}", mediaPath);
+            
+            // Generate relative URL
+            String mediaUrl = videosUrlPath + "/" + mediaFileName;
+            
+            // For videos, generate thumbnail
+            String thumbnailUrl = null;
+            Path thumbnailPath = null;
+            
+            // Create thumbnails directory if needed
+            Path thumbnailDirPath = Paths.get(thumbnailDir);
+            if (!Files.exists(thumbnailDirPath)) {
+                Files.createDirectories(thumbnailDirPath);
+            }
+            
+            // Generate thumbnail filename - using simple replacement pattern
+            String thumbnailFileName = mediaFileName.replace(".mp4", "_thumbnail.jpg");
+            thumbnailPath = thumbnailDirPath.resolve(thumbnailFileName);
+            
+            // Generate thumbnail (delegate to ThumbnailService)
+            boolean thumbnailCreated = false;
+            try {
+                // Use a relative file name, not an absolute path, to avoid path duplication
+                logger.error("PATH DEBUG: Video path being used for thumbnail: {}", mediaPath.toString());
+                logger.error("PATH DEBUG: Thumbnail path being used: {}", thumbnailPath.toString());
+                
+                // Just pass the filename to the thumbnail service, not the full path
+                String generatedThumbnailPath = thumbnailService.generateThumbnail(
+                    mediaPath.toString(), thumbnailFileName);
+                    
+                logger.error("PATH DEBUG: Generated thumbnail result: {}", generatedThumbnailPath);
+                thumbnailCreated = generatedThumbnailPath != null;
+            } catch (Exception ex) {
+                logger.error("Error generating thumbnail: {}", ex.getMessage(), ex);
+            }
+            
+            if (thumbnailCreated) {
+                thumbnailUrl = thumbnailsUrlPath + "/" + thumbnailFileName;
+                logger.info("Test upload - Thumbnail created at: {}", thumbnailPath);
+            }
+            
+            // Return success response with file paths
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("mediaUrl", mediaUrl);
+            if (thumbnailUrl != null) {
+                response.put("thumbnailUrl", thumbnailUrl);
+            }
+            response.put("message", "Test upload successful");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error in public test upload: {}", e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
     }
 }

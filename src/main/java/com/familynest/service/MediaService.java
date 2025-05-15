@@ -27,8 +27,33 @@ public class MediaService {
     @Value("${file.upload-dir:uploads}")
     private String uploadDir;
     
+    @Value("${app.videos.dir:${file.upload-dir}/videos}")
+    private String videosDir;
+    
+    @Value("${app.thumbnail.dir:${file.upload-dir}/thumbnails}")
+    private String thumbnailDir;
+    
+    @Value("${app.url.videos:/uploads/videos}")
+    private String videosUrlPath;
+    
+    @Value("${app.url.thumbnails:/uploads/thumbnails}")
+    private String thumbnailsUrlPath;
+    
+    @Value("${app.url.images:/uploads/images}")
+    private String imagesUrlPath;
+    
+    @Value("${app.default.thumbnail:default_thumbnail.jpg}")
+    private String defaultThumbnailFilename;
+    
     @Autowired
     private VideoController videoController;
+    
+    /**
+     * Get the default thumbnail URL
+     */
+    private String getDefaultThumbnailUrl() {
+        return thumbnailsUrlPath + "/" + defaultThumbnailFilename;
+    }
     
     /**
      * Uploads a video file and generates a thumbnail
@@ -47,7 +72,7 @@ public class MediaService {
                         (originalFilename != null ? "_" + originalFilename : "_video.mp4");
         
         // Create directories if they don't exist
-        Path uploadPath = Paths.get(uploadDir, "videos");
+        Path uploadPath = Paths.get(videosDir);
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
         }
@@ -61,19 +86,20 @@ public class MediaService {
         String thumbnailFilename = timestamp + "_" + uniqueId + "_thumb.jpg";
         logger.info("Generating thumbnail with filename: {}", thumbnailFilename);
         
-        String thumbnailUrl = videoController.getThumbnailForVideo("/uploads/videos/" + filename);
+        String videoUrl = videosUrlPath + "/" + filename;
+        String thumbnailUrl = videoController.getThumbnailForVideo(videoUrl);
         
         logger.info("VideoController returned URL: {}", thumbnailUrl);
         
         // Use the returned URL or default
         if (thumbnailUrl == null) {
             logger.warn("Failed to generate thumbnail, using default");
-            thumbnailUrl = "/uploads/thumbnails/default_thumbnail.jpg";
+            thumbnailUrl = getDefaultThumbnailUrl();
         }
         
         // Return URLs
         Map<String, String> result = new HashMap<>();
-        result.put("videoUrl", "/uploads/videos/" + filename);
+        result.put("videoUrl", videoUrl);
         result.put("thumbnailUrl", thumbnailUrl);
         result.put("videoPath", filePath.toString());
         
@@ -119,19 +145,19 @@ public class MediaService {
             logger.error("MEDIA SERVICE: Processing video file: {}, size: {} bytes", filename, file.getSize());
             
             // For video files, create a copy in the videos directory too
-            Path videosDir = Paths.get(uploadDir, "videos");
-            if (!Files.exists(videosDir)) {
-                Files.createDirectories(videosDir);
-                logger.info("Created videos directory: {}", videosDir);
+            Path videosPath = Paths.get(videosDir);
+            if (!Files.exists(videosPath)) {
+                Files.createDirectories(videosPath);
+                logger.info("Created videos directory: {}", videosPath);
             }
             
             // Save a copy to the videos directory
-            Path videoPath = videosDir.resolve(filename);
+            Path videoPath = videosPath.resolve(filename);
             Files.copy(filePath, videoPath);
             logger.info("Video file copied to videos directory: {}", videoPath);
             
             // Set relative URL for videos
-            String videoUrl = "/uploads/videos/" + filename;
+            String videoUrl = videosUrlPath + "/" + filename;
             result.put("mediaUrl", videoUrl);
             
             try {
@@ -141,11 +167,11 @@ public class MediaService {
                 result.put("thumbnailUrl", thumbnailUrl);
             } catch (Exception e) {
                 logger.error("Error getting thumbnail from VideoController: {}", e.getMessage(), e);
-                result.put("thumbnailUrl", "/uploads/thumbnails/default_thumbnail.jpg");
+                result.put("thumbnailUrl", getDefaultThumbnailUrl());
             }
         } else {
             // For non-video files (images, etc.)
-            result.put("mediaUrl", "/uploads/photos/" + filename);
+            result.put("mediaUrl", imagesUrlPath + "/" + filename);
         }
         
         logger.debug("Media upload complete. Result: {}", result);

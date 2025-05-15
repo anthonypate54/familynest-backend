@@ -1,7 +1,8 @@
 package com.familynest.controller;
 
 import com.familynest.service.ThumbnailService;
-import com.familynest.service.storage.StorageService;
+// Temporarily commented out to fix authentication issues
+// import com.familynest.service.storage.StorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,11 +37,20 @@ public class VideoController {
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
     
-    @Autowired
-    private ThumbnailService thumbnailService;
+    @Value("${app.videos.dir:${file.upload-dir}/videos}")
+    private String videosDir;
+    
+    @Value("${app.thumbnail.dir:${file.upload-dir}/thumbnails}")
+    private String thumbnailDir;
+    
+    @Value("${app.url.videos:/uploads/videos}")
+    private String videosUrlPath;
+    
+    @Value("${app.url.thumbnails:/uploads/thumbnails}")
+    private String thumbnailsUrlPath;
     
     @Autowired
-    private StorageService storageService;
+    private ThumbnailService thumbnailService;
     
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -65,8 +75,8 @@ public class VideoController {
         logger.info("VIDEO TEST ENDPOINT ACCESSED");
         Map<String, String> response = new HashMap<>();
         response.put("status", "SUCCESS");
-        response.put("videoUrl", "/uploads/test_video.mp4");
-        response.put("thumbnailUrl", "/uploads/thumbnails/default_thumbnail.jpg");
+        response.put("videoUrl", videosUrlPath + "/test_video.mp4");
+        response.put("thumbnailUrl", thumbnailsUrlPath + "/default_thumbnail.jpg");
         return ResponseEntity.ok(response);
     }
 
@@ -87,18 +97,26 @@ public class VideoController {
             String filename = timestamp + "_" + uniqueId + "_" + 
                         (originalFilename != null ? originalFilename.replace(" ", "_") : "video.mp4");
 
-            // Store video file using storage service
-            String videoPath = uploadDir + "/" + filename;
-            Files.copy(file.getInputStream(), Paths.get(videoPath));
+            // Store video file to the videos subdirectory
+            Path videosDirPath = Paths.get(videosDir);
+            if (!Files.exists(videosDirPath)) {
+                Files.createDirectories(videosDirPath);
+            }
+            
+            Path videoPath = videosDirPath.resolve(filename);
+            Files.copy(file.getInputStream(), videoPath);
             logger.debug("Video saved at path: {}", videoPath);
             
-            // Generate a thumbnail for the video using the relative path
-            String thumbnailUrl = getThumbnailForVideo(videoPath);
+            // Create proper relative URLs for frontend
+            String videoUrl = videosUrlPath + "/" + filename;
+            
+            // Generate a thumbnail for the video
+            String thumbnailUrl = getThumbnailForVideo(videoPath.toString());
             logger.debug("Generated thumbnail URL: {}", thumbnailUrl);
             
             Map<String, String> response = new HashMap<>();
             // Return relative paths - frontend will resolve based on baseUrl
-            response.put("videoUrl", videoPath);
+            response.put("videoUrl", videoUrl);
             response.put("thumbnailUrl", thumbnailUrl);
             
             return ResponseEntity.ok(response);
@@ -149,10 +167,10 @@ public class VideoController {
         message.put("content", "Test video message");
         message.put("media_type", "video");
         message.put("mediaType", "video");  // duplicate with camelCase
-        message.put("media_url", "/uploads/videos/test.mp4");
-        message.put("mediaUrl", "/uploads/videos/test.mp4");  // duplicate with camelCase
-        message.put("thumbnail_url", "/uploads/thumbnails/test_thumb.jpg");
-        message.put("thumbnailUrl", "/uploads/thumbnails/test_thumb.jpg");  // duplicate with camelCase
+        message.put("media_url", videosUrlPath + "/test.mp4");
+        message.put("mediaUrl", videosUrlPath + "/test.mp4");  // duplicate with camelCase
+        message.put("thumbnail_url", thumbnailsUrlPath + "/test_thumb.jpg");
+        message.put("thumbnailUrl", thumbnailsUrlPath + "/test_thumb.jpg");  // duplicate with camelCase
         
         // Add it to a response
         Map<String, Object> response = new HashMap<>();
@@ -180,8 +198,8 @@ public class VideoController {
         
         // Add video info with thumbnail
         Map<String, Object> videoInfo = new HashMap<>();
-        videoInfo.put("videoUrl", "/uploads/test_video.mp4");
-        videoInfo.put("thumbnailUrl", "/uploads/thumbnails/default_thumbnail.jpg");
+        videoInfo.put("videoUrl", videosUrlPath + "/test_video.mp4");
+        videoInfo.put("thumbnailUrl", thumbnailsUrlPath + "/default_thumbnail.jpg");
         response.put("video", videoInfo);
         
         logger.info("Returning public test response: {}", response);
@@ -199,20 +217,32 @@ public class VideoController {
     public String getThumbnailForVideo(String videoUrl) {
         if (videoUrl == null || videoUrl.isEmpty()) {
             logger.debug("No video URL provided, returning default thumbnail");
-            return "/uploads/thumbnails/default_thumbnail.jpg";
+            return thumbnailsUrlPath + "/default_thumbnail.jpg";
         }
         
         logger.debug("Getting thumbnail for video URL: {}", videoUrl);
         
         try {
-            // Extract filename from URL
+            // Extract filename from URL and handle path prefix variations
             String videoFilename;
+            String physicalVideoPath;
             
-            // Handle both full URLs and relative paths
+            // Handle full URLs, relative paths, and prefixed paths
             if (videoUrl.contains("/")) {
+                // Extract just the filename
                 videoFilename = videoUrl.substring(videoUrl.lastIndexOf("/") + 1);
+                
+                // For paths that have our known prefix, we need to map to the physical path
+                if (videoUrl.startsWith(videosUrlPath)) {
+                    // Convert from URL path to physical path
+                    physicalVideoPath = Paths.get(videosDir, videoFilename).toString();
+                } else {
+                    // Assume it's already a physical path
+                    physicalVideoPath = videoUrl;
+                }
             } else {
                 videoFilename = videoUrl;
+                physicalVideoPath = Paths.get(videosDir, videoFilename).toString();
             }
             
             // Remove any query parameters
@@ -232,46 +262,67 @@ public class VideoController {
             String filePrefix = matcher.find() ? matcher.group(1) : baseName;
             
             String thumbnailFilename = filePrefix + "_thumb.jpg";
-            String thumbnailRelativePath = "/uploads/thumbnails/" + thumbnailFilename;
+            String thumbnailRelativePath = thumbnailsUrlPath + "/" + thumbnailFilename;
             
             // Check if thumbnail exists
-            if (Files.exists(Paths.get(uploadDir + "/" + thumbnailFilename))) {
-                logger.debug("Thumbnail already exists at: {}", thumbnailRelativePath);
+            Path thumbnailFullPath = Paths.get(thumbnailDir, thumbnailFilename);
+            if (Files.exists(thumbnailFullPath)) {
+                logger.debug("Thumbnail already exists at: {}", thumbnailFullPath);
                 return thumbnailRelativePath;
             }
             
-            // If video path is absolute, convert to relative
-            String relativeVideoPath = videoUrl;
-            if (videoUrl.startsWith("http") || videoUrl.startsWith("/uploads/")) {
-                // Extract just the filename
-                relativeVideoPath = "videos/" + videoFilename;
-            }
+            // Get actual video file path, avoiding duplications
+            Path videoFullPath;
             
-            // Generate thumbnail - pass actual paths within the file system
-            Path videoFullPath = Paths.get(uploadDir + "/" + relativeVideoPath);
-            
-            if (Files.exists(videoFullPath)) {
-                // Use FFmpeg to generate thumbnail
-                String newThumbnailPath = thumbnailService.generateThumbnail(
-                    videoFullPath.toString(),
-                    thumbnailFilename
-                );
+            // Create a path check string by removing the leading slash from the URL path
+            String videoUrlPathCheck = videosUrlPath.startsWith("/") ? 
+                videosUrlPath.substring(1) : videosUrlPath;
                 
-                if (newThumbnailPath != null) {
-                    logger.debug("Generated new thumbnail at: {}", newThumbnailPath);
-                    return "/uploads/thumbnails/" + thumbnailFilename;
+            // If the URL is a reference to a file in our uploads directory
+            if (videoUrl.contains(videoUrlPathCheck)) {
+                // Only use the filename to avoid path duplication
+                videoFullPath = Paths.get(videosDir, videoFilename);
+                logger.debug("Extracted video path from URL: {}", videoFullPath);
+            } else if (videoUrl.startsWith("/")) {
+                // Handle absolute path within the server
+                if (videoUrl.startsWith(uploadDir)) {
+                    // Already an absolute path to the file
+                    videoFullPath = Paths.get(videoUrl);
+                } else {
+                    // Add upload dir prefix
+                    videoFullPath = Paths.get(uploadDir, videoUrl.substring(1));
                 }
+                logger.debug("Created video path from absolute path: {}", videoFullPath);
             } else {
-                logger.error("Video file not found at path: {}", videoFullPath);
+                // Handle relative path
+                videoFullPath = Paths.get(videosDir, videoFilename);
+                logger.debug("Created video path from relative path: {}", videoFullPath);
             }
             
-            // Fallback to default thumbnail if generation fails
-            logger.debug("Using default thumbnail");
-            return "/uploads/thumbnails/default_thumbnail.jpg";
+            // Ensure the video file exists
+            if (!Files.exists(videoFullPath)) {
+                logger.error("Video file does not exist at path: {}", videoFullPath);
+                return thumbnailsUrlPath + "/default_thumbnail.jpg";
+            }
+            
+            logger.debug("Using ThumbnailService to generate thumbnail for video at: {}", videoFullPath);
+            
+            // Generate thumbnail - pass the video file path and just the filename (not full path)
+            // This avoids the ThumbnailService from duplicating paths
+            String generatedThumbnail = thumbnailService.generateThumbnail(
+                videoFullPath.toString(), thumbnailFilename);
+            
+            if (generatedThumbnail != null) {
+                logger.debug("Thumbnail generated successfully: {}", generatedThumbnail);
+                return generatedThumbnail;
+            } else {
+                logger.error("Failed to generate thumbnail for video: {}", videoUrl);
+                return thumbnailsUrlPath + "/default_thumbnail.jpg";
+            }
             
         } catch (Exception e) {
             logger.error("Error generating thumbnail for video: {}", e.getMessage(), e);
-            return "/uploads/thumbnails/default_thumbnail.jpg";
+            return thumbnailsUrlPath + "/default_thumbnail.jpg";
         }
     }
     
@@ -295,37 +346,6 @@ public class VideoController {
         
         return ResponseEntity.ok(response);
     }
+}
 
-    /**
-     * Direct endpoint to serve thumbnail files
-     * This provides a workaround for static resource issues
-     */
-    @GetMapping("/public/thumbnail/{filename:.+}")
-    @ResponseBody
-    public ResponseEntity<Resource> serveFile(@PathVariable String filename) {
-        logger.debug("Serving thumbnail file: {}", filename);
-        
-        try {
-            // Load file as resource using storage service
-            Resource file = storageService.loadAsResource("thumbnails/" + filename);
-            
-            if (file == null || !file.exists()) {
-                logger.error("Thumbnail file not found: {}", filename);
-                return ResponseEntity.notFound().build();
-            }
-            
-            // Try to determine content type
-            String contentType = "image/jpeg";  // Default for thumbnails
-            
-            logger.debug("Serving thumbnail file: {} with content type: {}", filename, contentType);
-            
-            // Return the file
-            return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(contentType))
-                    .body(file);
-        } catch (Exception e) {
-            logger.error("Error serving thumbnail file: {}", filename, e);
-            return ResponseEntity.internalServerError().build();
-        }
-    }
-} 
+ 

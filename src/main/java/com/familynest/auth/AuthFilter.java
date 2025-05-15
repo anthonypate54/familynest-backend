@@ -1,6 +1,7 @@
 package com.familynest.auth;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import jakarta.servlet.FilterChain;
@@ -20,6 +21,15 @@ public class AuthFilter extends OncePerRequestFilter {
 
     @Autowired
     private AuthUtil authUtil;
+    
+    @Value("${app.url.videos:/uploads/videos}")
+    private String videosUrlPath;
+    
+    @Value("${app.url.thumbnails:/uploads/thumbnails}")
+    private String thumbnailsUrlPath;
+    
+    @Value("${app.url.images:/uploads/images}")
+    private String imagesUrlPath;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
@@ -45,6 +55,7 @@ public class AuthFilter extends OncePerRequestFilter {
             path.equals("/api/users/test-token") ||
             path.equals("/api/users/test-token-101") ||
             path.equals("/api/users/debug-token") ||
+            path.equals("/api/users/public-test-upload") ||
             path.startsWith("/api/videos/public") ||
             path.startsWith("/api/videos/test") ||
             path.startsWith("/uploads/")) {
@@ -90,8 +101,8 @@ public class AuthFilter extends OncePerRequestFilter {
         
         // Check if this is a photo or thumbnail request
         if (path.startsWith("/api/users/photos/") || 
-            path.startsWith("/uploads/thumbnails/") || 
-            path.startsWith("/uploads/videos/")) {
+            path.startsWith(thumbnailsUrlPath) || 
+            path.startsWith(videosUrlPath)) {
             logger.debug("Allowing media request for path: {}", path);
             chain.doFilter(request, response);
             return;

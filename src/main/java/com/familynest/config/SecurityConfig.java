@@ -54,6 +54,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/users/test").permitAll()
                     .requestMatchers("/api/users/101").permitAll()
                     .requestMatchers("/api/users/101/**").permitAll()
+                    .requestMatchers("/api/users/public-test-upload").permitAll()
                     .requestMatchers("/api/emergency/**").permitAll()  // Allow all emergency endpoints
                     .requestMatchers("/api/videos/**").permitAll()
                     .requestMatchers("/error").permitAll()

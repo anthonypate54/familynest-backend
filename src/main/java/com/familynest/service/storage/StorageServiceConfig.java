@@ -13,7 +13,8 @@ import org.springframework.core.env.Environment;
  * Configuration class that selects the appropriate StorageService
  * based on the configuration or environment
  */
-@Configuration
+// Temporarily commented out to fix authentication issues
+// @Configuration
 public class StorageServiceConfig {
     
     private static final Logger logger = LoggerFactory.getLogger(StorageServiceConfig.class);
@@ -21,35 +22,34 @@ public class StorageServiceConfig {
     @Value("${storage.type:local}")
     private String storageType;
     
-    /**
-     * Creates the primary StorageService bean based on configuration.
-     */
-    @Bean
-    @Primary
+    @Autowired
+    private Environment environment;
+    
+    // @Bean
+    // @Primary
     public StorageService storageService(
-            @Autowired(required = false) LocalStorageService localStorageService,
+            LocalStorageService localStorageService,
             @Autowired(required = false) S3StorageService s3StorageService) {
         
         logger.info("Configuring storage service of type: {}", storageType);
         
-        // Always log what we have available
-        logger.info("Available storage services: localStorageService={}, s3StorageService={}", 
-                 localStorageService != null ? "available" : "unavailable",
-                 s3StorageService != null ? "available" : "unavailable");
+        // Check active profiles
+        String[] activeProfiles = environment.getActiveProfiles();
+        logger.info("Active profiles: {}", String.join(", ", activeProfiles));
         
-        // For safety, always return a storage service
-        if ("s3".equalsIgnoreCase(storageType) && s3StorageService != null) {
-            logger.info("Using S3 storage service");
-            return s3StorageService;
-        } else {
-            // Default to local
-            if (localStorageService != null) {
+        switch (storageType.toLowerCase()) {
+            case "s3":
+                logger.info("Using S3 storage service");
+                if (s3StorageService != null) {
+                    return s3StorageService;
+                } else {
+                    logger.warn("S3 storage service requested but not available, falling back to local");
+                    return localStorageService;
+                }
+            case "local":
+            default:
                 logger.info("Using local filesystem storage service");
                 return localStorageService;
-            } else {
-                // This should never happen in proper configuration
-                throw new IllegalStateException("No storage service implementation available! Verify your Spring profiles.");
-            }
         }
     }
 } 
