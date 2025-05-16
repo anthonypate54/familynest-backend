@@ -37,8 +37,9 @@ public class AuthFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         logger.error("⚠️ AUTH FILTER - PROCESSING REQUEST FOR URI: {}", path);
         
-        // EMERGENCY BYPASS FOR USER 101
-        if (path.startsWith("/api/users/101") || path.startsWith("/api/emergency")) {
+        // EMERGENCY BYPASS FOR USER 101 - Message Preferences now requires proper auth
+        if (path.startsWith("/api/users/101") || 
+            path.startsWith("/api/emergency")) {
             logger.error("🔓 EMERGENCY BYPASS FOR PATH: {}", path);
             // Set test user attributes
             request.setAttribute("userId", 101L);
@@ -64,8 +65,9 @@ public class AuthFilter extends OncePerRequestFilter {
             return;
         }
         
-        // TEMPORARY TEST BYPASS
-        if (path.equals("/api/users/101") || path.equals("/api/users/101/messages")) {
+        // TEMPORARY TEST BYPASS - Message Preferences now requires proper auth
+        if (path.equals("/api/users/101") || 
+            path.equals("/api/users/101/messages")) {
             logger.error("🧪 TEMPORARY TEST BYPASS for user 101: {}", path);
             // Set authentication attributes for user 101
             request.setAttribute("userId", 101L);
@@ -74,7 +76,7 @@ public class AuthFilter extends OncePerRequestFilter {
             return;
         }
         
-        // Print request details for debugging
+        // Print request details for debugging - ALWAYS for troubleshooting
         logger.error("⚠️ Request method: {}", request.getMethod());
         logger.error("⚠️ Request headers:");
         Enumeration<String> headerNames = request.getHeaderNames();
@@ -106,6 +108,47 @@ public class AuthFilter extends OncePerRequestFilter {
             logger.debug("Allowing media request for path: {}", path);
             chain.doFilter(request, response);
             return;
+        }
+        
+        // Special detailed logging for message preferences endpoints
+        if (path.startsWith("/api/message-preferences")) {
+            logger.error("🔎 MESSAGE PREFERENCES AUTH CHECK FOR PATH: {}", path);
+            
+            String authHeader = request.getHeader("Authorization");
+            logger.error("🔑 Auth header for message preferences: {}", authHeader);
+            
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                logger.error("❌ No valid Authorization header found for message preferences: {}", authHeader);
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Missing or invalid Authorization header");
+                return;
+            }
+            
+            String token = authHeader.substring(7);
+            logger.error("🔑 Token for message preferences: {}", token);
+            
+            try {
+                if (!authUtil.validateToken(token)) {
+                    logger.error("❌ Token validation failed for message preferences token: {}", token);
+                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "Invalid token");
+                    return;
+                }
+                
+                Long userId = authUtil.extractUserId(token);
+                String role = authUtil.getUserRole(token);
+                logger.error("✅ Token valid for message preferences! Extracted userId: {}, role: {}", userId, role);
+                
+                // Set user attributes for the request
+                request.setAttribute("userId", userId);
+                request.setAttribute("role", role);
+                
+                chain.doFilter(request, response);
+                return;
+            }
+            catch (Exception e) {
+                logger.error("❌ Error validating token for message preferences: {}", e.getMessage(), e);
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, "Error validating token: " + e.getMessage());
+                return;
+            }
         }
         
         // Check other public endpoints

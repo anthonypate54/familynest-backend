@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -269,5 +270,77 @@ public class MessagePreferencesController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to create message settings: " + e.getMessage()));
         }
+    }
+
+    /**
+     * Debug endpoint for message preferences authentication
+     */
+    @GetMapping("/debug-auth/{userId}")
+    public ResponseEntity<Map<String, Object>> debugAuth(
+            @PathVariable Long userId,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        
+        logger.error("🔍 DEBUG AUTH - Request for user ID: {}", userId);
+        
+        // Create response with debugging info
+        Map<String, Object> debugInfo = new HashMap<>();
+        debugInfo.put("requestUri", request.getRequestURI());
+        debugInfo.put("method", request.getMethod());
+        debugInfo.put("requestedUserId", userId);
+        
+        // Get auth header info
+        debugInfo.put("hasAuthHeader", authHeader != null);
+        if (authHeader != null) {
+            debugInfo.put("authHeaderStartsWithBearer", authHeader.startsWith("Bearer "));
+            if (authHeader.startsWith("Bearer ")) {
+                String token = authHeader.substring(7);
+                debugInfo.put("tokenLength", token.length());
+                
+                try {
+                    // Try to validate token
+                    boolean isValid = authUtil.validateToken(token);
+                    debugInfo.put("tokenIsValid", isValid);
+                    
+                    if (isValid) {
+                        Long tokenUserId = authUtil.extractUserId(token);
+                        String role = authUtil.getUserRole(token);
+                        debugInfo.put("tokenUserId", tokenUserId);
+                        debugInfo.put("tokenUserRole", role);
+                        debugInfo.put("tokenMatchesRequestedUser", userId.equals(tokenUserId));
+                    }
+                } catch (Exception e) {
+                    debugInfo.put("tokenValidationError", e.getMessage());
+                }
+            }
+        }
+        
+        // Check attributes set by filters
+        Object userIdAttr = request.getAttribute("userId");
+        Object roleAttr = request.getAttribute("role");
+        debugInfo.put("hasUserIdAttribute", userIdAttr != null);
+        debugInfo.put("hasRoleAttribute", roleAttr != null);
+        
+        if (userIdAttr != null) {
+            debugInfo.put("attributeUserId", userIdAttr);
+            debugInfo.put("attributeMatchesRequestedUser", userId.equals(userIdAttr));
+        }
+        
+        if (roleAttr != null) {
+            debugInfo.put("attributeRole", roleAttr);
+        }
+        
+        // Log all headers for debugging
+        Map<String, String> headers = new HashMap<>();
+        Enumeration<String> headerNames = request.getHeaderNames();
+        while (headerNames.hasMoreElements()) {
+            String name = headerNames.nextElement();
+            headers.put(name, request.getHeader(name));
+        }
+        debugInfo.put("headers", headers);
+        
+        logger.error("🔍 DEBUG AUTH INFO: {}", debugInfo);
+        
+        return ResponseEntity.ok(debugInfo);
     }
 } 
