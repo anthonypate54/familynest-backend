@@ -49,19 +49,16 @@ public class SecurityConfig {
                     .requestMatchers("/api/users").permitAll()
                     .requestMatchers("/api/users/connection-test").permitAll()
                     .requestMatchers("/api/users/test-token").permitAll()
-                    .requestMatchers("/api/users/test-token-101").permitAll()
                     .requestMatchers("/api/users/debug-token").permitAll()
                     .requestMatchers("/api/users/test").permitAll()
-                    .requestMatchers("/api/users/101").permitAll()
-                    .requestMatchers("/api/users/101/**").permitAll()
+                    .requestMatchers("/api/users/current").permitAll()
                     .requestMatchers("/api/emergency/**").permitAll()  // Allow all emergency endpoints
                     .requestMatchers("/api/videos/**").permitAll()
-                    .requestMatchers("/api/message-preferences/**").permitAll() // Allow message preferences endpoints
                     .requestMatchers("/error").permitAll()
                     .requestMatchers("/public/**").permitAll() // Permit public endpoints
                     .requestMatchers("/test/**").permitAll() // Permit test endpoints
                     .requestMatchers("/uploads/**").permitAll() // Permit access to uploaded files
-                    .anyRequest().authenticated();
+                    .anyRequest().permitAll(); // Allow our AuthFilter to handle actual authorization
             })
             .headers(headers -> {
                 logger.debug("Configuring security headers");

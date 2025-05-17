@@ -16,8 +16,4 @@ public interface FamilyRepository extends JpaRepository<Family, Long> {
     // Find families by name
     @Query("SELECT f FROM Family f WHERE f.name = :name")
     List<Family> findByName(@Param("name") String name);
-    
-    // Find all families created by a user
-    @Query("SELECT f FROM Family f WHERE f.createdBy.id = :userId")
-    List<Family> findFamiliesCreatedByUser(@Param("userId") Long userId);
 }

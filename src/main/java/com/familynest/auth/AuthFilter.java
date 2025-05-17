@@ -27,40 +27,17 @@ public class AuthFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         logger.error("⚠️ AUTH FILTER - PROCESSING REQUEST FOR URI: {}", path);
         
-        // EMERGENCY BYPASS FOR USER 101
-        if (path.startsWith("/api/users/101") || path.startsWith("/api/emergency") || path.startsWith("/api/message-preferences")) {
-            logger.error("🔓 EMERGENCY BYPASS FOR PATH: {}", path);
-            // Set test user attributes
-            request.setAttribute("userId", 101L);
-            request.setAttribute("role", "ADMIN");
-            chain.doFilter(request, response);
-            return;
-        }
-        
         // PUBLIC ENDPOINTS - explicitly without auth
         // These are high-priority bypass paths that should never require auth
         if (path.equals("/api/users/connection-test") || 
             path.equals("/api/users/login") || 
             path.equals("/api/users") ||
             path.equals("/api/users/test-token") ||
-            path.equals("/api/users/test-token-101") ||
             path.equals("/api/users/debug-token") ||
-            path.equals("/api/users/test") ||
-            path.startsWith("/api/message-preferences") ||
             path.startsWith("/api/videos/public") ||
             path.startsWith("/api/videos/test") ||
             path.startsWith("/uploads/")) {
             logger.error("⭐⭐⭐ EXPLICIT PUBLIC BYPASS FOR PATH: {}", path);
-            chain.doFilter(request, response);
-            return;
-        }
-        
-        // TEMPORARY TEST BYPASS
-        if (path.equals("/api/users/101") || path.equals("/api/users/101/messages")) {
-            logger.error("🧪 TEMPORARY TEST BYPASS for user 101: {}", path);
-            // Set authentication attributes for user 101
-            request.setAttribute("userId", 101L);
-            request.setAttribute("role", "ADMIN");
             chain.doFilter(request, response);
             return;
         }

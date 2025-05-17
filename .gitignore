@@ -38,6 +38,7 @@ out/
 
 ### Application Properties ###
 src/main/resources/application.properties
+src/main/*.sql
 
 ### Uploads Directory ###
 uploads/
@@ -50,9 +51,3 @@ target/
 *.zip
 *.tar.gz
 *.rar
-
-### Custom Ignores ###
-# Ignore shell scripts in src/main
-src/main/**/*.sh
-# Ignore SQL files in src/main
-src/main/**/*.sql

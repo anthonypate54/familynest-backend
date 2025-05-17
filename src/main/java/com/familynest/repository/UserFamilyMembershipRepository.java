@@ -34,12 +34,4 @@ public interface UserFamilyMembershipRepository extends JpaRepository<UserFamily
     // This method will return just the family IDs without loading the entire entities
     @Query("SELECT m.familyId FROM UserFamilyMembership m WHERE m.userId = :userId")
     List<Long> findFamilyIdsByUserId(@Param("userId") Long userId);
-    
-    // Check if a membership exists for a user in a family
-    @Query("SELECT COUNT(m) > 0 FROM UserFamilyMembership m WHERE m.userId = :userId AND m.familyId = :familyId")
-    boolean existsByUserIdAndFamilyId(@Param("userId") Long userId, @Param("familyId") Long familyId);
-    
-    // Find the role of a user in a family
-    @Query("SELECT m.role FROM UserFamilyMembership m WHERE m.userId = :userId AND m.familyId = :familyId")
-    String findRoleByUserIdAndFamilyId(@Param("userId") Long userId, @Param("familyId") Long familyId);
 } 

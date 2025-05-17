@@ -157,7 +157,7 @@ public class UserController {
 
     /**
      * Test token endpoint to help debug auth issues
-     * Generates a valid token for user 101 for testing
+     * Generates a valid test token
      */
     @GetMapping("/test-token")
     @CrossOrigin(origins = "*")
@@ -165,17 +165,28 @@ public class UserController {
         logger.info("TEST TOKEN ENDPOINT ACCESSED");
         
         try {
-            // Create a test token for user ID 101 with role USER
-            String token = authUtil.generateToken(101L, "USER");
+            // Find a valid test user from the database
+            User testUser = userRepository.findAll()
+                .stream()
+                .findFirst()
+                .orElse(null);
+                
+            if (testUser == null) {
+                return ResponseEntity.status(500).body(Map.of("error", "No test user found"));
+            }
+            
+            // Create a test token for the test user
+            String token = authUtil.generateToken(testUser.getId(), "USER");
             
             Map<String, Object> response = new HashMap<>();
             response.put("status", "success");
             response.put("message", "Test token generated");
-            response.put("userId", 101);
+            response.put("userId", testUser.getId());
+            response.put("username", testUser.getUsername());
             response.put("token", token);
             response.put("role", "USER");
             
-            logger.info("Generated test token for userId 101");
+            logger.info("Generated test token for user: {}", testUser.getUsername());
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -188,29 +199,6 @@ public class UserController {
             
             return ResponseEntity.status(500).body(errorResponse);
         }
-    }
-
-    /**
-     * Public test token endpoint for debugging authentication issues
-     */
-    @GetMapping("/test-token-101")
-    @CrossOrigin(origins = "*")
-    public ResponseEntity<Map<String, String>> getTestToken101() {
-        logger.info("TEST TOKEN FOR USER 101 ENDPOINT ACCESSED");
-        
-        // Generate token for test user 101
-        String token = authUtil.generateToken(101L, "ADMIN");
-        
-        Map<String, String> response = new HashMap<>();
-        response.put("userId", "101");
-        response.put("token", token);
-        response.put("role", "ADMIN");
-        response.put("timestamp", String.valueOf(System.currentTimeMillis()));
-        
-        logger.error("Generated fresh test token for user 101: {}", token);
-        logger.error("Use this token for authentication in the app, it's freshly generated");
-        
-        return ResponseEntity.ok(response);
     }
     
     /**
@@ -499,14 +487,14 @@ public class UserController {
                 Path filePath = photosDirPath.resolve(fileName);
                 Files.write(filePath, photo.getBytes());
                 
-                // Store the photo URL path in the database using a direct update query
-                // instead of loading the entire entity graph
+                // Store the photo URL path in the database
                 String photoPath = photosUrlPath + "/" + fileName;
                 
-                // Use JPQL to update only the photo field
-                int updated = userRepository.updateUserPhoto(id, photoPath);
-                
-                if (updated > 0) {
+                // Get the user and update the photo field
+                User user = userRepository.findById(id).orElse(null);
+                if (user != null) {
+                    user.setPhoto(photoPath);
+                    userRepository.save(user);
                     logger.debug("Photo updated successfully for user ID: {}", id);
                     return ResponseEntity.ok().build();
                 } else {
@@ -707,13 +695,14 @@ public class UserController {
             }
             
             // Determine which family ID to use for the message
-            Long familyId = null;
+            // Need to use a final reference for the lambda
+            final Long[] familyIdHolder = new Long[1];
             
             // If explicit family ID was provided in the request, use it
             if (familyIdStr != null && !familyIdStr.isEmpty()) {
                 try {
-                    familyId = Long.parseLong(familyIdStr);
-                    logger.debug("Using explicitly provided family ID: {}", familyId);
+                    familyIdHolder[0] = Long.parseLong(familyIdStr);
+                    logger.debug("Using explicitly provided family ID: {}", familyIdHolder[0]);
                 } catch (NumberFormatException e) {
                     logger.error("Invalid family ID format: {}", familyIdStr);
                     return ResponseEntity.badRequest().build();
@@ -724,23 +713,28 @@ public class UserController {
                 
                 if (!activeFamilyIds.isEmpty()) {
                     // Use the first active family ID if available
-                    familyId = activeFamilyIds.get(0);
-                    logger.debug("Using user's first active family ID from direct query: {}", familyId);
+                    familyIdHolder[0] = activeFamilyIds.get(0);
+                    logger.debug("Using user's first active family ID from direct query: {}", familyIdHolder[0]);
                 } else {
                     // Fallback to any family ID
                     List<Long> familyIds = userFamilyMembershipRepository.findFamilyIdsByUserId(id);
-                    familyId = !familyIds.isEmpty() ? familyIds.get(0) : null;
-                    logger.debug("No active family IDs found, using first family ID: {}", familyId);
+                    familyIdHolder[0] = !familyIds.isEmpty() ? familyIds.get(0) : null;
+                    logger.debug("No active family IDs found, using first family ID: {}", familyIdHolder[0]);
                 }
             }
             
-            if (familyId == null) {
+            if (familyIdHolder[0] == null) {
                 logger.debug("No valid family ID found for message");
                 return ResponseEntity.badRequest().build();
             }
             
-            // Verify the user is a member of this family with direct query
-            boolean isMember = userFamilyMembershipRepository.existsByUserIdAndFamilyId(id, familyId);
+            // Use a final reference to the familyId for the lambda
+            final Long familyId = familyIdHolder[0];
+            
+            // Verify the user is a member of this family by querying for membership
+            List<UserFamilyMembership> userMemberships = userFamilyMembershipRepository.findByUserId(id);
+            boolean isMember = userMemberships.stream()
+                .anyMatch(membership -> membership.getFamilyId().equals(familyId));
             
             if (!isMember) {
                 logger.debug("User {} is not a member of family {}", id, familyId);
@@ -756,8 +750,8 @@ public class UserController {
                 isAuthorized = true;
             } else {
                 // Check if user is an admin of the family
-                String userRole = userFamilyMembershipRepository.findRoleByUserIdAndFamilyId(id, familyId);
-                isAuthorized = "ADMIN".equals(userRole);
+                Optional<UserFamilyMembership> membership = userFamilyMembershipRepository.findByUserIdAndFamilyId(id, familyId);
+                isAuthorized = membership.isPresent() && "ADMIN".equals(membership.get().getRole());
             }
             
             if (!isAuthorized) {
@@ -766,7 +760,8 @@ public class UserController {
             }
             
             // Get minimal user data needed for the message
-            String username = userRepository.findUsernameById(id);
+            User sender = userRepository.findById(id).orElse(null);
+            String username = sender != null ? sender.getUsername() : "unknown";
             
             // Create the message
             Message message = new Message();
@@ -842,7 +837,13 @@ public class UserController {
                                 int retryCount = 0;
                                 while (!Files.exists(verifyThumbnailPath) && retryCount < maxRetries) {
                                     logger.debug("Waiting for thumbnail file to appear on disk: {}", verifyThumbnailPath);
-                                    Thread.sleep(100); // Wait 100ms
+                                    try {
+                                        Thread.sleep(100); // Wait 100ms
+                                    } catch (InterruptedException ie) {
+                                        Thread.currentThread().interrupt();
+                                        logger.warn("Thread interrupted while waiting for thumbnail", ie);
+                                        break;
+                                    }
                                     retryCount++;
                                 }
                                 
@@ -866,8 +867,8 @@ public class UserController {
                             logger.warn("Failed to create thumbnail for video");
                         }
                     }
-                } catch (IOException | InterruptedException e) {
-                    logger.error("Error saving media file or waiting for thumbnail: {}", e.getMessage(), e);
+                } catch (IOException e) {
+                    logger.error("Error saving media file: {}", e.getMessage(), e);
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
                 }
             } else if (videoUrl != null && "video".equals(mediaType)) {
@@ -1681,18 +1682,10 @@ public class UserController {
             
             if (!isAdmin || familyId == null) {
                 // If we couldn't find a family where the user is an admin, try a direct database query
-                try {
-                    logger.debug("Trying direct database query to find user's family");
-                    List<Family> ownedFamilies = familyRepository.findFamiliesCreatedByUser(id);
-                    if (!ownedFamilies.isEmpty()) {
-                        Family ownedFamily = ownedFamilies.get(0);
-                        familyId = ownedFamily.getId();
-                        isAdmin = true;
-                        logger.debug("Found family {} owned by user {} via direct query", familyId, id);
-                    }
-                } catch (Exception e) {
-                    logger.error("Error querying owned families: {}", e.getMessage(), e);
-                }
+                // Since we can't directly query for families created by user,
+                // we'll skip this attempt and just use what we found in userFamilies
+                logger.debug("Skipping direct database query for owned families");
+                // No additional lookup attempt since required repository method is not available
             }
             
             if (!isAdmin || familyId == null) {
