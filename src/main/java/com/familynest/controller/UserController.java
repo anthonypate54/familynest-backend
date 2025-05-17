@@ -138,21 +138,34 @@ public class UserController {
     }
 
     /**
-     * Public connection test endpoint that doesn't require authentication
-     * Used to debug connection issues from the Flutter app
+     * Public connection test endpoint for Android devices
+     * Specifically designed to help test connectivity issues
      */
     @GetMapping("/connection-test")
     @CrossOrigin(origins = "*")
-    public ResponseEntity<Map<String, Object>> connectionTest() {
-        logger.info("PUBLIC CONNECTION TEST ENDPOINT ACCESSED");
+    public ResponseEntity<String> androidConnectionTest() {
+        String html = "<!DOCTYPE html>" +
+                      "<html>" +
+                      "<head>" +
+                      "    <title>Android Connection Test</title>" +
+                      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+                      "    <style>" +
+                      "        body { font-family: Arial, sans-serif; padding: 20px; }" +
+                      "        .success { color: green; font-weight: bold; font-size: 24px; }" +
+                      "    </style>" +
+                      "</head>" +
+                      "<body>" +
+                      "    <h1>FamilyNest Android Test</h1>" +
+                      "    <p class=\"success\">✅ CONNECTION SUCCESSFUL!</p>" +
+                      "    <p>Your Android device can successfully reach the FamilyNest server.</p>" +
+                      "    <p>The Flutter app should now be able to connect properly.</p>" +
+                      "    <p>Server time: " + java.time.LocalDateTime.now() + "</p>" +
+                      "</body>" +
+                      "</html>";
         
-        Map<String, Object> response = new HashMap<>();
-        response.put("status", "success");
-        response.put("message", "Backend connection successful");
-        response.put("timestamp", System.currentTimeMillis());
-        response.put("server", "FamilyNest Backend");
-        
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(html);
     }
 
     /**
@@ -1781,5 +1794,40 @@ public class UserController {
             logger.error("Error creating invitation: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error creating invitation: " + e.getMessage()));
         }
+    }
+
+    @GetMapping("/android-test")
+    public ResponseEntity<String> androidTest() {
+        String html = "<!DOCTYPE html>" +
+                      "<html>" +
+                      "<head>" +
+                      "    <title>Android Connection Test</title>" +
+                      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+                      "    <style>" +
+                      "        body { font-family: Arial, sans-serif; padding: 20px; }" +
+                      "        .success { color: green; font-weight: bold; font-size: 24px; }" +
+                      "    </style>" +
+                      "</head>" +
+                      "<body>" +
+                      "    <h1>FamilyNest Android Test</h1>" +
+                      "    <p class=\"success\">✅ CONNECTION SUCCESSFUL!</p>" +
+                      "    <p>Your Android device can successfully reach the FamilyNest server.</p>" +
+                      "    <p>The Flutter app should now be able to connect properly.</p>" +
+                      "    <p>Server time: " + java.time.LocalDateTime.now() + "</p>" +
+                      "</body>" +
+                      "</html>";
+        
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(html);
+    }
+
+    /**
+     * Super-simple plain text test endpoint with no HTML
+     */
+    @GetMapping(value = "/plaintest", produces = MediaType.TEXT_PLAIN_VALUE)
+    @CrossOrigin(origins = "*")
+    public ResponseEntity<String> plainTextTest() {
+        return ResponseEntity.ok("SERVER TEST OK: " + java.time.LocalDateTime.now());
     }
 }

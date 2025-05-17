@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FamilyNest Server Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #4285f4;
+        }
+        .test-button {
+            display: inline-block;
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 16px;
+            margin: 20px 0;
+            cursor: pointer;
+            border-radius: 4px;
+            border: none;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-height: 50px;
+        }
+    </style>
+</head>
+<body>
+    <h1>FamilyNest Server Test</h1>
+    <p>This page tests if your device can connect to the FamilyNest backend server.</p>
+    
+    <button class="test-button" onclick="testConnection()">Test Server Connection</button>
+    
+    <div id="result">
+        <p>Click the button above to test the connection.</p>
+    </div>
+    
+    <script>
+        function testConnection() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = "<p>Testing connection...</p>";
+            
+            fetch('/api/users/test', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.text();
+                }
+                throw new Error('Network response was not ok: ' + response.status);
+            })
+            .then(data => {
+                resultDiv.innerHTML = `
+                    <p style="color: green; font-weight: bold;">✅ Success!</p>
+                    <p>Server responded with: "${data}"</p>
+                    <p>Your device can successfully connect to the FamilyNest server.</p>
+                    <p>The Flutter app should work correctly now.</p>
+                `;
+            })
+            .catch(error => {
+                resultDiv.innerHTML = `
+                    <p style="color: red; font-weight: bold;">❌ Connection Failed</p>
+                    <p>Error: ${error.message}</p>
+                    <p>Make sure:</p>
+                    <ul>
+                        <li>Your phone is on the same WiFi network as the server</li>
+                        <li>The server is running at 10.0.0.10:8080</li>
+                        <li>There are no firewall issues blocking the connection</li>
+                    </ul>
+                `;
+            });
+        }
+    </script>
+</body>
+</html> 
