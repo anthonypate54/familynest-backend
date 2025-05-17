@@ -107,6 +107,12 @@ public class UserController {
     @Value("${app.url.images:/uploads/images}")
     private String imagesUrlPath;
 
+    @Value("${app.url.photos:/uploads/photos}")
+    private String photosUrlPath;
+    
+    @Value("${app.photos.dir:${file.upload-dir}/photos}")
+    private String photosDir;
+
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -387,10 +393,19 @@ public class UserController {
 
             if (photo != null && !photo.isEmpty()) {
                 String fileName = System.currentTimeMillis() + "_" + photo.getOriginalFilename();
-                Path filePath = Paths.get(uploadDir, fileName);
-                Files.createDirectories(filePath.getParent());
+                
+                // Create photos directory if it doesn't exist
+                Path photosDirPath = Paths.get(photosDir);
+                if (!Files.exists(photosDirPath)) {
+                    Files.createDirectories(photosDirPath);
+                }
+                
+                // Save file to photos directory
+                Path filePath = photosDirPath.resolve(fileName);
                 Files.write(filePath, photo.getBytes());
-                user.setPhoto("/api/users/photos/" + fileName);
+                
+                // Store the photo URL path in the database (not the API endpoint)
+                user.setPhoto(photosUrlPath + "/" + fileName);
             }
 
             User savedUser = userRepository.save(user);
@@ -457,25 +472,47 @@ public class UserController {
         }
     }
     @PostMapping("/{id}/update-photo")
+    @Transactional
     public ResponseEntity<Void> updatePhoto(
         @PathVariable Long id,
         @RequestPart(value = "photo", required = true) MultipartFile photo) {
         logger.debug("Received request to update photo for user ID: {}", id);
         try {
-            User user = userRepository.findById(id).orElse(null);
-            if (user == null) {
+            // Use a more efficient query that doesn't load related entities
+            // Check if user exists first
+            boolean userExists = userRepository.existsById(id);
+            if (!userExists) {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().build();
             }
+            
             if (photo != null && !photo.isEmpty()) {
                 String fileName = System.currentTimeMillis() + "_" + photo.getOriginalFilename();
-                Path filePath = Paths.get(uploadDir, fileName);
-                Files.createDirectories(filePath.getParent());
+                
+                // Create photos directory if it doesn't exist
+                Path photosDirPath = Paths.get(photosDir);
+                if (!Files.exists(photosDirPath)) {
+                    Files.createDirectories(photosDirPath);
+                }
+                
+                // Save file to photos directory
+                Path filePath = photosDirPath.resolve(fileName);
                 Files.write(filePath, photo.getBytes());
-                user.setPhoto("/api/users/photos/" + fileName);
-                userRepository.save(user);
-                logger.debug("Photo updated successfully for user ID: {}", id);
-                return ResponseEntity.ok().build();
+                
+                // Store the photo URL path in the database using a direct update query
+                // instead of loading the entire entity graph
+                String photoPath = photosUrlPath + "/" + fileName;
+                
+                // Use JPQL to update only the photo field
+                int updated = userRepository.updateUserPhoto(id, photoPath);
+                
+                if (updated > 0) {
+                    logger.debug("Photo updated successfully for user ID: {}", id);
+                    return ResponseEntity.ok().build();
+                } else {
+                    logger.error("Failed to update photo for user ID: {}", id);
+                    return ResponseEntity.badRequest().build();
+                }
             } else {
                 logger.debug("No photo provided for user ID: {}", id);
                 return ResponseEntity.badRequest().build();
@@ -651,17 +688,20 @@ public class UserController {
         @RequestParam(value = "videoUrl", required = false) String videoUrl,
         @RequestParam(value = "thumbnailUrl", required = false) String thumbnailUrl) {
         
+            logger.debug("ANTHONY POST videoUrl = {} ", videoUrl);
+            logger.debug("ANTHONY POST 2 thumbnailUrl = {} ", thumbnailUrl);
+
         logger.debug("Received request to post message for user ID: {}", id);
         logger.debug("Content: {}, Media: {}, MediaType: {}, FamilyId: {}", 
-                content, 
+                 content, 
                 media != null ? media.getOriginalFilename() + " (" + media.getSize() + " bytes)" : "null", 
                 mediaType,
                 familyIdStr);
                 
         try {
-            logger.debug("Step 1: Finding user with ID: {}", id);
-            User user = userRepository.findById(id).orElse(null);
-            if (user == null) {
+            // Check if user exists with a direct query instead of loading the entire entity
+            logger.debug("Step 1: Checking if user exists with ID: {}", id);
+            if (!userRepository.existsById(id)) {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().build();
             }
@@ -699,11 +739,9 @@ public class UserController {
                 return ResponseEntity.badRequest().build();
             }
             
-            // Verify the user is a member of this family
-            boolean isMember = userRepository.findMembersOfFamily(familyId)
-                .stream()
-                .anyMatch(member -> member.getId().equals(id));
-                
+            // Verify the user is a member of this family with direct query
+            boolean isMember = userFamilyMembershipRepository.existsByUserIdAndFamilyId(id, familyId);
+            
             if (!isMember) {
                 logger.debug("User {} is not a member of family {}", id, familyId);
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
@@ -718,8 +756,8 @@ public class UserController {
                 isAuthorized = true;
             } else {
                 // Check if user is an admin of the family
-                Optional<UserFamilyMembership> adminMembership = userFamilyMembershipRepository.findByUserIdAndFamilyId(id, familyId);
-                isAuthorized = adminMembership.isPresent() && "ADMIN".equals(adminMembership.get().getRole());
+                String userRole = userFamilyMembershipRepository.findRoleByUserIdAndFamilyId(id, familyId);
+                isAuthorized = "ADMIN".equals(userRole);
             }
             
             if (!isAuthorized) {
@@ -727,12 +765,15 @@ public class UserController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
             
+            // Get minimal user data needed for the message
+            String username = userRepository.findUsernameById(id);
+            
             // Create the message
             Message message = new Message();
             message.setContent(content != null ? content : "");
-            message.setSenderUsername(user.getUsername());
-            message.setSenderId(user.getId());
-            message.setUserId(user.getId());
+            message.setSenderUsername(username);
+            message.setSenderId(id);
+            message.setUserId(id);
             message.setFamilyId(familyId);
             message.setTimestamp(LocalDateTime.now());
             
@@ -789,6 +830,29 @@ public class UserController {
                                 
                             logger.error("PATH DEBUG: Generated thumbnail result: {}", generatedThumbnailPath);
                             thumbnailCreated = generatedThumbnailPath != null;
+                            
+                            // Add a verification step to ensure thumbnail file exists
+                            if (thumbnailCreated) {
+                                // Extract the filename from the generated path
+                                String extractedFilename = generatedThumbnailPath.substring(generatedThumbnailPath.lastIndexOf('/') + 1);
+                                Path verifyThumbnailPath = Paths.get(thumbnailDir, extractedFilename);
+                                
+                                // Verify the thumbnail file actually exists on disk
+                                int maxRetries = 5;
+                                int retryCount = 0;
+                                while (!Files.exists(verifyThumbnailPath) && retryCount < maxRetries) {
+                                    logger.debug("Waiting for thumbnail file to appear on disk: {}", verifyThumbnailPath);
+                                    Thread.sleep(100); // Wait 100ms
+                                    retryCount++;
+                                }
+                                
+                                if (Files.exists(verifyThumbnailPath)) {
+                                    logger.debug("Verified thumbnail exists on disk: {}", verifyThumbnailPath);
+                                } else {
+                                    logger.warn("Could not verify thumbnail exists after {} retries: {}", maxRetries, verifyThumbnailPath);
+                                    thumbnailCreated = false;
+                                }
+                            }
                         } catch (Exception ex) {
                             logger.error("Error generating thumbnail: {}", ex.getMessage(), ex);
                         }
@@ -802,8 +866,8 @@ public class UserController {
                             logger.warn("Failed to create thumbnail for video");
                         }
                     }
-                } catch (IOException e) {
-                    logger.error("Error saving media file: {}", e.getMessage(), e);
+                } catch (IOException | InterruptedException e) {
+                    logger.error("Error saving media file or waiting for thumbnail: {}", e.getMessage(), e);
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
                 }
             } else if (videoUrl != null && "video".equals(mediaType)) {
@@ -887,8 +951,6 @@ public class UserController {
                         "  ON m.id = cc.message_id " +
                         "ORDER BY m.id DESC";
 
-            logger.error("DEBUG SQL QUERY: \n{}", sql);
-
             // Check if user exists first for a better error message
             if (!userRepository.existsById(id)) {
                 logger.debug("User not found for ID: {}", id);
@@ -899,29 +961,17 @@ public class UserController {
             
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
             
-            // Debug output for all keys and values in the first result
-            if (!results.isEmpty() && results.size() > 0) {
-                logger.error("DEBUG: Number of results: {}", results.size());
-                Map<String, Object> firstResult = results.get(0);
-                logger.error("DEBUG: Keys in first result: {}", firstResult.keySet());
+            // Debug output only for development - just log count, not each individual message
+            if (logger.isDebugEnabled() && !results.isEmpty()) {
+                logger.debug("Number of messages retrieved: {}", results.size());
                 
-                // Show timestamp values for debugging order
-                logger.error("FIRST MESSAGE TIMESTAMP: {}", firstResult.get("timestamp"));
-                if (results.size() > 1) {
-                    logger.error("SECOND MESSAGE TIMESTAMP: {}", results.get(1).get("timestamp"));
-                }
-                
-                if (results.size() > 2) {
-                    logger.error("LAST MESSAGE TIMESTAMP: {}", results.get(results.size()-1).get("timestamp"));
-                }
-                
-                // Specifically look for thumbnail_url
-                logger.error("DEBUG: Has thumbnail_url? {}", firstResult.containsKey("thumbnail_url"));
-                logger.error("DEBUG: thumbnail_url value: {}", firstResult.get("thumbnail_url"));
-                
-                // Print all key-value pairs
-                for (Map.Entry<String, Object> entry : firstResult.entrySet()) {
-                    logger.error("DEBUG: {} = {}", entry.getKey(), entry.getValue());
+                // Only log details of first message as sample
+                if (results.size() > 0) {
+                    Map<String, Object> firstResult = results.get(0);
+                    logger.debug("Sample message data - ID: {}, timestamp: {}, has thumbnail: {}", 
+                        firstResult.get("id"), 
+                        firstResult.get("timestamp"),
+                        firstResult.get("thumbnail_url") != null);
                 }
             }
             
@@ -941,26 +991,16 @@ public class UserController {
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
                 
-                // Add detailed logging for thumbnail_url
-                Object thumbnailUrlValue = message.get("thumbnail_url");
-                logger.error("DEBUG: Message ID: {}, thumbnail_url value: {}", message.get("id"), thumbnailUrlValue);
-                messageMap.put("thumbnailUrl", thumbnailUrlValue); 
+                // Add thumbnail URL without excessive logging
+                messageMap.put("thumbnailUrl", message.get("thumbnail_url")); 
                 
-                // If there's no thumbnailUrl but there is a media_type of video, log a warning
-                if (thumbnailUrlValue == null && "video".equals(message.get("media_type"))) {
-                    logger.error("WARNING: Video message ID {} has no thumbnail_url", message.get("id"));
+                // Add video message thumbnail URL warning only once
+                if ("video".equals(message.get("media_type")) && message.get("thumbnail_url") == null) {
+                    logger.debug("Video message ID {} has no thumbnail_url", message.get("id"));
                 }
                 
                 return messageMap;
             }).collect(Collectors.toList());
-            
-            // Add explicit debug logging for video messages
-            for (Map<String, Object> msg : response) {
-                if ("video".equals(msg.get("mediaType"))) {
-                    logger.error("DEBUG: Video Message ID: {}, Has thumbnailUrl key: {}, thumbnailUrl value: {}", 
-                               msg.get("id"), msg.containsKey("thumbnailUrl"), msg.get("thumbnailUrl"));
-                }
-            }
             
             logger.debug("Returning {} messages for user {} using a single optimized query", response.size(), id);
             return ResponseEntity.ok(response);
@@ -1467,46 +1507,6 @@ public class UserController {
         }
     }
 
-    @GetMapping("/photos/{filename:.+}")
-    public ResponseEntity<Resource> servePhoto(@PathVariable String filename, 
-                                              HttpServletRequest request) {
-        logger.debug("Received request to serve photo: {}", filename);
-        try {
-            // Resolve the file path
-            Path filePath = Paths.get(uploadDir).resolve(filename).normalize();
-            Resource resource = new UrlResource(filePath.toUri());
-            
-            // Check if the file exists
-            if (!resource.exists()) {
-                logger.debug("Photo not found: {}", filename);
-                return ResponseEntity.notFound().build();
-            }
-            
-            // Determine content type
-            String contentType = null;
-            try {
-                contentType = request.getServletContext().getMimeType(resource.getFile().getAbsolutePath());
-            } catch (IOException ex) {
-                logger.debug("Could not determine file type for: {}", filename);
-            }
-            
-            // Fallback to the default content type if type could not be determined
-            if (contentType == null) {
-                contentType = "application/octet-stream";
-            }
-            
-            logger.debug("Serving photo: {} with content type: {}", filename, contentType);
-            
-            // Return the resource with appropriate headers
-            return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .body(resource);
-        } catch (Exception e) {
-            logger.error("Error serving photo: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().build();
-        }
-    }
-
     /**
      * Public test endpoint for uploading videos without authentication
      * ONLY FOR DEVELOPMENT TESTING - REMOVE IN PRODUCTION
@@ -1565,6 +1565,29 @@ public class UserController {
                     
                 logger.error("PATH DEBUG: Generated thumbnail result: {}", generatedThumbnailPath);
                 thumbnailCreated = generatedThumbnailPath != null;
+                
+                // Add a verification step to ensure thumbnail file exists
+                if (thumbnailCreated) {
+                    // Extract the filename from the generated path
+                    String extractedFilename = generatedThumbnailPath.substring(generatedThumbnailPath.lastIndexOf('/') + 1);
+                    Path verifyThumbnailPath = Paths.get(thumbnailDir, extractedFilename);
+                    
+                    // Verify the thumbnail file actually exists on disk
+                    int maxRetries = 5;
+                    int retryCount = 0;
+                    while (!Files.exists(verifyThumbnailPath) && retryCount < maxRetries) {
+                        logger.debug("Waiting for thumbnail file to appear on disk: {}", verifyThumbnailPath);
+                        Thread.sleep(100); // Wait 100ms
+                        retryCount++;
+                    }
+                    
+                    if (Files.exists(verifyThumbnailPath)) {
+                        logger.debug("Verified thumbnail exists on disk: {}", verifyThumbnailPath);
+                    } else {
+                        logger.warn("Could not verify thumbnail exists after {} retries: {}", maxRetries, verifyThumbnailPath);
+                        thumbnailCreated = false;
+                    }
+                }
             } catch (Exception ex) {
                 logger.error("Error generating thumbnail: {}", ex.getMessage(), ex);
             }
@@ -1590,6 +1613,180 @@ public class UserController {
             errorResponse.put("status", "error");
             errorResponse.put("message", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/{id}/invite")
+    public ResponseEntity<Map<String, Object>> inviteUser(
+            @PathVariable Long id,
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, String> inviteData) {
+        logger.debug("Received request to invite user from user ID: {}", id);
+        try {
+            // Validate the request
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            if (!authUtil.validateToken(token)) {
+                logger.debug("Unauthorized access attempt by user ID: {}", id);
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
+            }
+
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null || !userId.equals(id)) {
+                logger.debug("Unauthorized access attempt by user ID: {}", id);
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
+            }
+
+            // Get the user and verify they belong to a family
+            User inviter = userRepository.findById(id).orElse(null);
+            if (inviter == null) {
+                logger.debug("Inviter not found for ID: {}", id);
+                return ResponseEntity.badRequest().body(Map.of("error", "Inviter not found"));
+            }
+
+            // First get all families the user belongs to where they are an ADMIN
+            List<Map<String, Object>> userFamilies = getUserFamilies(id).getBody();
+            
+            // Add debug logs to see what we're getting
+            logger.debug("User families data for user {}: {}", id, userFamilies);
+            if (userFamilies != null && !userFamilies.isEmpty()) {
+                logger.debug("First family data: {}", userFamilies.get(0));
+                logger.debug("First family keys: {}", userFamilies.get(0).keySet());
+            }
+            
+            boolean isAdmin = false;
+            Long familyId = null;
+            
+            // Look for a family where the user is an admin/owner
+            if (userFamilies != null) {
+                for (Map<String, Object> family : userFamilies) {
+                    if ((Boolean) family.getOrDefault("isOwner", false)) {
+                        isAdmin = true;
+                        // Use safe conversion with null check
+                        Object familyIdObj = family.get("familyId");
+                        if (familyIdObj != null) {
+                            if (familyIdObj instanceof Number) {
+                                familyId = ((Number) familyIdObj).longValue();
+                            } else if (familyIdObj instanceof String) {
+                                try {
+                                    familyId = Long.parseLong((String) familyIdObj);
+                                } catch (NumberFormatException e) {
+                                    logger.warn("Could not parse familyId: {}", familyIdObj);
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            if (!isAdmin || familyId == null) {
+                // If we couldn't find a family where the user is an admin, try a direct database query
+                try {
+                    logger.debug("Trying direct database query to find user's family");
+                    List<Family> ownedFamilies = familyRepository.findFamiliesCreatedByUser(id);
+                    if (!ownedFamilies.isEmpty()) {
+                        Family ownedFamily = ownedFamilies.get(0);
+                        familyId = ownedFamily.getId();
+                        isAdmin = true;
+                        logger.debug("Found family {} owned by user {} via direct query", familyId, id);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error querying owned families: {}", e.getMessage(), e);
+                }
+            }
+            
+            if (!isAdmin || familyId == null) {
+                logger.debug("User ID {} is not an admin of any family", id);
+                return ResponseEntity.badRequest().body(Map.of("error", "User must be a family admin to send invites"));
+            }
+
+            String inviteeEmail = inviteData.get("email");
+            if (inviteeEmail == null || inviteeEmail.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invitee email is required"));
+            }
+            
+            // Get the family ID from the request if provided, otherwise use the family where user is admin
+            Long requestedFamilyId = null;
+            if (inviteData.containsKey("familyId") && inviteData.get("familyId") != null) {
+                try {
+                    requestedFamilyId = Long.parseLong(inviteData.get("familyId"));
+                } catch (NumberFormatException e) {
+                    logger.debug("Invalid family ID format: {}", inviteData.get("familyId"));
+                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid family ID format"));
+                }
+                
+                // Verify the user is an admin of the requested family
+                boolean isAdminOfRequestedFamily = false;
+                if (userFamilies != null) {
+                    for (Map<String, Object> family : userFamilies) {
+                        Object familyIdObj = family.get("familyId");
+                        Long currentFamilyId = null;
+                        
+                        // Safe conversion with null check
+                        if (familyIdObj != null) {
+                            if (familyIdObj instanceof Number) {
+                                currentFamilyId = ((Number) familyIdObj).longValue();
+                            } else if (familyIdObj instanceof String) {
+                                try {
+                                    currentFamilyId = Long.parseLong((String) familyIdObj);
+                                } catch (NumberFormatException e) {
+                                    logger.warn("Could not parse familyId: {}", familyIdObj);
+                                    continue;
+                                }
+                            }
+                        }
+                        
+                        if (currentFamilyId != null && 
+                            currentFamilyId.equals(requestedFamilyId) && 
+                            (Boolean) family.getOrDefault("isOwner", false)) {
+                            isAdminOfRequestedFamily = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!isAdminOfRequestedFamily) {
+                    logger.debug("User ID {} is not an admin of family ID {}", id, requestedFamilyId);
+                    return ResponseEntity.badRequest().body(Map.of("error", "User is not authorized to invite to this family"));
+                }
+                
+                familyId = requestedFamilyId;
+            }
+
+            // Check if invitee already has a pending invitation to this family
+            List<Invitation> existingInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
+                inviteeEmail, familyId, "PENDING");
+                
+            if (!existingInvitations.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "An invitation to this family is already pending for this email"));
+            }
+
+            // Create and save the invitation
+            Invitation invitation = new Invitation();
+            invitation.setFamilyId(familyId);
+            invitation.setSenderId(id);
+            invitation.setEmail(inviteeEmail);
+            invitation.setStatus("PENDING");
+            invitation.setCreatedAt(LocalDateTime.now());
+            invitation.setExpiresAt(LocalDateTime.now().plusDays(7));
+            
+            Invitation savedInvitation = invitationRepository.save(invitation);
+
+            logger.debug("Invitation created successfully: ID={}, familyId={}, email={}", 
+                savedInvitation.getId(), familyId, inviteeEmail);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("invitationId", savedInvitation.getId());
+            response.put("familyId", familyId);
+            response.put("email", inviteeEmail);
+            response.put("status", savedInvitation.getStatus());
+            response.put("expiresAt", savedInvitation.getExpiresAt().toString());
+            response.put("message", "Invitation sent successfully");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error creating invitation: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error creating invitation: " + e.getMessage()));
         }
     }
 }

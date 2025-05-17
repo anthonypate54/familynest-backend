@@ -35,8 +35,8 @@ public class PublicVideoController {
     public ResponseEntity<Map<String, String>> healthCheck() {
         logger.info("PUBLIC VIDEO HEALTH CHECK ENDPOINT ACCESSED");
         Map<String, String> response = new HashMap<>();
-        response.put("status", "UP");
-        response.put("message", "Public video processing service is available");
+        response.put("status", "DISABLED");
+        response.put("message", "Public video processing service has been disabled for security reasons");
         return ResponseEntity.ok(response);
     }
 
@@ -48,53 +48,16 @@ public class PublicVideoController {
      */
     @PostMapping("/upload")
     public ResponseEntity<Map<String, String>> uploadVideo(@RequestParam("file") MultipartFile file) {
-        logger.info("PUBLIC VIDEO UPLOAD ENDPOINT ACCESSED: {}", file != null ? file.getOriginalFilename() : "null");
+        logger.warn("DISABLED PUBLIC VIDEO UPLOAD ENDPOINT ACCESSED: {}", file != null ? file.getOriginalFilename() : "null");
         
-        // Simple test response for debugging
-        if (true) {
-            Map<String, String> testResponse = new HashMap<>();
-            testResponse.put("videoUrl", "/test_video_public.mp4");
-            testResponse.put("thumbnailUrl", "/test_thumbnail_public.jpg");
-            testResponse.put("message", "Public controller test response");
-            logger.info("Returning test data without processing - PUBLIC ENDPOINT");
-            return ResponseEntity.ok(testResponse);
-        }
+        // Return a security error message
+        Map<String, String> errorResponse = new HashMap<>();
+        errorResponse.put("status", "DISABLED");
+        errorResponse.put("error", "This endpoint has been disabled for security reasons");
+        errorResponse.put("message", "Please use the authenticated API endpoints instead");
+        logger.info("Rejected public video upload attempt");
         
-        // Normal processing logic (not used during testing)
-        if (file.isEmpty()) {
-            logger.error("Empty file uploaded");
-            return ResponseEntity.badRequest().body(
-                Map.of("error", "Empty file uploaded")
-            );
-        }
-        
-        try {
-            String contentType = file.getContentType();
-            if (contentType == null || !contentType.startsWith("video/")) {
-                logger.error("Invalid content type: {}", contentType);
-                return ResponseEntity.badRequest().body(
-                    Map.of("error", "Invalid file type. Only video files are accepted")
-                );
-            }
-            
-            // Process the video file (save and generate thumbnail)
-            VideoProcessingResult result = videoService.processVideo(file);
-            
-            // Return the URLs for the client to use
-            Map<String, String> response = new HashMap<>();
-            response.put("videoUrl", result.getVideoUrl());
-            response.put("thumbnailUrl", result.getThumbnailUrl());
-            
-            logger.info("Successfully processed video: {}", file.getOriginalFilename());
-            logger.info("Video URL: {}, Thumbnail URL: {}", result.getVideoUrl(), result.getThumbnailUrl());
-            
-            return ResponseEntity.ok(response);
-        } catch (IOException e) {
-            logger.error("Failed to process video: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError().body(
-                Map.of("error", "Failed to process video: " + e.getMessage())
-            );
-        }
+        return ResponseEntity.status(403).body(errorResponse);
     }
 
     /**
@@ -106,11 +69,10 @@ public class PublicVideoController {
         logger.info("PUBLIC VIDEO TEST ENDPOINT ACCESSED");
         
         Map<String, String> response = new HashMap<>();
-        response.put("status", "SUCCESS");
-        response.put("videoUrl", "/uploads/public_test_video.mp4");
-        response.put("thumbnailUrl", "/uploads/thumbnails/public_test_thumbnail.jpg");
+        response.put("status", "DISABLED");
+        response.put("message", "Public video endpoints have been disabled for security reasons");
         
-        logger.info("Returning public test video data");
+        logger.info("Returning disabled status for public test endpoint");
         return ResponseEntity.ok(response);
     }
 } 

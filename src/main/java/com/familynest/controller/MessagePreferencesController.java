@@ -15,11 +15,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,9 @@ public class MessagePreferencesController {
     private UserFamilyMessageSettingsRepository messageSettingsRepository;
 
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private JwtUtil jwtUtil;
 
     @Autowired
@@ -54,23 +58,30 @@ public class MessagePreferencesController {
      * Get message preferences for a user
      */
     @GetMapping("/{userId}")
+    @Cacheable(value = "messagePreferences", key = "#userId", unless = "#result.status != 200")
     public ResponseEntity<List<Map<String, Object>>> getMessagePreferences(
             @PathVariable Long userId,
-            @RequestHeader("Authorization") String authHeader,
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
             HttpServletRequest request) {
         logger.debug("Received request to get message preferences for user ID: {}", userId);
+        long startTime = System.currentTimeMillis();
         try {
             // Validate token and user
             Long tokenUserId;
             Object userIdAttr = request.getAttribute("userId");
             if (userIdAttr != null) {
-                // Use the userId attribute set by the TestAuthFilter
+                // Use the userId attribute set by the TestAuthFilter or AuthFilter bypass
                 tokenUserId = (Long) userIdAttr;
-                logger.debug("Using test userId: {}", tokenUserId);
-            } else {
+                logger.debug("Using userId from request attribute: {}", tokenUserId);
+            } else if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 // Normal authentication flow
                 String token = authHeader.replace("Bearer ", "");
                 tokenUserId = authUtil.extractUserId(token);
+                logger.debug("Extracted userId from token: {}", tokenUserId);
+            } else {
+                logger.debug("No authentication information available");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(List.of(Map.of("error", "Authentication required")));
             }
             
             // Only allow users to view their own preferences
@@ -87,45 +98,53 @@ public class MessagePreferencesController {
                 return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
             }
 
-            // Get all families the user belongs to
-            List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(userId);
-            
-            // Get all message settings
-            List<UserFamilyMessageSettings> settings = messageSettingsRepository.findByUserId(userId);
-            
-            // Map of family ID to settings
-            Map<Long, UserFamilyMessageSettings> settingsMap = settings.stream()
-                    .collect(Collectors.toMap(UserFamilyMessageSettings::getFamilyId, s -> s));
-            
-            List<Map<String, Object>> result = new ArrayList<>();
-            
-            // Build response with all families and their message settings
-            for (UserFamilyMembership membership : memberships) {
-                Long familyId = membership.getFamilyId();
+            // Use a single optimized SQL query instead of multiple repository calls
+            String sql = 
+                "SELECT " +
+                "  ufm.family_id AS \"familyId\", " +
+                "  f.name AS \"familyName\", " +
+                "  ufm.role AS \"role\", " +
+                "  ufm.is_active AS \"isActive\", " +
+                "  COALESCE(ufms.receive_messages, true) AS \"receiveMessages\", " +
+                "  ufms.last_updated AS \"lastUpdated\" " +
+                "FROM user_family_membership ufm " +
+                "JOIN family f ON ufm.family_id = f.id " +
+                "LEFT JOIN user_family_message_settings ufms ON " +
+                "  ufm.user_id = ufms.user_id AND " +
+                "  ufm.family_id = ufms.family_id " +
+                "WHERE ufm.user_id = ?";
                 
-                // Try to fetch family name, default to "Family #ID" if not found
-                String familyName = familyRepository.findById(familyId)
-                        .map(f -> f.getName())
-                        .orElse("Family #" + familyId);
+            logger.debug("Executing optimized SQL query for message preferences");
+            
+            // Execute the query
+            List<Map<String, Object>> result = jdbcTemplate.queryForList(sql, userId);
+            
+            // Make sure all fields are standardized and camelCase
+            for (Map<String, Object> row : result) {
+                // Convert boolean type if needed (PostgreSQL returns 't'/'f')
+                Object receiveMessages = row.get("receiveMessages");
+                if (receiveMessages instanceof String) {
+                    row.put("receiveMessages", "t".equalsIgnoreCase((String)receiveMessages));
+                }
                 
-                // Get settings if they exist, otherwise use default (receive = true)
-                UserFamilyMessageSettings setting = settingsMap.getOrDefault(
-                    familyId, 
-                    new UserFamilyMessageSettings(userId, familyId, true)
-                );
-                
-                Map<String, Object> familySettings = new HashMap<>();
-                familySettings.put("familyId", familyId);
-                familySettings.put("familyName", familyName);
-                familySettings.put("receiveMessages", setting.getReceiveMessages());
-                familySettings.put("role", membership.getRole());
-                familySettings.put("isActive", membership.isActive());
-                familySettings.put("lastUpdated", setting.getLastUpdated() != null ? 
-                                                  setting.getLastUpdated().toString() : null);
-                
-                result.add(familySettings);
+                // Standardize camelCase where needed
+                if (row.get("familyId") == null && row.get("familyid") != null) {
+                    row.put("familyId", row.get("familyid"));
+                }
+                if (row.get("familyName") == null && row.get("familyname") != null) {
+                    row.put("familyName", row.get("familyname"));
+                }
+                if (row.get("isActive") == null && row.get("isactive") != null) {
+                    row.put("isActive", row.get("isactive"));
+                }
+                if (row.get("lastUpdated") == null && row.get("lastupdated") != null) {
+                    row.put("lastUpdated", row.get("lastupdated"));
+                }
             }
             
+            logger.debug("Found {} message preferences for user {}", result.size(), userId);
+            long endTime = System.currentTimeMillis();
+            logger.debug("Message preferences query completed in {} ms", (endTime - startTime));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error getting message preferences: {}", e.getMessage(), e);
@@ -140,7 +159,7 @@ public class MessagePreferencesController {
     @PostMapping("/{userId}/update")
     public ResponseEntity<Map<String, Object>> updateMessagePreferences(
             @PathVariable Long userId,
-            @RequestHeader("Authorization") String authHeader,
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
             @RequestBody Map<String, Object> preferences,
             HttpServletRequest request) {
         
@@ -150,13 +169,18 @@ public class MessagePreferencesController {
             Long tokenUserId;
             Object userIdAttr = request.getAttribute("userId");
             if (userIdAttr != null) {
-                // Use the userId attribute set by the TestAuthFilter
+                // Use the userId attribute set by the TestAuthFilter or AuthFilter bypass
                 tokenUserId = (Long) userIdAttr;
-                logger.debug("Using test userId: {}", tokenUserId);
-            } else {
+                logger.debug("Using userId from request attribute: {}", tokenUserId);
+            } else if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 // Normal authentication flow
                 String token = authHeader.replace("Bearer ", "");
                 tokenUserId = authUtil.extractUserId(token);
+                logger.debug("Extracted userId from token: {}", tokenUserId);
+            } else {
+                logger.debug("No authentication information available");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
             }
             
             // Only allow users to update their own preferences
@@ -270,77 +294,5 @@ public class MessagePreferencesController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to create message settings: " + e.getMessage()));
         }
-    }
-
-    /**
-     * Debug endpoint for message preferences authentication
-     */
-    @GetMapping("/debug-auth/{userId}")
-    public ResponseEntity<Map<String, Object>> debugAuth(
-            @PathVariable Long userId,
-            @RequestHeader("Authorization") String authHeader,
-            HttpServletRequest request) {
-        
-        logger.error("🔍 DEBUG AUTH - Request for user ID: {}", userId);
-        
-        // Create response with debugging info
-        Map<String, Object> debugInfo = new HashMap<>();
-        debugInfo.put("requestUri", request.getRequestURI());
-        debugInfo.put("method", request.getMethod());
-        debugInfo.put("requestedUserId", userId);
-        
-        // Get auth header info
-        debugInfo.put("hasAuthHeader", authHeader != null);
-        if (authHeader != null) {
-            debugInfo.put("authHeaderStartsWithBearer", authHeader.startsWith("Bearer "));
-            if (authHeader.startsWith("Bearer ")) {
-                String token = authHeader.substring(7);
-                debugInfo.put("tokenLength", token.length());
-                
-                try {
-                    // Try to validate token
-                    boolean isValid = authUtil.validateToken(token);
-                    debugInfo.put("tokenIsValid", isValid);
-                    
-                    if (isValid) {
-                        Long tokenUserId = authUtil.extractUserId(token);
-                        String role = authUtil.getUserRole(token);
-                        debugInfo.put("tokenUserId", tokenUserId);
-                        debugInfo.put("tokenUserRole", role);
-                        debugInfo.put("tokenMatchesRequestedUser", userId.equals(tokenUserId));
-                    }
-                } catch (Exception e) {
-                    debugInfo.put("tokenValidationError", e.getMessage());
-                }
-            }
-        }
-        
-        // Check attributes set by filters
-        Object userIdAttr = request.getAttribute("userId");
-        Object roleAttr = request.getAttribute("role");
-        debugInfo.put("hasUserIdAttribute", userIdAttr != null);
-        debugInfo.put("hasRoleAttribute", roleAttr != null);
-        
-        if (userIdAttr != null) {
-            debugInfo.put("attributeUserId", userIdAttr);
-            debugInfo.put("attributeMatchesRequestedUser", userId.equals(userIdAttr));
-        }
-        
-        if (roleAttr != null) {
-            debugInfo.put("attributeRole", roleAttr);
-        }
-        
-        // Log all headers for debugging
-        Map<String, String> headers = new HashMap<>();
-        Enumeration<String> headerNames = request.getHeaderNames();
-        while (headerNames.hasMoreElements()) {
-            String name = headerNames.nextElement();
-            headers.put(name, request.getHeader(name));
-        }
-        debugInfo.put("headers", headers);
-        
-        logger.error("🔍 DEBUG AUTH INFO: {}", debugInfo);
-        
-        return ResponseEntity.ok(debugInfo);
     }
 } 

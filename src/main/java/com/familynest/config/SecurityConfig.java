@@ -54,13 +54,9 @@ public class SecurityConfig {
                     .requestMatchers("/api/users/test").permitAll()
                     .requestMatchers("/api/users/101").permitAll()
                     .requestMatchers("/api/users/101/**").permitAll()
-                    .requestMatchers("/api/users/public-test-upload").permitAll()
-                    .requestMatchers("/api/message-preferences/101").permitAll()
-                    .requestMatchers("/api/message-preferences/101/**").permitAll()
-                    .requestMatchers("/api/message-preferences/debug-auth/101").permitAll()
-                    .requestMatchers("/api/message-preferences/**").hasAuthority("ADMIN")
                     .requestMatchers("/api/emergency/**").permitAll()  // Allow all emergency endpoints
                     .requestMatchers("/api/videos/**").permitAll()
+                    .requestMatchers("/api/message-preferences/**").permitAll() // Allow message preferences endpoints
                     .requestMatchers("/error").permitAll()
                     .requestMatchers("/public/**").permitAll() // Permit public endpoints
                     .requestMatchers("/test/**").permitAll() // Permit test endpoints

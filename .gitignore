@@ -51,11 +51,8 @@ target/
 *.tar.gz
 *.rar
 
-### SQL Files ###
-*.sql
-!src/main/resources/schema.sql
-!src/main/resources/data.sql
-!src/main/resources/import.sql
-
-### Log Files ###
-*.log
+### Custom Ignores ###
+# Ignore shell scripts in src/main
+src/main/**/*.sh
+# Ignore SQL files in src/main
+src/main/**/*.sql

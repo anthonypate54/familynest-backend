@@ -2,6 +2,7 @@ package com.familynest.repository;
 
 import com.familynest.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -30,4 +31,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Also make this case-insensitive
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.email) = LOWER(:email)")
     boolean existsByEmail(@Param("email") String email);
+    
+    // Method to update user photo - fixed to use the correct field name 'photo'
+    @Modifying
+    @Query("UPDATE User u SET u.photo = :photoUrl WHERE u.id = :userId")
+    int updateUserPhoto(@Param("userId") Long userId, @Param("photoUrl") String photoUrl);
+    
+    // Method to get username by ID
+    @Query("SELECT u.username FROM User u WHERE u.id = :userId")
+    String findUsernameById(@Param("userId") Long userId);
 }
