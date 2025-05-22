@@ -58,6 +58,12 @@ public class MessageController {
     @Value("${server.port:8080}")
     private String serverPort;
 
+    @Value("${app.base-url}")
+    private String baseUrl;
+
+    @Value("${app.default.thumbnail}")
+    private String defaultThumbnail;
+
     /**
      * Get messages for a user with pagination - super optimized version using a single efficient SQL query
      * This endpoint is much faster than the previous version because:
@@ -150,8 +156,7 @@ public class MessageController {
             );
             
             // Determine the base URL for media files
-            String baseUrl = "http://localhost:8080";
-            if (!serverAddress.equals("localhost")) {
+             if (!serverAddress.equals("localhost")) {
                 baseUrl = "http://" + serverAddress + ":" + serverPort;
             }
             if (!contextPath.isEmpty()) {
@@ -213,9 +218,9 @@ public class MessageController {
                         logger.debug("Got thumbnailUrl from VideoController: {}", thumbnailUrl);
                     } else {
                         // No media URL, use default thumbnail
-                        String defaultThumbnail = baseUrl + "/uploads/thumbnails/default_thumbnail.jpg";
-                        message.put("thumbnail_url", defaultThumbnail);
-                        message.put("thumbnailUrl", defaultThumbnail);
+                        String defThumbnail = baseUrl + defaultThumbnail;
+                        message.put("thumbnail_url", defThumbnail);
+                        message.put("thumbnailUrl", defThumbnail);
                         logger.debug("Using default thumbnailUrl (no media_url)");
                     }
                 }

@@ -42,6 +42,7 @@ src/main/*.sql
 
 ### Uploads Directory ###
 uploads/
+testdb-uploads/
 
 ### Build Outputs ###
 target/

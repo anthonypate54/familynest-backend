@@ -90,7 +90,7 @@ public class AuthFilter extends OncePerRequestFilter {
             return;
         }
         
-        logger.error("❌❌❌ ENDPOINT NOT IN PUBLIC WHITELIST: {}", path);
+     //   logger.error("❌❌❌ ENDPOINT NOT IN PUBLIC WHITELIST: {}", path);
 
         String authHeader = request.getHeader("Authorization");
         logger.error("🔑 Auth header: {}", authHeader);
