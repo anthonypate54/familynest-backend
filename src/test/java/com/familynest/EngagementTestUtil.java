@@ -427,8 +427,8 @@ public class EngagementTestUtil {
         User user = getTestUser(userIdx);
 
         MessageComment comment = new MessageComment();
-        comment.setMessageId(message.getId());
-        comment.setUserId(user.getId());
+        comment.setParentMessageId(message.getId());
+        comment.setSenderId(user.getId());
         comment.setContent(content);
         comment.setCreatedAt(LocalDateTime.now().minusDays(messageIdx).minusHours(userIdx));
 

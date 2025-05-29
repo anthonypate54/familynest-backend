@@ -92,7 +92,7 @@ public class UserControllerTest {
         testUser.setFirstName("Test");
         testUser.setLastName("User");
         testUser.setRole("ADMIN");
-        testUser.setFamilyId(null);
+        // Don't set familyId - it's managed through UserFamilyMembership
 
         testFamily = new Family();
         testFamily.setId(2L);

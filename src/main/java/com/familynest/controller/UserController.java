@@ -390,7 +390,8 @@ public class UserController {
             user.setFirstName(userData.getFirstName());
             user.setLastName(userData.getLastName());
             user.setRole(userData.getRole() != null ? userData.getRole() : "USER");
-            user.setFamilyId(null);
+            // Don't set familyId - it's managed through UserFamilyMembership
+            user = userRepository.save(user);
 
             if (photo != null && !photo.isEmpty()) {
                 String fileName = System.currentTimeMillis() + "_" + photo.getOriginalFilename();
@@ -409,10 +410,9 @@ public class UserController {
                 user.setPhoto(photosUrlPath + "/" + fileName);
             }
 
-            User savedUser = userRepository.save(user);
-            logger.debug("User created successfully with ID: {}", savedUser.getId());
+            logger.debug("User created successfully with ID: {}", user.getId());
             Map<String, Object> response = new HashMap<>();
-            response.put("userId", savedUser.getId());
+            response.put("userId", user.getId());
             return ResponseEntity.status(201).body(response);
         } catch (Exception e) {
             logger.error("Error creating user: {}", e.getMessage(), e);
@@ -596,10 +596,6 @@ public class UserController {
             membership.setRole("ADMIN");
             userFamilyMembershipRepository.save(membership);
             
-            logger.debug("Updating user {} with new family ID: {}", id, savedFamily.getId());
-            user.setFamilyId(savedFamily.getId());
-            userRepository.save(user);
-            
             logger.debug("Family creation completed successfully");
             Map<String, Object> response = new HashMap<>();
             response.put("familyId", savedFamily.getId());
@@ -680,231 +676,82 @@ public class UserController {
     }
 
     @PostMapping(value = "/{id}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<Void> postMessage(
-        @PathVariable Long id,
-        @RequestParam(value = "content", required = false) String content,
-        @RequestPart(value = "media", required = false) MultipartFile media,
-        @RequestParam(value = "mediaType", required = false) String mediaType,
-        @RequestParam(value = "familyId", required = false) String familyIdStr,
-        @RequestParam(value = "videoUrl", required = false) String videoUrl,
-        @RequestParam(value = "thumbnailUrl", required = false) String thumbnailUrl) {
+    public ResponseEntity<Map<String, Object>> postMessage(
+            @RequestParam("content") String content,
+            @RequestParam(value = "media", required = false) MultipartFile media,
+            @RequestParam(value = "mediaType", required = false) String mediaType,
+            @RequestParam("familyId") Long familyId,
+            HttpServletRequest request) {
         
-            logger.debug("ANTHONY POST videoUrl = {} ", videoUrl);
-            logger.debug("ANTHONY POST 2 thumbnailUrl = {} ", thumbnailUrl);
-
-        logger.debug("Received request to post message for user ID: {}", id);
-        logger.debug("Content: {}, Media: {}, MediaType: {}, FamilyId: {}", 
-                 content, 
-                media != null ? media.getOriginalFilename() + " (" + media.getSize() + " bytes)" : "null", 
-                mediaType,
-                familyIdStr);
-                
+        Map<String, Object> response = new HashMap<>();
         try {
-            // Check if user exists with a direct query instead of loading the entire entity
-            logger.debug("Step 1: Checking if user exists with ID: {}", id);
-            if (!userRepository.existsById(id)) {
-                logger.debug("User not found for ID: {}", id);
-                return ResponseEntity.badRequest().build();
+            // Extract user ID from request
+            Long userId = (Long) request.getAttribute("userId");
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                       .body(Map.of("error", "User not authenticated"));
             }
             
-            // Determine which family ID to use for the message
-            // Need to use a final reference for the lambda
-            final Long[] familyIdHolder = new Long[1];
+            // Validate content
+            if (content == null || content.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                       .body(Map.of("error", "Message content cannot be empty"));
+            }
             
-            // If explicit family ID was provided in the request, use it
-            if (familyIdStr != null && !familyIdStr.isEmpty()) {
-                try {
-                    familyIdHolder[0] = Long.parseLong(familyIdStr);
-                    logger.debug("Using explicitly provided family ID: {}", familyIdHolder[0]);
-                } catch (NumberFormatException e) {
-                    logger.error("Invalid family ID format: {}", familyIdStr);
-                    return ResponseEntity.badRequest().build();
-                }
-            } else {
-                // Direct query for active family ID 
-                List<Long> activeFamilyIds = userFamilyMembershipRepository.findActiveFamilyIdByUserId(id);
-                
-                if (!activeFamilyIds.isEmpty()) {
-                    // Use the first active family ID if available
-                    familyIdHolder[0] = activeFamilyIds.get(0);
-                    logger.debug("Using user's first active family ID from direct query: {}", familyIdHolder[0]);
-                } else {
-                    // Fallback to any family ID
-                    List<Long> familyIds = userFamilyMembershipRepository.findFamilyIdsByUserId(id);
-                    familyIdHolder[0] = !familyIds.isEmpty() ? familyIds.get(0) : null;
-                    logger.debug("No active family IDs found, using first family ID: {}", familyIdHolder[0]);
+            // Get user details for the response
+            String sql = "SELECT username, first_name, last_name, photo FROM app_user WHERE id = ?";
+            Map<String, Object> userData = jdbcTemplate.queryForMap(sql, userId);
+            
+            String mediaUrl = null;
+            String thumbnailUrl = null;
+            
+            // Handle media upload if present
+            if (media != null && !media.isEmpty()) {
+                Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
+                mediaUrl = mediaResult.get("mediaUrl");
+                if ("video".equals(mediaType)) {
+                    thumbnailUrl = mediaResult.get("thumbnailUrl");
                 }
             }
             
-            if (familyIdHolder[0] == null) {
-                logger.debug("No valid family ID found for message");
-                return ResponseEntity.badRequest().build();
-            }
+            // Insert the message
+            String insertSql = "INSERT INTO message (content, user_id, sender_id, sender_username, " +
+                             "media_type, media_url, thumbnail_url, family_id) " +
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             
-            // Use a final reference to the familyId for the lambda
-            final Long familyId = familyIdHolder[0];
+            jdbcTemplate.update(insertSql, 
+                content, 
+                userId, 
+                userId, 
+                userData.get("username"),
+                mediaType,
+                mediaUrl,
+                thumbnailUrl,
+                familyId
+            );
             
-            // Verify the user is a member of this family by querying for membership
-            List<UserFamilyMembership> userMemberships = userFamilyMembershipRepository.findByUserId(id);
-            boolean isMember = userMemberships.stream()
-                .anyMatch(membership -> membership.getFamilyId().equals(familyId));
+            // Create response
+            response.put("content", content);
+            response.put("mediaType", mediaType);
+            response.put("mediaUrl", mediaUrl);
+            response.put("thumbnailUrl", thumbnailUrl);
+            response.put("timestamp", LocalDateTime.now());
             
-            if (!isMember) {
-                logger.debug("User {} is not a member of family {}", id, familyId);
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-            }
+            // Add user data
+            Map<String, Object> user = new HashMap<>();
+            user.put("id", userId);
+            user.put("username", userData.get("username"));
+            user.put("firstName", userData.get("first_name"));
+            user.put("lastName", userData.get("last_name"));
+            user.put("photo", userData.get("photo"));
+            response.put("user", user);
             
-            // Verify the user is authorized to post messages to this family
-            boolean isAuthorized = false;
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
             
-            // Check if this is one of the user's active families
-            List<Long> userActiveFamilyIds = userFamilyMembershipRepository.findActiveFamilyIdByUserId(id);
-            if (userActiveFamilyIds.contains(familyId)) {
-                isAuthorized = true;
-            } else {
-                // Check if user is an admin of the family
-                Optional<UserFamilyMembership> membership = userFamilyMembershipRepository.findByUserIdAndFamilyId(id, familyId);
-                isAuthorized = membership.isPresent() && "ADMIN".equals(membership.get().getRole());
-            }
-            
-            if (!isAuthorized) {
-                logger.debug("User {} is not authorized to post messages to family {}", id, familyId);
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-            }
-            
-            // Get minimal user data needed for the message
-            User sender = userRepository.findById(id).orElse(null);
-            String username = sender != null ? sender.getUsername() : "unknown";
-            
-            // Create the message
-            Message message = new Message();
-            message.setContent(content != null ? content : "");
-            message.setSenderUsername(username);
-            message.setSenderId(id);
-            message.setUserId(id);
-            message.setFamilyId(familyId);
-            message.setTimestamp(LocalDateTime.now());
-            
-            // Simplified media handling
-            if (media != null && mediaType != null) {
-                logger.debug("Processing media of type: {}", mediaType);
-                
-                try {
-                    // Create directory structure if it doesn't exist
-                    String subdir = "video".equals(mediaType) ? "videos" : "images";
-                    Path uploadPath = Paths.get(uploadDir, subdir);
-                    if (!Files.exists(uploadPath)) {
-                        Files.createDirectories(uploadPath);
-                    }
-                    
-                    // Create filename with timestamp - using simple naming pattern
-                    String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
-                    Path mediaPath = uploadPath.resolve(mediaFileName);
-                    
-                    // Write the file
-                    Files.write(mediaPath, media.getBytes());
-                    logger.debug("Media file saved at: {}", mediaPath);
-                    
-                    // Set media URL (relative path)
-                    // Use URLs matching the static-path-pattern configuration
-                    String mediaUrl = "video".equals(mediaType) ? 
-                        videosUrlPath + "/" + mediaFileName : 
-                        imagesUrlPath + "/" + mediaFileName;
-                    message.setMediaType(mediaType);
-                    message.setMediaUrl(mediaUrl);
-                    
-                    // For videos, generate thumbnail
-                    if ("video".equals(mediaType)) {
-                        // Create thumbnails directory if needed
-                        Path thumbnailDirPath = Paths.get(thumbnailDir);
-                        if (!Files.exists(thumbnailDirPath)) {
-                            Files.createDirectories(thumbnailDirPath);
-                        }
-                        
-                        // Generate thumbnail filename - using simple replacement pattern
-                        String thumbnailFileName = mediaFileName.replace(".mp4", "_thumbnail.jpg");
-                        Path thumbnailPath = thumbnailDirPath.resolve(thumbnailFileName);
-                        
-                        // Generate thumbnail (delegate to ThumbnailService)
-                        boolean thumbnailCreated = false;
-                        try {
-                            // Use a relative file name, not an absolute path, to avoid path duplication
-                            logger.error("PATH DEBUG: Video path being used for thumbnail: {}", mediaPath.toString());
-                            logger.error("PATH DEBUG: Thumbnail path being used: {}", thumbnailPath.toString());
-                            
-                            // Just pass the filename to the thumbnail service, not the full path
-                            String generatedThumbnailPath = thumbnailService.generateThumbnail(
-                                mediaPath.toString(), thumbnailFileName);
-                                
-                            logger.error("PATH DEBUG: Generated thumbnail result: {}", generatedThumbnailPath);
-                            thumbnailCreated = generatedThumbnailPath != null;
-                            
-                            // Add a verification step to ensure thumbnail file exists
-                            if (thumbnailCreated) {
-                                // Extract the filename from the generated path
-                                String extractedFilename = generatedThumbnailPath.substring(generatedThumbnailPath.lastIndexOf('/') + 1);
-                                Path verifyThumbnailPath = Paths.get(thumbnailDir, extractedFilename);
-                                
-                                // Verify the thumbnail file actually exists on disk
-                                int maxRetries = 5;
-                                int retryCount = 0;
-                                while (!Files.exists(verifyThumbnailPath) && retryCount < maxRetries) {
-                                    logger.debug("Waiting for thumbnail file to appear on disk: {}", verifyThumbnailPath);
-                                    try {
-                                        Thread.sleep(100); // Wait 100ms
-                                    } catch (InterruptedException ie) {
-                                        Thread.currentThread().interrupt();
-                                        logger.warn("Thread interrupted while waiting for thumbnail", ie);
-                                        break;
-                                    }
-                                    retryCount++;
-                                }
-                                
-                                if (Files.exists(verifyThumbnailPath)) {
-                                    logger.debug("Verified thumbnail exists on disk: {}", verifyThumbnailPath);
-                                } else {
-                                    logger.warn("Could not verify thumbnail exists after {} retries: {}", maxRetries, verifyThumbnailPath);
-                                    thumbnailCreated = false;
-                                }
-                            }
-                        } catch (Exception ex) {
-                            logger.error("Error generating thumbnail: {}", ex.getMessage(), ex);
-                        }
-                        
-                        if (thumbnailCreated) {
-                            // Set thumbnail URL (relative path) with leading slash for client consumption
-                            String thumbnailRelativeUrl = thumbnailsUrlPath + "/" + thumbnailFileName;
-                            message.setThumbnailUrl(thumbnailRelativeUrl);
-                            logger.debug("Thumbnail created at: {}", thumbnailPath);
-                        } else {
-                            logger.warn("Failed to create thumbnail for video");
-                        }
-                    }
-                } catch (IOException e) {
-                    logger.error("Error saving media file: {}", e.getMessage(), e);
-                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-                }
-            } else if (videoUrl != null && "video".equals(mediaType)) {
-                // Handle pre-uploaded video URLs
-                logger.debug("Using pre-uploaded video URL: {}", videoUrl);
-                message.setMediaType("video");
-                message.setMediaUrl(videoUrl);
-                
-                if (thumbnailUrl != null) {
-                    logger.debug("Using provided thumbnail URL: {}", thumbnailUrl);
-                    message.setThumbnailUrl(thumbnailUrl);
-                }
-            }
-            
-            // Save the message
-            logger.debug("Saving message: {}", message);
-            Message savedMessage = messageRepository.save(message);
-            logger.debug("Message saved with ID: {}", savedMessage.getId());
-            
-            return ResponseEntity.status(201).build();
         } catch (Exception e) {
             logger.error("Error posting message: {}", e.getMessage(), e);
-            return ResponseEntity.status(500).build();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                   .body(Map.of("error", "Failed to post message: " + e.getMessage()));
         }
     }
 
@@ -961,8 +808,8 @@ public class UserController {
                         "  ON m.id = vc.message_id " +
                         "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_reaction GROUP BY message_id) rc " +
                         "  ON m.id = rc.message_id " +
-                        "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_comment GROUP BY message_id) cc " +
-                        "  ON m.id = cc.message_id " +
+                        "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
+                        "  ON m.id = cc.parent_message_id " +
                         "ORDER BY m.id DESC";
 
             // Check if user exists first for a better error message

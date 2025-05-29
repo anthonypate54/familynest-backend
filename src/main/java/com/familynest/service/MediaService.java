@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-import com.familynest.controller.VideoController;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,64 +45,13 @@ public class MediaService {
     private String defaultThumbnailFilename;
     
     @Autowired
-    private VideoController videoController;
+    private ThumbnailService thumbnailService;
     
     /**
      * Get the default thumbnail URL
      */
     private String getDefaultThumbnailUrl() {
         return thumbnailsUrlPath + "/" + defaultThumbnailFilename;
-    }
-    
-    /**
-     * Uploads a video file and generates a thumbnail
-     * 
-     * @param file The video file to upload
-     * @return Map containing videoUrl and thumbnailUrl
-     * @throws IOException If file operations fail
-     */
-    public Map<String, String> uploadVideo(MultipartFile file) throws IOException {
-        // Create a unique filename
-        String originalFilename = file.getOriginalFilename();
-        String uniqueId = UUID.randomUUID().toString().substring(0, 8);
-        String timestamp = String.valueOf(System.currentTimeMillis());
-        
-        String filename = timestamp + "_" + uniqueId + 
-                        (originalFilename != null ? "_" + originalFilename : "_video.mp4");
-        
-        // Create directories if they don't exist
-        Path uploadPath = Paths.get(videosDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
-        
-        // Save the video file
-        Path filePath = uploadPath.resolve(filename);
-        Files.write(filePath, file.getBytes());
-        logger.info("Video saved successfully: {}", filePath);
-        
-        // Generate thumbnail using the service
-        String thumbnailFilename = timestamp + "_" + uniqueId + "_thumb.jpg";
-        logger.info("Generating thumbnail with filename: {}", thumbnailFilename);
-        
-        String videoUrl = videosUrlPath + "/" + filename;
-        String thumbnailUrl = videoController.getThumbnailForVideo(videoUrl);
-        
-        logger.info("VideoController returned URL: {}", thumbnailUrl);
-        
-        // Use the returned URL or default
-        if (thumbnailUrl == null) {
-            logger.warn("Failed to generate thumbnail, using default");
-            thumbnailUrl = getDefaultThumbnailUrl();
-        }
-        
-        // Return URLs
-        Map<String, String> result = new HashMap<>();
-        result.put("videoUrl", videoUrl);
-        result.put("thumbnailUrl", thumbnailUrl);
-        result.put("videoPath", filePath.toString());
-        
-        return result;
     }
     
     /**
@@ -115,63 +63,92 @@ public class MediaService {
      * @throws IOException If file operations fail
      */
     public Map<String, String> uploadMedia(MultipartFile file, String mediaType) throws IOException {
-        // Create a unique filename
-        String originalFilename = file.getOriginalFilename();
-        String uniqueId = UUID.randomUUID().toString().substring(0, 8);
-        String timestamp = String.valueOf(System.currentTimeMillis());
+        logger.debug("Processing media of type: {}", mediaType);
         
-        logger.debug("Uploading media: originalFilename={}, mediaType={}, size={} bytes", 
-            originalFilename, mediaType, file.getSize());
-        
-        String filename = timestamp + "_" + uniqueId + 
-                        (originalFilename != null ? "_" + originalFilename : "_media");
-        
-        // Create directories if they don't exist
-        Path uploadPath = Paths.get(uploadDir);
+        // Create directory structure if it doesn't exist
+        String subdir = "video".equals(mediaType) ? "videos" : "images";
+        Path uploadPath = Paths.get(uploadDir, subdir);
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
-            logger.info("Created uploads directory: {}", uploadPath);
         }
         
-        // Save the media file
-        Path filePath = uploadPath.resolve(filename);
-        Files.write(filePath, file.getBytes());
-        logger.info("Media file saved successfully: {}", filePath);
+        // Create filename with timestamp
+        String mediaFileName = System.currentTimeMillis() + "_" + file.getOriginalFilename();
+        Path mediaPath = uploadPath.resolve(mediaFileName);
+        
+        // Write the file
+        Files.write(mediaPath, file.getBytes());
+        logger.debug("Media file saved at: {}", mediaPath);
+        
+        // Set media URL (relative path)
+        String mediaUrl = "video".equals(mediaType) ? 
+            videosUrlPath + "/" + mediaFileName : 
+            "/uploads/images/" + mediaFileName;
         
         Map<String, String> result = new HashMap<>();
+        result.put("mediaUrl", mediaUrl);
         
-        // Always use relative paths for URLs - makes transition to S3 easier
+        // For videos, generate thumbnail
         if ("video".equals(mediaType)) {
-            logger.error("MEDIA SERVICE: Processing video file: {}, size: {} bytes", filename, file.getSize());
-            
-            // For video files, create a copy in the videos directory too
-            Path videosPath = Paths.get(videosDir);
-            if (!Files.exists(videosPath)) {
-                Files.createDirectories(videosPath);
-                logger.info("Created videos directory: {}", videosPath);
+            // Create thumbnails directory if needed
+            Path thumbnailDirPath = Paths.get(thumbnailDir);
+            if (!Files.exists(thumbnailDirPath)) {
+                Files.createDirectories(thumbnailDirPath);
             }
             
-            // Save a copy to the videos directory
-            Path videoPath = videosPath.resolve(filename);
-            Files.copy(filePath, videoPath);
-            logger.info("Video file copied to videos directory: {}", videoPath);
+            // Generate thumbnail filename
+            String thumbnailFileName = mediaFileName.replace(".mp4", "_thumbnail.jpg");
+            Path thumbnailPath = thumbnailDirPath.resolve(thumbnailFileName);
             
-            // Set relative URL for videos
-            String videoUrl = videosUrlPath + "/" + filename;
-            result.put("mediaUrl", videoUrl);
-            
+            // Generate thumbnail using ThumbnailService
+            boolean thumbnailCreated = false;
             try {
-                // Use VideoController to get the thumbnail URL (centralized handling)
-                String thumbnailUrl = videoController.getThumbnailForVideo(videoUrl);
-                logger.error("MEDIA SERVICE: Got thumbnail URL from VideoController: {}", thumbnailUrl);
+                logger.debug("Generating thumbnail for video: {}", mediaPath);
+                String generatedThumbnailPath = thumbnailService.generateThumbnail(
+                    mediaPath.toString(), thumbnailFileName);
+                thumbnailCreated = generatedThumbnailPath != null;
+                
+                // Add a verification step to ensure thumbnail file exists
+                if (thumbnailCreated) {
+                    // Extract the filename from the generated path
+                    String extractedFilename = generatedThumbnailPath.substring(generatedThumbnailPath.lastIndexOf('/') + 1);
+                    Path verifyThumbnailPath = Paths.get(thumbnailDir, extractedFilename);
+                    
+                    // Verify the thumbnail file actually exists on disk
+                    int maxRetries = 5;
+                    int retryCount = 0;
+                    while (!Files.exists(verifyThumbnailPath) && retryCount < maxRetries) {
+                        logger.debug("Waiting for thumbnail file to appear on disk: {}", verifyThumbnailPath);
+                        try {
+                            Thread.sleep(100); // Wait 100ms
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            logger.warn("Thread interrupted while waiting for thumbnail", ie);
+                            break;
+                        }
+                        retryCount++;
+                    }
+                    
+                    if (Files.exists(verifyThumbnailPath)) {
+                        logger.debug("Verified thumbnail exists on disk: {}", verifyThumbnailPath);
+                    } else {
+                        logger.warn("Could not verify thumbnail exists after {} retries: {}", maxRetries, verifyThumbnailPath);
+                        thumbnailCreated = false;
+                    }
+                }
+            } catch (Exception ex) {
+                logger.error("Error generating thumbnail: {}", ex.getMessage(), ex);
+            }
+            
+            if (thumbnailCreated) {
+                // Set thumbnail URL (relative path)
+                String thumbnailUrl = thumbnailsUrlPath + "/" + thumbnailFileName;
                 result.put("thumbnailUrl", thumbnailUrl);
-            } catch (Exception e) {
-                logger.error("Error getting thumbnail from VideoController: {}", e.getMessage(), e);
+                logger.debug("Thumbnail created at: {}", thumbnailPath);
+            } else {
+                logger.warn("Failed to create thumbnail for video");
                 result.put("thumbnailUrl", getDefaultThumbnailUrl());
             }
-        } else {
-            // For non-video files (images, etc.)
-            result.put("mediaUrl", imagesUrlPath + "/" + filename);
         }
         
         logger.debug("Media upload complete. Result: {}", result);

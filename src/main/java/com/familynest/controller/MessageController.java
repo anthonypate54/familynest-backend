@@ -303,36 +303,4 @@ public class MessageController {
             return ResponseEntity.badRequest().body(Map.of("error", "Error getting messages: " + e.getMessage()));
         }
     }
-
-    private void generateVideoThumbnailUrl(Map<String, Object> message, String baseUrl) {
-        if (message.containsKey("media_url") && message.get("media_url") != null) {
-            String mediaUrl = (String) message.get("media_url");
-            
-            // Check if it contains /videos/ or if it's a .mp4 file in the photos directory
-            if (mediaUrl.contains("/videos/") || 
-                (mediaUrl.contains("/photos/") && mediaUrl.toLowerCase().endsWith(".mp4"))) {
-                
-                logger.debug("Generating thumbnail URL for video: {}", mediaUrl);
-                
-                // Extract filename and create thumbnail URL
-                String baseFilename = mediaUrl.substring(mediaUrl.lastIndexOf('/') + 1);
-                // Remove extension
-                if (baseFilename.contains(".")) {
-                    baseFilename = baseFilename.substring(0, baseFilename.lastIndexOf('.'));
-                }
-                // Create thumbnail filename
-                String thumbnailFilename = baseFilename + "_thumb.jpg";
-                // Add thumbnailUrl field
-                String thumbnailUrl = baseUrl + "/uploads/thumbnails/" + thumbnailFilename;
-                message.put("thumbnailUrl", thumbnailUrl);
-                logger.debug("Generated thumbnailUrl: {}", thumbnailUrl);
-            } else {
-                logger.debug("Video URL doesn't match expected pattern for thumbnails: {}", mediaUrl);
-                message.put("thumbnailUrl", null);
-            }
-        } else {
-            logger.debug("Video message has no media_url, can't generate thumbnail");
-            message.put("thumbnailUrl", null);
-        }
-    }
 } 

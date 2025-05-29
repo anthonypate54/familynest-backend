@@ -78,7 +78,7 @@ public class EngagementService {
         // Create and save new reaction
         MessageReaction reaction = new MessageReaction();
         reaction.setMessageId(messageId);
-        reaction.setUserId(userId);
+        reaction.setSenderId(userId);
         reaction.setReactionType(reactionType);
         reaction.setCreatedAt(LocalDateTime.now());
         
@@ -134,7 +134,7 @@ public class EngagementService {
         // Create and save new comment
         MessageComment comment = new MessageComment();
         comment.setMessageId(messageId);
-        comment.setUserId(userId);
+        comment.setSenderId(userId);
         comment.setContent(content);
         comment.setCreatedAt(LocalDateTime.now());
         comment.setParentCommentId(parentCommentId);
@@ -169,7 +169,7 @@ public class EngagementService {
         MessageComment comment = optionalComment.get();
         
         // Check if user is the author of the comment
-        if (!comment.getUserId().equals(userId)) {
+        if (!comment.getSenderId().equals(userId)) {
             throw new IllegalArgumentException("User is not authorized to update this comment");
         }
         
@@ -191,7 +191,7 @@ public class EngagementService {
         MessageComment comment = optionalComment.get();
         
         // Check if user is the author of the comment
-        if (!comment.getUserId().equals(userId)) {
+        if (!comment.getSenderId().equals(userId)) {
             throw new IllegalArgumentException("User is not authorized to delete this comment");
         }
         
@@ -225,7 +225,7 @@ public class EngagementService {
         // Create and save new view
         MessageView view = new MessageView();
         view.setMessageId(messageId);
-        view.setUserId(userId);
+        view.setSenderId(userId);
         view.setViewedAt(LocalDateTime.now());
         
         return viewRepository.save(view);

@@ -5,18 +5,24 @@ import com.familynest.model.User;
 import com.familynest.service.EngagementService;
 import com.familynest.repository.UserRepository;
 import com.familynest.auth.JwtUtil;
+import com.familynest.service.ThumbnailService;
+import com.familynest.service.MediaService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
+import com.familynest.auth.AuthUtil; // Add this import
+
+
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DataAccessException;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -26,6 +32,12 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.cache.annotation.Cacheable;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/api/messages")
@@ -45,110 +57,160 @@ public class CommentController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private ThumbnailService thumbnailService;
+
+    @Autowired
+    private VideoController videoController;
+
+    @Autowired
+    private MediaService mediaService;
+
+    @Autowired
+    private AuthUtil authUtil; // Add this dependency
+
+    @Value("${file.upload-dir:/tmp/familynest-uploads}")
+    private String uploadDir;
+
+    @Value("${app.videos.dir:${file.upload-dir}/videos}")
+    private String videosDir;
+    
+    @Value("${app.thumbnail.dir:${file.upload-dir}/thumbnails}")
+    private String thumbnailDir;
+    
+    @Value("${app.url.videos:/uploads/videos}")
+    private String videosUrlPath;
+    
+    @Value("${app.url.thumbnails:/uploads/thumbnails}")
+    private String thumbnailsUrlPath;
+    
+    @Value("${app.url.images:/uploads/images}")
+    private String imagesUrlPath;
+
     /**
      * Get comments for a message with efficient pagination
      * Uses a single optimized SQL query instead of multiple Hibernate queries
      */
     @GetMapping("/{messageId}/comments")
-    @Cacheable(value = "messageComments", key = "#messageId + '-' + #page + '-' + #size")
-    public ResponseEntity<Map<String, Object>> getComments(
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getComments(
             @PathVariable Long messageId,
-            @RequestParam(required = false, defaultValue = "0") int page,
-            @RequestParam(required = false, defaultValue = "20") int size) {
-        
-        logger.debug("Getting comments for message: {}, page: {}, size: {}", messageId, page, size);
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            HttpServletRequest request) {
+            
+        logger.debug("Getting comments for message: {}", messageId);
         
         try {
             // Limit page size to prevent abuse
-            int pageSize = Math.min(size, 50);
-            int offset = page * pageSize;
-            
-            // Use a single optimized query to get comments with user data
-            String sql = "WITH comment_count AS (" +
-                       "  SELECT COUNT(*) as total FROM message_comment WHERE message_id = ?" +
-                       ") " +
-                       "SELECT mc.id, mc.message_id, mc.user_id, mc.content, mc.media_url, mc.media_type, " +
-                       "       mc.created_at, mc.updated_at, mc.parent_comment_id, " +
-                       "       u.username, u.first_name, u.last_name, u.photo, " +
-                       "       cc.total as total_count " +
-                       "FROM message_comment mc " +
-                       "JOIN app_user u ON mc.user_id = u.id " +
-                       "CROSS JOIN comment_count cc " +
-                       "WHERE mc.message_id = ? " +
-                       "ORDER BY mc.created_at ASC " +
-                       "LIMIT ? OFFSET ?";
-            
-            // Execute query
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(
-                sql, messageId, messageId, pageSize, offset);
-            
-            // Check if we got any results
-            if (results.isEmpty()) {
-                // If no comments, let's at least check if the message exists
-                String checkSql = "SELECT EXISTS(SELECT 1 FROM message WHERE id = ?)";
-                boolean messageExists = jdbcTemplate.queryForObject(checkSql, Boolean.class, messageId);
+            Long userId = (Long) request.getAttribute("userId");
+            if (userId == null) {
+                logger.debug("No userId found in request");
+                throw new RuntimeException("Unauthorized");
+            }
                 
-                if (!messageExists) {
-                    logger.debug("Message not found: {}", messageId);
-                    return ResponseEntity.notFound().build();
+            // Use a single optimized query to get comments with user data and metrics
+            String sql = "WITH user_check AS (" +
+            "  SELECT id FROM app_user WHERE id = ?" +
+            "), " +
+            "user_families AS (" +
+            "  SELECT ufm.family_id " +
+            "  FROM user_family_membership ufm " +
+            "  WHERE ufm.user_id = ? " +
+            "), " +
+            "muted_families AS (" +
+            "  SELECT ufms.family_id " +
+            "  FROM user_family_message_settings ufms " +
+            "  WHERE ufms.user_id = ? AND ufms.receive_messages = false" +
+            "), " +
+            "active_families AS (" +
+            "  SELECT uf.family_id " +
+            "  FROM user_families uf " +
+            "  LEFT JOIN muted_families mf ON uf.family_id = mf.family_id " +
+            "  WHERE mf.family_id IS NULL" +
+            "), " +
+            "message_subset AS (" +
+            "  SELECT m.id " +
+            "  FROM message_comment m " +
+            "  JOIN active_families af ON m.family_id = af.family_id " +
+            "  WHERE m.parent_message_id = ? " +
+            "  ORDER BY m.id DESC " + 
+            "  LIMIT 100" +
+            ") " +
+            "SELECT " +
+            "  m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
+            "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
+            "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
+            "  f.name as family_name, " +
+            "  COALESCE(vc.count, 0) as view_count, " +
+            "  COALESCE(rc.count, 0) as reaction_count, " +
+            "  COALESCE(cc.count, 0) as comment_count " +
+            "FROM message_comment m " +
+            "JOIN message_subset ms ON m.id = ms.id " +
+            "LEFT JOIN app_user s ON m.sender_id = s.id " +
+            "LEFT JOIN family f ON m.family_id = f.id " +
+            "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
+            "  ON m.id = vc.message_id " +
+            "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_reaction GROUP BY message_id) rc " +
+            "  ON m.id = rc.message_id " +
+            "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
+            "  ON m.id = cc.parent_message_id " +
+            "ORDER BY m.id DESC";
+            // Execute query
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId, userId, messageId);
+            // Debug output only for development - just log count, not each individual message
+            if (logger.isDebugEnabled() && !results.isEmpty()) {
+                logger.debug("Number of messages retrieved: {}", results.size());
+                
+                // Only log details of first message as sample
+                if (results.size() > 0) {
+                    Map<String, Object> firstResult = results.get(0);
+                    logger.debug("Sample message data - ID: {}, timestamp: {}, has thumbnail: {}", 
+                        firstResult.get("id"), 
+                        firstResult.get("timestamp"),
+                        firstResult.get("thumbnail_url") != null);
+                }
+            }
+                         
+            // Transform results to the response format
+            // Transform results to the response format
+            List<Map<String, Object>> response = results.stream().map(message -> {
+                Map<String, Object> messageMap = new HashMap<>();
+                messageMap.put("id", message.get("id"));
+                messageMap.put("content", message.get("content"));
+                messageMap.put("senderUsername", message.get("sender_username"));
+                messageMap.put("senderId", message.get("sender_id"));
+                messageMap.put("senderPhoto", message.get("sender_photo"));
+                messageMap.put("senderFirstName", message.get("sender_first_name"));
+                messageMap.put("senderLastName", message.get("sender_last_name"));
+                messageMap.put("familyId", message.get("family_id"));
+                messageMap.put("familyName", message.get("family_name"));
+                messageMap.put("timestamp", message.get("timestamp").toString());
+                messageMap.put("mediaType", message.get("media_type"));
+                messageMap.put("mediaUrl", message.get("media_url"));
+                
+                // Add thumbnail URL without excessive logging
+                messageMap.put("thumbnailUrl", message.get("thumbnail_url")); 
+                
+                // Add video message thumbnail URL warning only once
+                if ("video".equals(message.get("media_type")) && message.get("thumbnail_url") == null) {
+                    logger.debug("Video message ID {} has no thumbnail_url", message.get("id"));
                 }
                 
-                // Message exists but no comments
-                return ResponseEntity.ok(Map.of(
-                    "comments", List.of(),
-                    "totalCount", 0,
-                    "totalPages", 0,
-                    "currentPage", page,
-                    "pageSize", pageSize,
-                    "hasNext", false
-                ));
-            }
-            
-            // Get total count from first result
-            int totalCount = ((Number) results.get(0).get("total_count")).intValue();
-            int totalPages = (int) Math.ceil((double) totalCount / pageSize);
-            boolean hasNext = (page + 1) < totalPages;
-            
-            // Transform results
-            List<Map<String, Object>> comments = results.stream().map(row -> {
-                Map<String, Object> comment = new HashMap<>();
-                comment.put("id", row.get("id"));
-                comment.put("messageId", row.get("message_id"));
-                comment.put("content", row.get("content"));
-                comment.put("createdAt", row.get("created_at"));
-                comment.put("updatedAt", row.get("updated_at"));
-                comment.put("parentCommentId", row.get("parent_comment_id"));
-                comment.put("mediaUrl", row.get("media_url"));
-                comment.put("mediaType", row.get("media_type"));
-                
-                // Add user data
-                Map<String, Object> user = new HashMap<>();
-                user.put("id", row.get("user_id"));
-                user.put("username", row.get("username"));
-                user.put("firstName", row.get("first_name"));
-                user.put("lastName", row.get("last_name"));
-                user.put("photo", row.get("photo"));
-                comment.put("user", user);
-                
-                return comment;
+                return messageMap;
             }).collect(Collectors.toList());
             
-            // Create response
-            Map<String, Object> response = new HashMap<>();
-            response.put("comments", comments);
-            response.put("totalCount", totalCount);
-            response.put("totalPages", totalPages);
-            response.put("currentPage", page);
-            response.put("pageSize", pageSize);
-            response.put("hasNext", hasNext);
+ 
+            logger.debug("Returning {} messages for user {} using a single optimized query", response.size(), userId);
+            Map<String, Object> responseMap = new HashMap<>();
+            responseMap.put("comments", response);
+            responseMap.put("totalItems", response.size());
             
-            logger.debug("Returning {} comments for message {} (total {})", comments.size(), messageId, totalCount);
+            
+
             return ResponseEntity.ok(response);
-            
         } catch (Exception e) {
-            logger.error("Error getting comments for message {}: {}", messageId, e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                   .body(Map.of("error", "Failed to get comments: " + e.getMessage()));
+            logger.error("Error retrieving messages: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
         }
     }
     
@@ -160,33 +222,42 @@ public class CommentController {
         logger.debug("Getting replies for comment ID: {}", commentId);
         
         try {
-            List<MessageComment> replies = engagementService.getCommentReplies(commentId);
+            // Get replies with a single optimized query
+            String sql = "SELECT mc.*, u.username, u.first_name, u.last_name, u.photo " +
+                        "FROM message_comment mc " +
+                        "JOIN app_user u ON mc.sender_id = u.id " +
+                        "WHERE mc.parent_comment_id = ? " +
+                        "ORDER BY mc.created_at ASC";
             
-            // Get user details for each reply
-            List<Map<String, Object>> replyDetails = new ArrayList<>();
-            for (MessageComment reply : replies) {
+            List<Map<String, Object>> replies = jdbcTemplate.queryForList(sql, commentId);
+            
+            // Transform results
+            List<Map<String, Object>> replyDetails = replies.stream().map(row -> {
                 Map<String, Object> detail = new HashMap<>();
-                detail.put("id", reply.getId());
-                detail.put("messageId", reply.getMessageId());
-                detail.put("userId", reply.getUserId());
-                detail.put("content", reply.getContent());
-                detail.put("mediaUrl", reply.getMediaUrl());
-                detail.put("mediaType", reply.getMediaType());
-                detail.put("createdAt", reply.getCreatedAt());
-                detail.put("updatedAt", reply.getUpdatedAt());
-                detail.put("parentCommentId", reply.getParentCommentId());
+                detail.put("id", row.get("id"));
+                detail.put("parentMessageId", row.get("parent_message_id"));
+                detail.put("senderId", row.get("sender_id"));
+                detail.put("content", row.get("content"));
+                detail.put("mediaUrl", row.get("media_url"));
+                detail.put("mediaType", row.get("media_type"));
+                detail.put("thumbnailUrl", row.get("thumbnail_url"));
+                detail.put("videoUrl", row.get("video_url"));
+                detail.put("createdAt", row.get("created_at"));
+                detail.put("updatedAt", row.get("updated_at"));
+                detail.put("parentCommentId", row.get("parent_comment_id"));
+                detail.put("metrics", row.get("metrics"));
                 
-                // Add basic user info
-                User user = userRepository.findById(reply.getUserId()).orElse(null);
-                if (user != null) {
-                    detail.put("username", user.getUsername());
-                    detail.put("firstName", user.getFirstName());
-                    detail.put("lastName", user.getLastName());
-                    detail.put("photo", user.getPhoto());
-                }
+                // Add user data
+                Map<String, Object> user = new HashMap<>();
+                user.put("id", row.get("sender_id"));
+                user.put("username", row.get("username"));
+                user.put("firstName", row.get("first_name"));
+                user.put("lastName", row.get("last_name"));
+                user.put("photo", row.get("photo"));
+                detail.put("user", user);
                 
-                replyDetails.add(detail);
-            }
+                return detail;
+            }).collect(Collectors.toList());
             
             Map<String, Object> response = new HashMap<>();
             response.put("replies", replyDetails);
@@ -200,74 +271,146 @@ public class CommentController {
         }
     }
     
+    @PostMapping(value = "/comments/{commentId}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String, Object>> uploadCommentMedia(
+        @PathVariable Long commentId,
+        @RequestPart("media") MultipartFile media,
+        @RequestParam("mediaType") String mediaType,
+        HttpServletRequest request
+    ) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            logger.debug("Processing media of type: {} for comment ID: {}", mediaType, commentId);
+            
+            // Create directory structure if it doesn't exist
+            String subdir = "video".equals(mediaType) ? "videos" : "images";
+            Path uploadPath = Paths.get(uploadDir, subdir);
+            if (!Files.exists(uploadPath)) {
+                Files.createDirectories(uploadPath);
+            }
+            
+            // Create filename with timestamp - using simple naming pattern
+            String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
+            Path mediaPath = uploadPath.resolve(mediaFileName);
+            
+            // Write the file
+            Files.write(mediaPath, media.getBytes());
+            logger.debug("Media file saved at: {}", mediaPath);
+            
+            // Set media URL (relative path)
+            // Use URLs matching the static-path-pattern configuration
+            String mediaUrl = "video".equals(mediaType) ? 
+                videosUrlPath + "/" + mediaFileName : 
+                imagesUrlPath + "/" + mediaFileName;
+            
+            response.put("mediaType", mediaType);
+            response.put("mediaUrl", mediaUrl);
+            
+            String thumbnailUrl = null;
+            
+            // For videos, use VideoController to get thumbnail
+            if ("video".equals(mediaType)) {
+                thumbnailUrl = videoController.getThumbnailForVideo(mediaUrl);
+                if (thumbnailUrl != null) {
+                    response.put("thumbnailUrl", thumbnailUrl);
+                    logger.debug("Got thumbnail URL from VideoController: {}", thumbnailUrl);
+                } else {
+                    logger.warn("Failed to get thumbnail URL from VideoController");
+                }
+            }
+
+            // Update the comment in the database with the media URLs
+            String updateSql = "UPDATE message_comment SET media_url = ?, media_type = ?, thumbnail_url = ? WHERE id = ?";
+            jdbcTemplate.update(updateSql, mediaUrl, mediaType, thumbnailUrl, commentId);
+            logger.debug("Updated comment {} with media URLs", commentId);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error uploading media: {}", e.getMessage(), e);
+            response.put("error", "Failed to upload media: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+    /* 
+ 
     /**
+     * 
      * Add a new comment to a message
      */
-    @PostMapping("/{messageId}/comments")
-    public ResponseEntity<Map<String, Object>> addComment(
-            @PathVariable Long messageId,
-            @RequestBody Map<String, Object> commentData,
+    @PostMapping(value = "/{messageId}/comments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String, Object>> postComment(
+            @PathVariable Long messageId, 
+            @RequestParam("content") String content,
+            @RequestParam(value = "media", required = false) MultipartFile media,
+            @RequestParam(value = "mediaType", required = false) String mediaType,
+            @RequestParam("familyId") Long familyId,
+            @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
-        
-        logger.debug("Adding comment to message: {}", messageId);
-        
+         
+        Map<String, Object> response = new HashMap<>();
+      
         try {
             // Extract user ID from request
-            Long userId = (Long) request.getAttribute("userId");
-            if (userId == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                       .body(Map.of("error", "User not authenticated"));
+            if (messageId <= 0) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                       .body(Map.of("error", "Message ID is required"));
             }
             
             // Extract comment data
-            String content = (String) commentData.get("content");
             if (content == null || content.trim().isEmpty()) {
                 return ResponseEntity.badRequest()
                        .body(Map.of("error", "Comment content cannot be empty"));
             }
-            
-            // Get optional parent comment ID
-            Long parentCommentId = null;
-            if (commentData.containsKey("parentCommentId") && commentData.get("parentCommentId") != null) {
-                parentCommentId = Long.valueOf(commentData.get("parentCommentId").toString());
-            }
-            
-            // Create and save the comment
-            MessageComment comment = new MessageComment();
-            comment.setMessageId(messageId);
-            comment.setUserId(userId);
-            comment.setContent(content);
-            comment.setCreatedAt(LocalDateTime.now());
-            
-            // Set optional fields
-            if (commentData.containsKey("mediaUrl")) {
-                comment.setMediaUrl((String) commentData.get("mediaUrl"));
-            }
-            
-            if (commentData.containsKey("mediaType")) {
-                comment.setMediaType((String) commentData.get("mediaType"));
-            }
-            
-            if (parentCommentId != null) {
-                comment.setParentCommentId(parentCommentId);
-            }
-            
-            // Save comment
-            MessageComment savedComment = engagementService.addComment(messageId, userId, content, parentCommentId);
-            
-            // Get user data for the response
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);       
+
+                  // Get user details for the response
             String sql = "SELECT username, first_name, last_name, photo FROM app_user WHERE id = ?";
             Map<String, Object> userData = jdbcTemplate.queryForMap(sql, userId);
-            
+                      
+            String mediaUrl = null;
+            String thumbnailUrl = null;
+            // Handle media upload if present
+            if (media != null && !media.isEmpty()) {
+                Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
+                mediaUrl = mediaResult.get("mediaUrl");
+                if ("video".equals(mediaType)) {
+                    thumbnailUrl = mediaResult.get("thumbnailUrl");
+                }
+            }
+
+            try {
+                // Insert the message
+                    String insertSql = "INSERT INTO message_comment (content, user_id, sender_id, sender_username, " +
+                        "media_type, media_url, thumbnail_url, family_id, parent_message_id) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+                    jdbcTemplate.update(insertSql, 
+                        content, 
+                        userId, 
+                        userId, 
+                        userData.get("username"),
+                        mediaType,
+                        mediaUrl,
+                        thumbnailUrl,
+                        familyId,
+                        messageId
+                    );
+                } catch (DataAccessException e) {
+                    logger.error("Database error while inserting comment: {}", e.getMessage(), e);
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("error", "Failed to save comment to database"));
+                } catch (Exception e) {
+                    logger.error("Unexpected error while inserting comment: {}", e.getMessage(), e);
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("error", "An unexpected error occurred while saving the comment"));
+            }
             // Create response
-            Map<String, Object> response = new HashMap<>();
-            response.put("id", savedComment.getId());
-            response.put("messageId", savedComment.getMessageId());
-            response.put("content", savedComment.getContent());
-            response.put("createdAt", savedComment.getCreatedAt());
-            response.put("parentCommentId", savedComment.getParentCommentId());
-            response.put("mediaUrl", savedComment.getMediaUrl());
-            response.put("mediaType", savedComment.getMediaType());
+            response.put("content", content);
+            response.put("mediaType", mediaType);
+            response.put("mediaUrl", mediaUrl);
+            response.put("thumbnailUrl", thumbnailUrl);
+            response.put("timestamp", LocalDateTime.now());
             
             // Add user data
             Map<String, Object> user = new HashMap<>();
@@ -278,25 +421,24 @@ public class CommentController {
             user.put("photo", userData.get("photo"));
             response.put("user", user);
             
-            logger.debug("Comment added successfully to message {}: {}", messageId, savedComment.getId());
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
             
         } catch (Exception e) {
-            logger.error("Error adding comment to message {}: {}", messageId, e.getMessage(), e);
+            logger.error("Error posting comment: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                   .body(Map.of("error", "Failed to add comment: " + e.getMessage()));
-        }
+                .body(Map.of("error", "Failed to post message: " + e.getMessage()));
+        }  
     }
-    
-    /**
-     * Update an existing comment
-     */
-    @PutMapping("/comments/{commentId}")
-    public ResponseEntity<Map<String, Object>> updateComment(
-            @PathVariable Long commentId,
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, String> commentData,
-            HttpServletRequest request) {
+
+/**
+ * Update an existing comment
+ */
+@PutMapping("/comments/{commentId}")
+public ResponseEntity<Map<String, Object>> updateComment(
+    @PathVariable Long commentId,
+    @RequestHeader("Authorization") String authHeader,
+    @RequestBody Map<String, String> commentData,
+    HttpServletRequest request) {
         logger.debug("Updating comment ID: {}", commentId);
         
         try {
@@ -318,16 +460,30 @@ public class CommentController {
             if (content == null || content.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Comment content is required"));
             }
+
+            // Verify comment exists and belongs to user
+            String checkSql = "SELECT id FROM message_comment WHERE id = ? AND sender_id = ?";
+            try {
+                jdbcTemplate.queryForObject(checkSql, Long.class, commentId, userId);
+            } catch (Exception e) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Comment not found or you don't have permission to update it"));
+            }
             
-            MessageComment updatedComment = engagementService.updateComment(commentId, userId, content);
+            // Update the comment
+            String updateSql = "UPDATE message_comment SET content = ?, updated_at = CURRENT_TIMESTAMP " +
+                             "WHERE id = ? AND sender_id = ? " +
+                             "RETURNING id, parent_message_id, sender_id, content, timestamp, updated_at";
+            
+            Map<String, Object> updatedComment = jdbcTemplate.queryForMap(updateSql, content, commentId, userId);
             
             Map<String, Object> response = new HashMap<>();
-            response.put("id", updatedComment.getId());
-            response.put("messageId", updatedComment.getMessageId());
-            response.put("userId", updatedComment.getUserId());
-            response.put("content", updatedComment.getContent());
-            response.put("createdAt", updatedComment.getCreatedAt());
-            response.put("updatedAt", updatedComment.getUpdatedAt());
+            response.put("id", updatedComment.get("id"));
+            response.put("parentMessageId", updatedComment.get("parent_message_id"));
+            response.put("senderId", updatedComment.get("sender_id"));
+            response.put("content", updatedComment.get("content"));
+            response.put("createdAt", updatedComment.get("created_at"));
+            response.put("updatedAt", updatedComment.get("updated_at"));
             
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
@@ -339,7 +495,7 @@ public class CommentController {
                     .body(Map.of("error", "Failed to update comment: " + e.getMessage()));
         }
     }
-    
+
     /**
      * Delete a comment
      */
@@ -364,8 +520,24 @@ public class CommentController {
                 Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
                 userId = Long.parseLong(claims.get("userId").toString());
             }
+
+            // Verify comment exists and belongs to user
+            String checkSql = "SELECT id FROM message_comment WHERE id = ? AND sender_id = ?";
+            try {
+                jdbcTemplate.queryForObject(checkSql, Long.class, commentId, userId);
+            } catch (Exception e) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Comment not found or you don't have permission to delete it"));
+            }
             
-            engagementService.deleteComment(commentId, userId);
+            // Delete the comment
+            String deleteSql = "DELETE FROM message_comment WHERE id = ? AND sender_id = ?";
+            int rowsAffected = jdbcTemplate.update(deleteSql, commentId, userId);
+            
+            if (rowsAffected == 0) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "Comment not found"));
+            }
             
             return ResponseEntity.ok(Map.of("message", "Comment deleted successfully"));
         } catch (IllegalArgumentException e) {

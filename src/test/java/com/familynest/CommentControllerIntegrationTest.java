@@ -82,23 +82,23 @@ public class CommentControllerIntegrationTest {
         
         // Create some test comments
         testComment1 = new MessageComment();
-        testComment1.setMessageId(testMessage1.getId());
-        testComment1.setUserId(testUser1.getId());
+        testComment1.setParentMessageId(testMessage1.getId());
+        testComment1.setSenderId(testUser1.getId());
         testComment1.setContent("Test comment 1");
         testComment1.setCreatedAt(java.time.LocalDateTime.now());
         testComment1 = commentRepository.save(testComment1);
         
         testComment2 = new MessageComment();
-        testComment2.setMessageId(testMessage1.getId());
-        testComment2.setUserId(testUser2.getId());
+        testComment2.setParentMessageId(testMessage1.getId());
+        testComment2.setSenderId(testUser2.getId());
         testComment2.setContent("Test comment 2");
         testComment2.setCreatedAt(java.time.LocalDateTime.now());
         testComment2 = commentRepository.save(testComment2);
         
         // Create a reply to testComment1
         MessageComment reply = new MessageComment();
-        reply.setMessageId(testMessage1.getId());
-        reply.setUserId(testUser2.getId());
+        reply.setParentMessageId(testMessage1.getId());
+        reply.setSenderId(testUser2.getId());
         reply.setContent("Reply to comment 1");
         reply.setParentCommentId(testComment1.getId());
         reply.setCreatedAt(java.time.LocalDateTime.now());
