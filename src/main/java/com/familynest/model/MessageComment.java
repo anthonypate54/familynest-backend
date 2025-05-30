@@ -201,4 +201,13 @@ public class MessageComment {
     public void setParentComment(MessageComment parentComment) {
         this.parentComment = parentComment;
     }
+
+    // Alias methods to maintain compatibility
+    public void setMessageId(Long messageId) {
+        this.parentMessageId = messageId;
+    }
+
+    public void setUserId(Long userId) {
+        this.senderId = userId;
+    }
 } 

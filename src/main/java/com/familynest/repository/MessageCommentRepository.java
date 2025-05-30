@@ -16,6 +16,11 @@ public interface MessageCommentRepository extends JpaRepository<MessageComment, 
     // Find all top-level comments for a message with pagination
     Page<MessageComment> findByParentMessageIdAndParentCommentIdIsNull(Long parentMessageId, Pageable pageable);
     
+    // Alias method for compatibility
+    default Page<MessageComment> findByMessageIdAndParentCommentIdIsNull(Long messageId, Pageable pageable) {
+        return findByParentMessageIdAndParentCommentIdIsNull(messageId, pageable);
+    }
+    
     // Find all replies to a specific comment
     List<MessageComment> findByParentCommentId(Long parentCommentId);
     
@@ -24,6 +29,11 @@ public interface MessageCommentRepository extends JpaRepository<MessageComment, 
     
     // Count comments for a message
     long countByParentMessageId(Long parentMessageId);
+    
+    // Alias method for compatibility
+    default long countByMessageId(Long messageId) {
+        return countByParentMessageId(messageId);
+    }
     
     // Count replies for a comment
     long countByParentCommentId(Long parentCommentId);

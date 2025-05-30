@@ -59,4 +59,9 @@ public class MessageView {
     public void setViewedAt(LocalDateTime viewedAt) {
         this.viewedAt = viewedAt;
     }
+
+    // Alias method to maintain compatibility
+    public void setSenderId(Long senderId) {
+        this.userId = senderId;
+    }
 } 

@@ -70,4 +70,9 @@ public class MessageReaction {
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
     }
+
+    // Alias method to maintain compatibility
+    public void setSenderId(Long senderId) {
+        this.userId = senderId;
+    }
 } 
