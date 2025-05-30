@@ -140,7 +140,7 @@ public class CommentController {
             "  m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
             "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
             "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
-            "  f.name as family_name, " +
+            "  f.name as family_name, m.parent_message_id as parent_message_id, " +
             "  COALESCE(vc.count, 0) as view_count, " +
             "  m.like_count, m.love_count, " +
             "  COALESCE(cc.count, 0) as comment_count " +
@@ -189,6 +189,7 @@ public class CommentController {
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
+                messageMap.put("parentMessageId", message.get("parent_message_id"));
                 
                 // Add video message thumbnail URL warning only once
                 if ("video".equals(message.get("media_type")) && message.get("thumbnail_url") == null) {
