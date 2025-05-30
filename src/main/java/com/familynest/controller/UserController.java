@@ -675,6 +675,7 @@ public class UserController {
         }
     }
 
+    @Transactional
     @PostMapping(value = "/{id}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> postMessage(
             @RequestParam("content") String content,
@@ -716,8 +717,8 @@ public class UserController {
             
             // Insert the message
             String insertSql = "INSERT INTO message (content, user_id, sender_id, sender_username, " +
-                             "media_type, media_url, thumbnail_url, family_id) " +
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                             "media_type, media_url, thumbnail_url, family_id, like_count, love_count) " +
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)";
             
             jdbcTemplate.update(insertSql, 
                 content, 
@@ -798,7 +799,7 @@ public class UserController {
                         "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                         "  f.name as family_name, " +
                         "  COALESCE(vc.count, 0) as view_count, " +
-                        "  COALESCE(rc.count, 0) as reaction_count, " +
+                        "  m.like_count, m.love_count, " +
                         "  COALESCE(cc.count, 0) as comment_count " +
                         "FROM message m " +
                         "JOIN message_subset ms ON m.id = ms.id " +
@@ -806,8 +807,6 @@ public class UserController {
                         "LEFT JOIN family f ON m.family_id = f.id " +
                         "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
                         "  ON m.id = vc.message_id " +
-                        "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_reaction GROUP BY message_id) rc " +
-                        "  ON m.id = rc.message_id " +
                         "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
                         "  ON m.id = cc.parent_message_id " +
                         "ORDER BY m.id DESC";
@@ -851,6 +850,10 @@ public class UserController {
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
+                messageMap.put("viewCount", message.get("view_count"));
+                messageMap.put("likeCount", message.get("like_count"));
+                messageMap.put("loveCount", message.get("love_count"));
+                messageMap.put("commentCount", message.get("comment_count"));
                 
                 // Add thumbnail URL without excessive logging
                 messageMap.put("thumbnailUrl", message.get("thumbnail_url")); 

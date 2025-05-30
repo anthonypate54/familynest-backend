@@ -142,7 +142,7 @@ public class CommentController {
             "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
             "  f.name as family_name, " +
             "  COALESCE(vc.count, 0) as view_count, " +
-            "  COALESCE(rc.count, 0) as reaction_count, " +
+            "  m.like_count, m.love_count, " +
             "  COALESCE(cc.count, 0) as comment_count " +
             "FROM message_comment m " +
             "JOIN message_subset ms ON m.id = ms.id " +
@@ -150,8 +150,6 @@ public class CommentController {
             "LEFT JOIN family f ON m.family_id = f.id " +
             "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
             "  ON m.id = vc.message_id " +
-            "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_reaction GROUP BY message_id) rc " +
-            "  ON m.id = rc.message_id " +
             "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
             "  ON m.id = cc.parent_message_id " +
             "ORDER BY m.id DESC";
@@ -172,7 +170,6 @@ public class CommentController {
             }
                          
             // Transform results to the response format
-            // Transform results to the response format
             List<Map<String, Object>> response = results.stream().map(message -> {
                 Map<String, Object> messageMap = new HashMap<>();
                 messageMap.put("id", message.get("id"));
@@ -187,9 +184,11 @@ public class CommentController {
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
-                
-                // Add thumbnail URL without excessive logging
-                messageMap.put("thumbnailUrl", message.get("thumbnail_url")); 
+                messageMap.put("thumbnailUrl", message.get("thumbnail_url"));
+                messageMap.put("viewCount", message.get("view_count"));
+                messageMap.put("likeCount", message.get("like_count"));
+                messageMap.put("loveCount", message.get("love_count"));
+                messageMap.put("commentCount", message.get("comment_count"));
                 
                 // Add video message thumbnail URL warning only once
                 if ("video".equals(message.get("media_type")) && message.get("thumbnail_url") == null) {
@@ -199,14 +198,7 @@ public class CommentController {
                 return messageMap;
             }).collect(Collectors.toList());
             
- 
             logger.debug("Returning {} messages for user {} using a single optimized query", response.size(), userId);
-            Map<String, Object> responseMap = new HashMap<>();
-            responseMap.put("comments", response);
-            responseMap.put("totalItems", response.size());
-            
-            
-
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error retrieving messages: {}", e.getMessage(), e);
@@ -223,10 +215,14 @@ public class CommentController {
         
         try {
             // Get replies with a single optimized query
-            String sql = "SELECT mc.*, u.username, u.first_name, u.last_name, u.photo " +
+            String sql = "SELECT mc.*, u.username, u.first_name, u.last_name, u.photo, " +
+                        "mc.like_count, mc.love_count, " +
+                        "COALESCE(cc.count, 0) as reply_count " +
                         "FROM message_comment mc " +
                         "JOIN app_user u ON mc.sender_id = u.id " +
-                        "WHERE mc.parent_comment_id = ? " +
+                        "LEFT JOIN (SELECT parent_comment_id, COUNT(*) as count FROM message_comment GROUP BY parent_comment_id) cc " +
+                        "  ON mc.id = cc.parent_comment_id " +
+                        "WHERE mc.parent_message_id = ? " +
                         "ORDER BY mc.created_at ASC";
             
             List<Map<String, Object>> replies = jdbcTemplate.queryForList(sql, commentId);
@@ -337,6 +333,7 @@ public class CommentController {
      * 
      * Add a new comment to a message
      */
+    @Transactional
     @PostMapping(value = "/{messageId}/comments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> postComment(
             @PathVariable Long messageId, 
@@ -382,8 +379,8 @@ public class CommentController {
             try {
                 // Insert the message
                     String insertSql = "INSERT INTO message_comment (content, user_id, sender_id, sender_username, " +
-                        "media_type, media_url, thumbnail_url, family_id, parent_message_id) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        "media_type, media_url, thumbnail_url, family_id, parent_message_id, like_count, love_count) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)";
 
                     jdbcTemplate.update(insertSql, 
                         content, 
@@ -433,6 +430,7 @@ public class CommentController {
 /**
  * Update an existing comment
  */
+@Transactional
 @PutMapping("/comments/{commentId}")
 public ResponseEntity<Map<String, Object>> updateComment(
     @PathVariable Long commentId,
@@ -499,6 +497,7 @@ public ResponseEntity<Map<String, Object>> updateComment(
     /**
      * Delete a comment
      */
+    @Transactional
     @DeleteMapping("/comments/{commentId}")
     public ResponseEntity<Map<String, Object>> deleteComment(
             @PathVariable Long commentId,
