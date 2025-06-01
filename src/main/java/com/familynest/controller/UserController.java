@@ -9,6 +9,8 @@ import com.familynest.repository.FamilyRepository;
 import com.familynest.auth.AuthUtil; // Add this import
 import com.familynest.service.ThumbnailService; // Add ThumbnailService import
 import com.familynest.service.MediaService;
+import com.familynest.service.MessageService;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,11 +58,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.CrossOrigin;
+
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
 
     private static final Logger logger = LoggerFactory.getLogger(UserController.class);
+
+    @Autowired
+    private MessageService messageService;
 
     @Autowired
     private UserRepository userRepository;
@@ -676,37 +682,32 @@ public class UserController {
     }
 
     @Transactional
-    @PostMapping(value = "/{id}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/{userId}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> postMessage(
             @RequestParam("content") String content,
             @RequestParam(value = "media", required = false) MultipartFile media,
             @RequestParam(value = "mediaType", required = false) String mediaType,
             @RequestParam("familyId") Long familyId,
+            @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
-        
-        Map<String, Object> response = new HashMap<>();
         try {
-            // Extract user ID from request
-            Long userId = (Long) request.getAttribute("userId");
-            if (userId == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                       .body(Map.of("error", "User not authenticated"));
-            }
-            
-            // Validate content
+            // Validation
             if (content == null || content.trim().isEmpty()) {
                 return ResponseEntity.badRequest()
                        .body(Map.of("error", "Message content cannot be empty"));
             }
-            
-            // Get user details for the response
+    
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+    
+            // Get user data for sender_username, etc.
             String sql = "SELECT username, first_name, last_name, photo FROM app_user WHERE id = ?";
             Map<String, Object> userData = jdbcTemplate.queryForMap(sql, userId);
-            
+    
+            // Handle media upload if present
             String mediaUrl = null;
             String thumbnailUrl = null;
-            
-            // Handle media upload if present
             if (media != null && !media.isEmpty()) {
                 Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
                 mediaUrl = mediaResult.get("mediaUrl");
@@ -714,13 +715,13 @@ public class UserController {
                     thumbnailUrl = mediaResult.get("thumbnailUrl");
                 }
             }
-            
-            // Insert the message
+    
+            // Insert the message and get the new ID
             String insertSql = "INSERT INTO message (content, user_id, sender_id, sender_username, " +
-                             "media_type, media_url, thumbnail_url, family_id, like_count, love_count) " +
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)";
-            
-            jdbcTemplate.update(insertSql, 
+                "media_type, media_url, thumbnail_url, family_id, like_count, love_count) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0) RETURNING id";
+    
+            Long newMessageId = jdbcTemplate.queryForObject(insertSql, Long.class,
                 content, 
                 userId, 
                 userId, 
@@ -730,29 +731,17 @@ public class UserController {
                 thumbnailUrl,
                 familyId
             );
-            
-            // Create response
-            response.put("content", content);
-            response.put("mediaType", mediaType);
-            response.put("mediaUrl", mediaUrl);
-            response.put("thumbnailUrl", thumbnailUrl);
-            response.put("timestamp", LocalDateTime.now());
-            
-            // Add user data
-            Map<String, Object> user = new HashMap<>();
-            user.put("id", userId);
-            user.put("username", userData.get("username"));
-            user.put("firstName", userData.get("first_name"));
-            user.put("lastName", userData.get("last_name"));
-            user.put("photo", userData.get("photo"));
-            response.put("user", user);
-            
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-            
+    
+            // Fetch the full message with all joins using the service
+            Map<String, Object> messageData = messageService.getMessageById(newMessageId);
+    
+            // Return the fully-formed message as the response
+            return ResponseEntity.status(HttpStatus.CREATED).body(messageData);
+    
         } catch (Exception e) {
             logger.error("Error posting message: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                   .body(Map.of("error", "Failed to post message: " + e.getMessage()));
+                .body(Map.of("error", "Failed to post message: " + e.getMessage()));
         }
     }
 

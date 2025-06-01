@@ -7,6 +7,8 @@ import com.familynest.repository.UserRepository;
 import com.familynest.auth.JwtUtil;
 import com.familynest.service.ThumbnailService;
 import com.familynest.service.MediaService;
+import com.familynest.service.MessageService;
+
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +46,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class CommentController {
 
     private static final Logger logger = LoggerFactory.getLogger(CommentController.class);
+
+    @Autowired
+    private MessageService messageService;
 
     @Autowired
     private EngagementService engagementService;
@@ -344,31 +349,28 @@ public class CommentController {
             @RequestParam("familyId") Long familyId,
             @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
-         
-        Map<String, Object> response = new HashMap<>();
-      
         try {
-            // Extract user ID from request
+            // Validation
             if (messageId <= 0) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                        .body(Map.of("error", "Message ID is required"));
             }
-            
-            // Extract comment data
             if (content == null || content.trim().isEmpty()) {
                 return ResponseEntity.badRequest()
                        .body(Map.of("error", "Comment content cannot be empty"));
             }
+    
+            // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);       
-
-                  // Get user details for the response
+            Long userId = authUtil.extractUserId(token);
+    
+            // Get user data for sender_username, etc.
             String sql = "SELECT username, first_name, last_name, photo FROM app_user WHERE id = ?";
             Map<String, Object> userData = jdbcTemplate.queryForMap(sql, userId);
-                      
+    
+            // Handle media upload if present
             String mediaUrl = null;
             String thumbnailUrl = null;
-            // Handle media upload if present
             if (media != null && !media.isEmpty()) {
                 Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
                 mediaUrl = mediaResult.get("mediaUrl");
@@ -376,56 +378,35 @@ public class CommentController {
                     thumbnailUrl = mediaResult.get("thumbnailUrl");
                 }
             }
-
-            try {
-                // Insert the message
-                    String insertSql = "INSERT INTO message_comment (content, user_id, sender_id, sender_username, " +
-                        "media_type, media_url, thumbnail_url, family_id, parent_message_id, like_count, love_count) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)";
-
-                    jdbcTemplate.update(insertSql, 
-                        content, 
-                        userId, 
-                        userId, 
-                        userData.get("username"),
-                        mediaType,
-                        mediaUrl,
-                        thumbnailUrl,
-                        familyId,
-                        messageId
-                    );
-                } catch (DataAccessException e) {
-                    logger.error("Database error while inserting comment: {}", e.getMessage(), e);
-                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                        .body(Map.of("error", "Failed to save comment to database"));
-                } catch (Exception e) {
-                    logger.error("Unexpected error while inserting comment: {}", e.getMessage(), e);
-                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                        .body(Map.of("error", "An unexpected error occurred while saving the comment"));
-            }
-            // Create response
-            response.put("content", content);
-            response.put("mediaType", mediaType);
-            response.put("mediaUrl", mediaUrl);
-            response.put("thumbnailUrl", thumbnailUrl);
-            response.put("timestamp", LocalDateTime.now());
-            
-            // Add user data
-            Map<String, Object> user = new HashMap<>();
-            user.put("id", userId);
-            user.put("username", userData.get("username"));
-            user.put("firstName", userData.get("first_name"));
-            user.put("lastName", userData.get("last_name"));
-            user.put("photo", userData.get("photo"));
-            response.put("user", user);
-            
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-            
+    
+            // Insert the comment and get the new ID
+            String insertSql = "INSERT INTO message_comment (content, user_id, sender_id, sender_username, " +
+                "media_type, media_url, thumbnail_url, family_id, parent_message_id, like_count, love_count) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0) RETURNING id";
+    
+            Long newCommentId = jdbcTemplate.queryForObject(insertSql, Long.class,
+                content, 
+                userId, 
+                userId, 
+                userData.get("username"),
+                mediaType,
+                mediaUrl,
+                thumbnailUrl,
+                familyId,
+                messageId
+            );
+    
+            // Fetch the full comment with all joins using the service
+            Map<String, Object> commentData = messageService.getCommentById(newCommentId);
+    
+            // Return the fully-formed comment as the response
+            return ResponseEntity.status(HttpStatus.CREATED).body(commentData);
+    
         } catch (Exception e) {
             logger.error("Error posting comment: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Failed to post message: " + e.getMessage()));
-        }  
+        }
     }
 
 /**
