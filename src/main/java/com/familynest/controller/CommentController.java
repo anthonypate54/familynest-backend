@@ -340,9 +340,9 @@ public class CommentController {
      * Add a new comment to a message
      */
     @Transactional
-    @PostMapping(value = "/{messageId}/comments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/{parentMessageId}/comments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> postComment(
-            @PathVariable Long messageId, 
+            @PathVariable Long parentMessageId, 
             @RequestParam("content") String content,
             @RequestParam(value = "media", required = false) MultipartFile media,
             @RequestParam(value = "mediaType", required = false) String mediaType,
@@ -351,7 +351,7 @@ public class CommentController {
             HttpServletRequest request) {
         try {
             // Validation
-            if (messageId <= 0) {
+            if (parentMessageId <= 0) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                        .body(Map.of("error", "Message ID is required"));
             }
@@ -393,7 +393,7 @@ public class CommentController {
                 mediaUrl,
                 thumbnailUrl,
                 familyId,
-                messageId
+                parentMessageId
             );
     
             // Fetch the full comment with all joins using the service
