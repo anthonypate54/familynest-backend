@@ -96,8 +96,9 @@ public class MediaService {
                 Files.createDirectories(thumbnailDirPath);
             }
             
-            // Generate thumbnail filename
-            String thumbnailFileName = mediaFileName.replace(".mp4", "_thumbnail.jpg");
+            // Generate thumbnail filename - handle any video extension
+            String baseName = mediaFileName.substring(0, mediaFileName.lastIndexOf('.'));
+            String thumbnailFileName = baseName + "_thumbnail.jpg";
             Path thumbnailPath = thumbnailDirPath.resolve(thumbnailFileName);
             
             // Generate thumbnail using ThumbnailService
@@ -152,6 +153,45 @@ public class MediaService {
         }
         
         logger.debug("Media upload complete. Result: {}", result);
+        return result;
+    }
+
+    /**
+     * Handles external video URLs with uploaded thumbnails
+     * This is a separate method to keep it clean and avoid confusing the uploadMedia method
+     * 
+     * @param thumbnailFile The thumbnail image file uploaded from frontend
+     * @param externalVideoUrl The external video URL (Google Drive, etc.)
+     * @return Map containing mediaUrl (external URL), thumbnailUrl, and mediaType
+     * @throws IOException If thumbnail upload fails
+     */
+    public Map<String, String> processExternalVideoWithThumbnail(
+            MultipartFile thumbnailFile, 
+            String externalVideoUrl) throws IOException {
+        
+        logger.debug("Processing external video URL: {} with uploaded thumbnail", externalVideoUrl);
+        
+        // Create thumbnails directory if needed
+        Path thumbnailDirPath = Paths.get(thumbnailDir);
+        if (!Files.exists(thumbnailDirPath)) {
+            Files.createDirectories(thumbnailDirPath);
+        }
+        
+        // Create filename with timestamp for the thumbnail
+        String thumbnailFileName = System.currentTimeMillis() + "_" + thumbnailFile.getOriginalFilename();
+        Path thumbnailPath = thumbnailDirPath.resolve(thumbnailFileName);
+        
+        // Write the thumbnail file to disk
+        Files.write(thumbnailPath, thumbnailFile.getBytes());
+        logger.debug("Thumbnail file saved at: {}", thumbnailPath);
+        
+        // Create result map
+        Map<String, String> result = new HashMap<>();
+        result.put("mediaUrl", externalVideoUrl);  // External URL is the main media URL
+        result.put("thumbnailUrl", thumbnailsUrlPath + "/" + thumbnailFileName);  // Local thumbnail URL
+        result.put("mediaType", "cloud_video");  // Special type for external videos
+        
+        logger.debug("External video processing complete. Result: {}", result);
         return result;
     }
 } 

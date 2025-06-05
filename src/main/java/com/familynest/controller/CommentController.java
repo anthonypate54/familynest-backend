@@ -342,13 +342,14 @@ public class CommentController {
     @Transactional
     @PostMapping(value = "/{parentMessageId}/comments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> postComment(
-            @PathVariable Long parentMessageId, 
-            @RequestParam("content") String content,
-            @RequestParam(value = "media", required = false) MultipartFile media,
-            @RequestParam(value = "mediaType", required = false) String mediaType,
-            @RequestParam("familyId") Long familyId,
-            @RequestHeader("Authorization") String authHeader,
-            HttpServletRequest request) {
+        @PathVariable Long parentMessageId, 
+        @RequestParam("content") String content,
+        @RequestParam(value = "media", required = false) MultipartFile media,
+        @RequestParam(value = "mediaType", required = false) String mediaType,
+        @RequestParam(value = "videoUrl", required = false) String videoUrl,  // ADD THIS
+        @RequestParam("familyId") Long familyId,
+        @RequestHeader("Authorization") String authHeader,
+        HttpServletRequest request) {
         try {
             // Validation
             if (parentMessageId <= 0) {
@@ -371,14 +372,33 @@ public class CommentController {
             // Handle media upload if present
             String mediaUrl = null;
             String thumbnailUrl = null;
-            if (media != null && !media.isEmpty()) {
+            if (media != null && !media.isEmpty() && (videoUrl == null || !videoUrl.startsWith("http"))) {
                 Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
                 mediaUrl = mediaResult.get("mediaUrl");
                 if ("video".equals(mediaType)) {
                     thumbnailUrl = mediaResult.get("thumbnailUrl");
                 }
+            } // Handle external video URL (takes priority and may override above)
+            else if (videoUrl != null && videoUrl.startsWith("http")) {
+                logger.debug("Processing external video URL: {}", videoUrl);
+                
+                // If we uploaded media, it's actually a thumbnail for the external video
+                if (media != null && !media.isEmpty() && "image".equals(mediaType)) {
+                    // Use our new clean method instead of reassignment
+                    Map<String, String> externalVideoResult = mediaService.processExternalVideoWithThumbnail(media, videoUrl);
+                    mediaUrl = externalVideoResult.get("mediaUrl");
+                    thumbnailUrl = externalVideoResult.get("thumbnailUrl");
+                    mediaType = externalVideoResult.get("mediaType");
+                    logger.debug("Used new method - mediaUrl: {}, thumbnailUrl: {}", mediaUrl, thumbnailUrl);
+                } else {
+                    // No thumbnail uploaded
+                    mediaUrl = videoUrl;
+                    mediaType = "cloud_video";
+                    thumbnailUrl = null;
+                    logger.debug("External video without thumbnail - mediaUrl: {}", mediaUrl);
+                }
             }
-    
+        
             // Insert the comment and get the new ID
             String insertSql = "INSERT INTO message_comment (content, user_id, sender_id, sender_username, " +
                 "media_type, media_url, thumbnail_url, family_id, parent_message_id, like_count, love_count) " +
