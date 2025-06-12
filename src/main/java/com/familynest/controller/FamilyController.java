@@ -7,6 +7,8 @@ import com.familynest.repository.FamilyRepository;
 import com.familynest.repository.UserRepository;
 import com.familynest.repository.UserFamilyMembershipRepository;
 import com.familynest.repository.UserFamilyMessageSettingsRepository;
+import com.familynest.repository.InvitationRepository;
+import com.familynest.model.Invitation;
 import com.familynest.auth.AuthUtil;
 import com.familynest.auth.JwtUtil;
 
@@ -20,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
+
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -34,6 +38,9 @@ public class FamilyController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private InvitationRepository invitationRepository;
 
     @Autowired
     private UserFamilyMembershipRepository userFamilyMembershipRepository;
@@ -433,42 +440,73 @@ public class FamilyController {
         }
     }
 
-    /**
-     * Send invitation to join family
-     * POST /api/families/{familyId}/invite
-     */
-    @PostMapping("/{familyId}/invite")
-    public ResponseEntity<Map<String, Object>> inviteToFamily(
+    @PostMapping("/{familyId}/invite") 
+    @Transactional
+    public ResponseEntity<Map<String, Object>> inviteUser(
             @PathVariable Long familyId,
             @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, String> inviteData) {
-        logger.debug("Received request to invite to family ID: {}", familyId);
+        logger.debug("Received request to invite user to family ID: {}", familyId);
+        
+        // This functionality has been moved to InvitationController
+        // Please use /api/invitations/{familyId}/invite endpoint instead
+        logger.info("Redirecting invite request to InvitationController");
+        
+        // Forward to the InvitationController endpoint
+        return ResponseEntity.status(HttpStatus.MOVED_PERMANENTLY)
+            .header("Location", "/api/invitations/" + familyId + "/invite")
+            .body(Map.of(
+                "message", "This endpoint has been moved to /api/invitations/{familyId}/invite",
+                "redirectTo", "/api/invitations/" + familyId + "/invite",
+                "info", "The method has been renamed from inviteUser to inviteUserToFamily"
+            ));
+    }
+
+    @GetMapping("/{id}/families")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getUserFamilies(@PathVariable Long id) {
+        logger.debug("Getting families for user ID: {}", id);
         try {
-            // Extract user ID from token
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);
-            if (userId == null) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            // Check if the user exists using a lightweight check
+            if (!userRepository.existsById(id)) {
+                return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
             }
-
-            // Check if user is authorized to invite (must be family admin/owner)
-            Optional<UserFamilyMembership> membership = userFamilyMembershipRepository.findByUserIdAndFamilyId(userId, familyId);
-            if (membership.isEmpty() || !"ADMIN".equals(membership.get().getRole())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized to invite to this family"));
-            }
-
-            // TODO: Implement invitation logic here
-            // This would typically involve creating an invitation record and sending an email
-            String email = inviteData.get("email");
             
-            logger.debug("Invitation logic not yet implemented for email: {}", email);
-            return ResponseEntity.ok(Map.of("message", "Invitation functionality coming soon"));
+            // Simplified SQL query to get all family data
+            String sql = "SELECT " +
+                        "  f.id as family_id, f.name as family_name, f.created_by as owner_id, " +
+                        "  (SELECT COUNT(*) FROM user_family_membership ufm WHERE ufm.family_id = f.id) as member_count, " +
+                        "  ufm.role, ufm.is_active, " +
+                        "  CASE WHEN f.created_by = ? THEN true ELSE false END as is_owner " +
+                        "FROM family f " +
+                        "JOIN user_family_membership ufm ON f.id = ufm.family_id " +
+                        "WHERE ufm.user_id = ?";
+            
+            logger.debug("Executing query for families for user ID: {}", id);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id);
+            
+            // Transform results into the response format  
+            List<Map<String, Object>> families = results.stream().map(family -> {
+                Map<String, Object> familyInfo = new HashMap<>();
+                familyInfo.put("familyId", family.get("family_id"));
+                familyInfo.put("familyName", family.get("family_name"));
+                familyInfo.put("memberCount", family.get("member_count"));
+                familyInfo.put("isOwner", family.get("is_owner"));
+                familyInfo.put("role", family.get("role"));
+                familyInfo.put("isActive", family.get("is_active"));
+                return familyInfo;
+            }).collect(Collectors.toList());
+            
+            logger.debug("Returning {} families for user {}", families.size(), id);
+            return ResponseEntity.ok(families);
         } catch (Exception e) {
-            logger.error("Error sending invitation: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(Map.of("error", "Error sending invitation: " + e.getMessage()));
+            logger.error("Error getting families for user {}: {}", id, e.getMessage(), e);
+            return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error getting families: " + e.getMessage())));
         }
     }
 
+ 
     /**
      * Check if user owns a family and return family details if they do
      * GET /api/families/owned

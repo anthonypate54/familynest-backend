@@ -1331,32 +1331,41 @@ public class UserController {
 
     @GetMapping("/invitations")
     @Transactional(readOnly = true)
-    public ResponseEntity<List<Map<String, Object>>> getInvitations(@RequestHeader("Authorization") String authHeader) {
+    public ResponseEntity<List<Map<String, Object>>> getInvitations(@RequestHeader(value = "Authorization", required = true) String authHeader) {
+        logger.info("🔍 INVITATIONS: Request received - authHeader present: {}", authHeader != null);
         logger.debug("Received request to get invitations");
         try {
+            if (authHeader == null || authHeader.trim().isEmpty()) {
+                return ResponseEntity.status(403).body(List.of(Map.of("error", "Missing authorization header")));
+            }
+    
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
             Long userId = authUtil.extractUserId(token);
             if (userId == null) {
                 return ResponseEntity.status(403).body(List.of(Map.of("error", "Unauthorized access")));
             }
-
-            // Optimized single SQL query to get user's email and invitations
-            String sql = "WITH user_email AS (" +
-                        "  SELECT u.email FROM app_user u WHERE u.id = ?" +
-                        ") " +
-                        "SELECT i.id, i.family_id, i.sender_id, i.status, i.created_at, i.expires_at, " +
+    
+            // Simplified SQL query for debugging
+            String sql = "SELECT i.id, i.family_id, i.sender_id, i.status, i.created_at, i.expires_at, i.email, " +
                         "       f.name as family_name, " +
-                        "       s.username as sender_username, s.first_name as sender_first_name, s.last_name as sender_last_name " +
+                        "       s.username as sender_username, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
+                        "       u.email as user_email " +
                         "FROM invitation i " +
-                        "JOIN user_email ue ON i.email = ue.email " +
                         "LEFT JOIN family f ON i.family_id = f.id " +
-                        "LEFT JOIN app_user s ON i.sender_id = s.id";
+                        "LEFT JOIN app_user s ON i.sender_id = s.id " +
+                        "LEFT JOIN app_user u ON u.id = ? " +
+                        "WHERE i.email = (SELECT email FROM app_user WHERE id = ?)";
             
-            logger.debug("Executing optimized query for invitations for user ID: {}", userId);
+            logger.debug("Executing query for invitations for user ID: {}", userId);
             
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId);
-            
-            // Transform results into the response format
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId);
+  // Add this after the SQL query execution
+logger.info("🔍 DEBUG: Raw results count: {}", results.size());
+String emailCheckSql = "SELECT email FROM app_user WHERE id = ?";
+List<String> userEmails = jdbcTemplate.queryForList(emailCheckSql, String.class, userId);
+logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT FOUND" : userEmails.get(0));
+           
+           // Transform results into the response format
             List<Map<String, Object>> response = results.stream().map(inv -> {
                 Map<String, Object> invMap = new HashMap<>();
                 invMap.put("id", inv.get("id"));
@@ -1371,9 +1380,14 @@ public class UserController {
                 invMap.put("senderName", inv.get("sender_first_name") + " " + inv.get("sender_last_name"));
                 invMap.put("senderUsername", inv.get("sender_username"));
                 
+                // Debug info
+                invMap.put("invitationEmail", inv.get("email"));
+                invMap.put("userEmail", inv.get("user_email"));
+                
                 return invMap;
             }).collect(Collectors.toList());
-
+  
+            
             logger.debug("Returning {} invitations for user ID: {}", response.size(), userId);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -1381,7 +1395,6 @@ public class UserController {
             return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
         }
     }
-
     /**
      * Public test endpoint for uploading videos without authentication
      * ONLY FOR DEVELOPMENT TESTING - REMOVE IN PRODUCTION
@@ -1491,172 +1504,7 @@ public class UserController {
         }
     }
 
-    @PostMapping("/{id}/invite")
-    public ResponseEntity<Map<String, Object>> inviteUser(
-            @PathVariable Long id,
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, String> inviteData) {
-        logger.debug("Received request to invite user from user ID: {}", id);
-        try {
-            // Validate the request
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            if (!authUtil.validateToken(token)) {
-                logger.debug("Unauthorized access attempt by user ID: {}", id);
-                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
-            }
-
-            Long userId = authUtil.extractUserId(token);
-            if (userId == null || !userId.equals(id)) {
-                logger.debug("Unauthorized access attempt by user ID: {}", id);
-                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
-            }
-
-            // Get the user and verify they belong to a family
-            User inviter = userRepository.findById(id).orElse(null);
-            if (inviter == null) {
-                logger.debug("Inviter not found for ID: {}", id);
-                return ResponseEntity.badRequest().body(Map.of("error", "Inviter not found"));
-            }
-
-            // First get all families the user belongs to where they are an ADMIN
-            List<Map<String, Object>> userFamilies = getUserFamilies(id).getBody();
-            
-            // Add debug logs to see what we're getting
-            logger.debug("User families data for user {}: {}", id, userFamilies);
-            if (userFamilies != null && !userFamilies.isEmpty()) {
-                logger.debug("First family data: {}", userFamilies.get(0));
-                logger.debug("First family keys: {}", userFamilies.get(0).keySet());
-            }
-            
-            boolean isAdmin = false;
-            Long familyId = null;
-            
-            // Look for a family where the user is an admin/owner
-            if (userFamilies != null) {
-                for (Map<String, Object> family : userFamilies) {
-                    if ((Boolean) family.getOrDefault("isOwner", false)) {
-                        isAdmin = true;
-                        // Use safe conversion with null check
-                        Object familyIdObj = family.get("familyId");
-                        if (familyIdObj != null) {
-                            if (familyIdObj instanceof Number) {
-                                familyId = ((Number) familyIdObj).longValue();
-                            } else if (familyIdObj instanceof String) {
-                                try {
-                                    familyId = Long.parseLong((String) familyIdObj);
-                                } catch (NumberFormatException e) {
-                                    logger.warn("Could not parse familyId: {}", familyIdObj);
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-            
-            if (!isAdmin || familyId == null) {
-                // If we couldn't find a family where the user is an admin, try a direct database query
-                // Since we can't directly query for families created by user,
-                // we'll skip this attempt and just use what we found in userFamilies
-                logger.debug("Skipping direct database query for owned families");
-                // No additional lookup attempt since required repository method is not available
-            }
-            
-            if (!isAdmin || familyId == null) {
-                logger.debug("User ID {} is not an admin of any family", id);
-                return ResponseEntity.badRequest().body(Map.of("error", "User must be a family admin to send invites"));
-            }
-
-            String inviteeEmail = inviteData.get("email");
-            if (inviteeEmail == null || inviteeEmail.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Invitee email is required"));
-            }
-            
-            // Get the family ID from the request if provided, otherwise use the family where user is admin
-            Long requestedFamilyId = null;
-            if (inviteData.containsKey("familyId") && inviteData.get("familyId") != null) {
-                try {
-                    requestedFamilyId = Long.parseLong(inviteData.get("familyId"));
-                } catch (NumberFormatException e) {
-                    logger.debug("Invalid family ID format: {}", inviteData.get("familyId"));
-                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid family ID format"));
-                }
-                
-                // Verify the user is an admin of the requested family
-                boolean isAdminOfRequestedFamily = false;
-                if (userFamilies != null) {
-                    for (Map<String, Object> family : userFamilies) {
-                        Object familyIdObj = family.get("familyId");
-                        Long currentFamilyId = null;
-                        
-                        // Safe conversion with null check
-                        if (familyIdObj != null) {
-                            if (familyIdObj instanceof Number) {
-                                currentFamilyId = ((Number) familyIdObj).longValue();
-                            } else if (familyIdObj instanceof String) {
-                                try {
-                                    currentFamilyId = Long.parseLong((String) familyIdObj);
-                                } catch (NumberFormatException e) {
-                                    logger.warn("Could not parse familyId: {}", familyIdObj);
-                                    continue;
-                                }
-                            }
-                        }
-                        
-                        if (currentFamilyId != null && 
-                            currentFamilyId.equals(requestedFamilyId) && 
-                            (Boolean) family.getOrDefault("isOwner", false)) {
-                            isAdminOfRequestedFamily = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!isAdminOfRequestedFamily) {
-                    logger.debug("User ID {} is not an admin of family ID {}", id, requestedFamilyId);
-                    return ResponseEntity.badRequest().body(Map.of("error", "User is not authorized to invite to this family"));
-                }
-                
-                familyId = requestedFamilyId;
-            }
-
-            // Check if invitee already has a pending invitation to this family
-            List<Invitation> existingInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
-                inviteeEmail, familyId, "PENDING");
-                
-            if (!existingInvitations.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "An invitation to this family is already pending for this email"));
-            }
-
-            // Create and save the invitation
-            Invitation invitation = new Invitation();
-            invitation.setFamilyId(familyId);
-            invitation.setSenderId(id);
-            invitation.setEmail(inviteeEmail);
-            invitation.setStatus("PENDING");
-            invitation.setCreatedAt(LocalDateTime.now());
-            invitation.setExpiresAt(LocalDateTime.now().plusDays(7));
-            
-            Invitation savedInvitation = invitationRepository.save(invitation);
-
-            logger.debug("Invitation created successfully: ID={}, familyId={}, email={}", 
-                savedInvitation.getId(), familyId, inviteeEmail);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("invitationId", savedInvitation.getId());
-            response.put("familyId", familyId);
-            response.put("email", inviteeEmail);
-            response.put("status", savedInvitation.getStatus());
-            response.put("expiresAt", savedInvitation.getExpiresAt().toString());
-            response.put("message", "Invitation sent successfully");
-            
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            logger.error("Error creating invitation: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Error creating invitation: " + e.getMessage()));
-        }
-    }
-
+ 
     @GetMapping("/android-test")
     public ResponseEntity<String> androidTest() {
         String html = "<!DOCTYPE html>" +
