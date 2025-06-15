@@ -194,14 +194,23 @@ public class ReactionController {
                 // Remove like
                 jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE'", 
                     messageId, userId);
-                jdbcTemplate.update("UPDATE message SET like_count = like_count - 1 WHERE id = ?", messageId);
-                return ResponseEntity.ok(Map.of("action", "removed", "type", "like"));
+                    
+                    int likeCount = jdbcTemplate.queryForObject(
+                        "UPDATE message SET like_count = like_count - 1 WHERE id = ? RETURNING like_count", 
+                        Integer.class, 
+                        messageId);    
+                    return ResponseEntity.ok(Map.of("action", "removed", "type", "like", "like_count", likeCount));
             } else {
                 // Add like
                 jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type) VALUES (?, ?, 'LIKE')", 
                     messageId, userId);
-                jdbcTemplate.update("UPDATE message SET like_count = like_count + 1 WHERE id = ?", messageId);
-                return ResponseEntity.ok(Map.of("action", "added", "type", "like"));
+
+                    int likeCount = jdbcTemplate.queryForObject(
+                        "UPDATE message SET like_count = like_count + 1 WHERE id = ? RETURNING like_count", 
+                        Integer.class, 
+                        messageId
+                    );    
+                return ResponseEntity.ok(Map.of("action", "added", "type", "like", "like_count", likeCount));
             }
         } catch (Exception e) {
             logger.error("Error toggling like: {}", e.getMessage(), e);
@@ -232,14 +241,20 @@ public class ReactionController {
                 // Remove love
                 jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE'", 
                     messageId, userId);
-                jdbcTemplate.update("UPDATE message SET love_count = love_count - 1 WHERE id = ?", messageId);
-                return ResponseEntity.ok(Map.of("action", "removed", "type", "love"));
+                int loveCount = jdbcTemplate.queryForObject(
+                    "UPDATE message SET love_count = love_count - 1 WHERE id = ? RETURNING love_count", 
+                    Integer.class, 
+                    messageId);
+                return ResponseEntity.ok(Map.of("action", "removed", "type", "love", "love_count", loveCount));
             } else {
                 // Add love
                 jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type) VALUES (?, ?, 'LOVE')", 
                     messageId, userId);
-                jdbcTemplate.update("UPDATE message SET love_count = love_count + 1 WHERE id = ?", messageId);
-                return ResponseEntity.ok(Map.of("action", "added", "type", "love"));
+                int loveCount = jdbcTemplate.queryForObject(
+                    "UPDATE message SET love_count = love_count + 1 WHERE id = ? RETURNING love_count", 
+                    Integer.class, 
+                    messageId);
+                return ResponseEntity.ok(Map.of("action", "added", "type", "love", "love_count", loveCount));
             }
         } catch (Exception e) {
             logger.error("Error toggling love: {}", e.getMessage(), e);

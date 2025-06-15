@@ -768,9 +768,16 @@ public class UserController {
     }
 
     @GetMapping("/{id}/messages")
-    public ResponseEntity<List<Map<String, Object>>> getMessages(@PathVariable Long id) {
-        logger.debug("Received request to get messages for user ID: {}", id);
-        try {
+    public ResponseEntity<List<Map<String, Object>>> getMessages(
+        @PathVariable Long id,
+        @RequestHeader("Authorization") String authHeader) {
+
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long currentUserId = authUtil.extractUserId(token);
+            if (currentUserId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+         try {
             // Use a single optimized SQL query that:
             // 1. Checks if user exists
             // 2. Gets all families user belongs to
@@ -811,7 +818,9 @@ public class UserController {
                         "  f.name as family_name, " +
                         "  COALESCE(vc.count, 0) as view_count, " +
                         "  m.like_count, m.love_count, " +
-                        "  COALESCE(cc.count, 0) as comment_count " +
+                        "  COALESCE(cc.count, 0) as comment_count, " +
+                        " CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
+                        " CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
                         "FROM message m " +
                         "JOIN message_subset ms ON m.id = ms.id " +
                         "LEFT JOIN app_user s ON m.sender_id = s.id " +
@@ -820,6 +829,12 @@ public class UserController {
                         "  ON m.id = vc.message_id " +
                         "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
                         "  ON m.id = cc.parent_message_id " +
+                        "LEFT JOIN message_reaction mr ON m.id = mr.message_id " +
+                        " AND mr.user_id = ? " +
+                        " AND mr.reaction_type = 'LIKE'" +
+                        "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id " +
+                        " AND mr2.user_id = ? " +
+                        " AND mr2.reaction_type = 'LOVE'" +
                         "ORDER BY m.id DESC";
 
             // Check if user exists first for a better error message
@@ -827,10 +842,8 @@ public class UserController {
                 logger.debug("User not found for ID: {}", id);
                 return ResponseEntity.badRequest().body(null);
             }
-         
-            logger.debug("Executing optimized query for messages for user ID: {}", id);
-            
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
+                     
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id, currentUserId, currentUserId);
             
             // Debug output only for development - just log count, not each individual message
             if (logger.isDebugEnabled() && !results.isEmpty()) {
@@ -845,8 +858,7 @@ public class UserController {
                         firstResult.get("thumbnail_url") != null);
                 }
             }
-            
-            // Transform results to the response format
+             // Transform results to the response format
             List<Map<String, Object>> response = results.stream().map(message -> {
                 Map<String, Object> messageMap = new HashMap<>();
                 messageMap.put("id", message.get("id"));
@@ -865,7 +877,9 @@ public class UserController {
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
-                
+                messageMap.put("isLiked", message.get("is_liked"));
+                messageMap.put("isLoved", message.get("is_loved"));
+ 
                 // Add thumbnail URL without excessive logging
                 messageMap.put("thumbnailUrl", message.get("thumbnail_url")); 
                 

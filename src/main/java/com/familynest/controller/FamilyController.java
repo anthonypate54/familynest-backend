@@ -285,7 +285,7 @@ public class FamilyController {
                         "JOIN app_user u ON u.id = ufm.user_id " +
                         "JOIN family f ON f.id = ufm.family_id " +
                         "LEFT JOIN family of ON of.created_by = u.id " +
-                        "WHERE ufm.family_id = ?";
+                        "WHERE ufm.family_id = ? ORDER BY u.first_name, u.last_name";
                         
             logger.debug("Executing query for family members for family ID: {}", familyId);
             

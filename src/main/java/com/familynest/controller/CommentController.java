@@ -138,7 +138,7 @@ public class CommentController {
             "  FROM message_comment m " +
             "  JOIN active_families af ON m.family_id = af.family_id " +
             "  WHERE m.parent_message_id = ? " +
-            "  ORDER BY m.id DESC " + 
+            "  ORDER BY m.id ASC " + 
             "  LIMIT 100" +
             ") " +
             "SELECT " +
@@ -157,7 +157,7 @@ public class CommentController {
             "  ON m.id = vc.message_id " +
             "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
             "  ON m.id = cc.parent_message_id " +
-            "ORDER BY m.id DESC";
+            "ORDER BY m.id ASC";
             // Execute query
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId, userId, messageId);
             // Debug output only for development - just log count, not each individual message

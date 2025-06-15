@@ -131,11 +131,8 @@ public class DMController {
             String sql = """
                 SELECT 
                     c.id as conversation_id,
-                    c.created_at as conversation_created_at,
-                    CASE 
-                        WHEN c.user1_id = ? THEN c.user2_id 
-                        ELSE c.user1_id 
-                    END as other_user_id,
+                    c.created_at as created_at,
+                    u.id as other_user_id,
                     u.username as other_username,
                     u.first_name as other_first_name,
                     u.last_name as other_last_name
@@ -149,9 +146,26 @@ public class DMController {
                 """;
 
             List<Map<String, Object>> conversations = jdbcTemplate.queryForList(sql, 
-                currentUserId, currentUserId, currentUserId, currentUserId, currentUserId);
+                currentUserId, currentUserId, currentUserId, currentUserId);
 
-            return ResponseEntity.ok(Map.of("conversations", conversations));
+            // Transform the data to match getOrCreateConversation format
+            List<Map<String, Object>> formattedConversations = conversations.stream()
+                .map(conv -> {
+                    Map<String, Object> otherUser = new HashMap<>();
+                    otherUser.put("id", conv.get("other_user_id"));
+                    otherUser.put("username", conv.get("other_username"));
+                    otherUser.put("first_name", conv.get("other_first_name"));
+                    otherUser.put("last_name", conv.get("other_last_name"));
+
+                    Map<String, Object> formattedConv = new HashMap<>();
+                    formattedConv.put("conversation_id", conv.get("conversation_id"));
+                    formattedConv.put("created_at", conv.get("created_at"));
+                    formattedConv.put("other_user", otherUser);
+                    return formattedConv;
+                })
+                .collect(Collectors.toList());
+
+            return ResponseEntity.ok(Map.of("conversations", formattedConversations));
 
         } catch (DataAccessException e) {
             logger.error("Database error getting conversations: {}", e.getMessage());
