@@ -43,6 +43,21 @@ public class ReactionController {
     @Autowired
     private AuthUtil authUtil;
 
+    /*
+     * Note on Message vs Comment Reactions:
+     * - Both messages and comments use the same message_reaction table
+     * - The distinction is in the target table:
+     *   - message: Regular messages with no parent_id
+     *   - message_comment: Comments in threads with a NOT NULL parent_message_id
+     * - IDs are unique across both tables, so message_reaction.message_id can reference either
+     * - The appropriate count is updated based on which table the ID exists in
+     */
+
+    public ReactionController(JdbcTemplate jdbcTemplate, AuthUtil authUtil) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.authUtil = authUtil;
+    }
+
     @Transactional
     @PostMapping("/{messageId}/reactions")
     public ResponseEntity<Map<String, Object>> addReaction(
@@ -173,8 +188,8 @@ public class ReactionController {
     }
 
     @Transactional
-    @PostMapping("/{messageId}/like")
-    public ResponseEntity<Map<String, Object>> toggleLike(
+    @PostMapping("/{messageId}/message_like")
+    public ResponseEntity<Map<String, Object>> toggleMessageLike(
             @PathVariable Long messageId,
             @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
@@ -187,12 +202,12 @@ public class ReactionController {
             }
 
             // Check if like already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE'";
+            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, messageId, userId);
 
             if (!existingReaction.isEmpty()) {
                 // Remove like
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'", 
                     messageId, userId);
                     
                     int likeCount = jdbcTemplate.queryForObject(
@@ -202,7 +217,7 @@ public class ReactionController {
                     return ResponseEntity.ok(Map.of("action", "removed", "type", "like", "like_count", likeCount));
             } else {
                 // Add like
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type) VALUES (?, ?, 'LIKE')", 
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LIKE', 'MESSAGE')", 
                     messageId, userId);
 
                     int likeCount = jdbcTemplate.queryForObject(
@@ -213,15 +228,15 @@ public class ReactionController {
                 return ResponseEntity.ok(Map.of("action", "added", "type", "like", "like_count", likeCount));
             }
         } catch (Exception e) {
-            logger.error("Error toggling like: {}", e.getMessage(), e);
+            logger.error("Error toggling message like: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                   .body(Map.of("error", "Failed to toggle like: " + e.getMessage()));
+                   .body(Map.of("error", "Failed to toggle message like: " + e.getMessage()));
         }
     }
 
     @Transactional
-    @PostMapping("/{messageId}/love")
-    public ResponseEntity<Map<String, Object>> toggleLove(
+    @PostMapping("/{messageId}/message_love")
+    public ResponseEntity<Map<String, Object>> toggleMessageLove(
             @PathVariable Long messageId,
             @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
@@ -234,12 +249,12 @@ public class ReactionController {
             }
 
             // Check if love already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE'";
+            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, messageId, userId);
 
             if (!existingReaction.isEmpty()) {
                 // Remove love
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'", 
                     messageId, userId);
                 int loveCount = jdbcTemplate.queryForObject(
                     "UPDATE message SET love_count = love_count - 1 WHERE id = ? RETURNING love_count", 
@@ -248,7 +263,7 @@ public class ReactionController {
                 return ResponseEntity.ok(Map.of("action", "removed", "type", "love", "love_count", loveCount));
             } else {
                 // Add love
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type) VALUES (?, ?, 'LOVE')", 
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LOVE', 'MESSAGE')", 
                     messageId, userId);
                 int loveCount = jdbcTemplate.queryForObject(
                     "UPDATE message SET love_count = love_count + 1 WHERE id = ? RETURNING love_count", 
@@ -257,9 +272,118 @@ public class ReactionController {
                 return ResponseEntity.ok(Map.of("action", "added", "type", "love", "love_count", loveCount));
             }
         } catch (Exception e) {
-            logger.error("Error toggling love: {}", e.getMessage(), e);
+            logger.error("Error toggling message love: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                   .body(Map.of("error", "Failed to toggle love: " + e.getMessage()));
+                   .body(Map.of("error", "Failed to toggle message love: " + e.getMessage()));
+        }
+    }
+
+    @Transactional
+    @PostMapping("/{commentId}/comment_like")
+    public ResponseEntity<Map<String, Object>> toggleCommentLike(
+            @PathVariable Long commentId,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                       .body(Map.of("error", "User not authenticated"));
+            }
+
+            // First check if comment exists
+            String commentCheckSql = "SELECT id FROM message_comment WHERE id = ?";
+            List<Map<String, Object>> commentData = jdbcTemplate.queryForList(commentCheckSql, commentId);
+            logger.info("Checking comment {}: found {} results", commentId, commentData.size());
+            
+            if (commentData.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                       .body(Map.of("error", "Comment not found"));
+            }
+
+            // Check if like already exists
+            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'";
+            List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
+            logger.info("Checking existing reaction for comment {}: found {} results", commentId, existingReaction.size());
+
+            if (!existingReaction.isEmpty()) {
+                // Remove like
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'", 
+                    commentId, userId);
+                logger.info("Removed like reaction for comment {}", commentId);
+                    
+                int likeCount = jdbcTemplate.queryForObject(
+                    "UPDATE message_comment SET like_count = like_count - 1 WHERE id = ? RETURNING like_count", 
+                    Integer.class, 
+                    commentId);    
+                logger.info("Updated like count for comment {} to {}", commentId, likeCount);
+                return ResponseEntity.ok(Map.of("action", "removed", "type", "like", "like_count", likeCount));
+            } else {
+                // Add like
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LIKE', 'COMMENT')", 
+                    commentId, userId);
+                logger.info("Added like reaction for comment {}", commentId);
+
+                int likeCount = jdbcTemplate.queryForObject(
+                    "UPDATE message_comment SET like_count = like_count + 1 WHERE id = ? RETURNING like_count", 
+                    Integer.class, 
+                    commentId
+                );    
+                logger.info("Updated like count for comment {} to {}", commentId, likeCount);
+                return ResponseEntity.ok(Map.of("action", "added", "type", "like", "like_count", likeCount));
+            }
+        } catch (Exception e) {
+            logger.error("Error toggling comment like: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                   .body(Map.of("error", "Failed to toggle comment like: " + e.getMessage()));
+        }
+    }
+
+    @Transactional
+    @PostMapping("/{commentId}/comment_love")
+    public ResponseEntity<Map<String, Object>> toggleCommentLove(
+            @PathVariable Long commentId,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                       .body(Map.of("error", "User not authenticated"));
+            }
+
+            // Check if love already exists
+            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'";
+            List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
+
+            if (!existingReaction.isEmpty()) {
+                // Remove love
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'", 
+                    commentId, userId);
+                
+                int loveCount = jdbcTemplate.queryForObject(
+                    "UPDATE message_comment SET love_count = love_count - 1 WHERE id = ? RETURNING love_count", 
+                    Integer.class, 
+                    commentId);    
+                return ResponseEntity.ok(Map.of("action", "removed", "type", "love", "love_count", loveCount));
+            } else {
+                // Add love
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LOVE', 'COMMENT')", 
+                    commentId, userId);
+
+                int loveCount = jdbcTemplate.queryForObject(
+                    "UPDATE message_comment SET love_count = love_count + 1 WHERE id = ? RETURNING love_count", 
+                    Integer.class, 
+                    commentId
+                );    
+                return ResponseEntity.ok(Map.of("action", "added", "type", "love", "love_count", loveCount));
+            }
+        } catch (Exception e) {
+            logger.error("Error toggling comment love: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                   .body(Map.of("error", "Failed to toggle comment love: " + e.getMessage()));
         }
     }
 } 

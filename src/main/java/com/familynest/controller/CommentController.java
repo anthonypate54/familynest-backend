@@ -8,6 +8,8 @@ import com.familynest.auth.JwtUtil;
 import com.familynest.service.ThumbnailService;
 import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
+import com.familynest.model.Message;
+import java.sql.Timestamp;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -148,7 +150,9 @@ public class CommentController {
             "  f.name as family_name, m.parent_message_id as parent_message_id, " +
             "  COALESCE(vc.count, 0) as view_count, " +
             "  m.like_count, m.love_count, " +
-            "  COALESCE(cc.count, 0) as comment_count " +
+            "  COALESCE(cc.count, 0) as comment_count, " +
+            "  CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
+            "  CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
             "FROM message_comment m " +
             "JOIN message_subset ms ON m.id = ms.id " +
             "LEFT JOIN app_user s ON m.sender_id = s.id " +
@@ -157,9 +161,11 @@ public class CommentController {
             "  ON m.id = vc.message_id " +
             "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
             "  ON m.id = cc.parent_message_id " +
+            "LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT' " +
+            "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT' " +
             "ORDER BY m.id ASC";
             // Execute query
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId, userId, messageId);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId, userId, messageId, userId, userId);
             // Debug output only for development - just log count, not each individual message
             if (logger.isDebugEnabled() && !results.isEmpty()) {
                 logger.debug("Number of messages retrieved: {}", results.size());
@@ -195,6 +201,8 @@ public class CommentController {
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
                 messageMap.put("parentMessageId", message.get("parent_message_id"));
+                messageMap.put("isLiked", message.get("is_liked"));
+                messageMap.put("isLoved", message.get("is_loved"));
                 
                 // Add video message thumbnail URL warning only once
                 if ("video".equals(message.get("media_type")) && message.get("thumbnail_url") == null) {
@@ -549,5 +557,30 @@ public ResponseEntity<Map<String, Object>> updateComment(
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to delete comment: " + e.getMessage()));
         }
+    }
+
+    private Message mapToMessage(Map<String, Object> row) {
+        Message message = new Message();
+        message.setId(((Number) row.get("id")).longValue());
+        message.setContent((String) row.get("content"));
+        message.setSenderUsername((String) row.get("sender_username"));
+        message.setSenderId(((Number) row.get("sender_id")).longValue());
+        message.setFamilyId(((Number) row.get("family_id")).longValue());
+        message.setTimestamp(((Timestamp) row.get("timestamp")).toLocalDateTime());
+        message.setMediaType((String) row.get("media_type"));
+        message.setMediaUrl((String) row.get("media_url"));
+        message.setThumbnailUrl((String) row.get("thumbnail_url"));
+        message.setSenderPhoto((String) row.get("sender_photo"));
+        message.setSenderFirstName((String) row.get("sender_first_name"));
+        message.setSenderLastName((String) row.get("sender_last_name"));
+        message.setFamilyName((String) row.get("family_name"));
+        message.setParentMessageId(((Number) row.get("parent_message_id")).longValue());
+        message.setViewCount(((Number) row.get("view_count")).intValue());
+        message.setLikeCount(((Number) row.get("like_count")).intValue());
+        message.setLoveCount(((Number) row.get("love_count")).intValue());
+        message.setCommentCount(((Number) row.get("comment_count")).intValue());
+        message.setIsLiked(((Boolean) row.get("is_liked")));
+        message.setIsLoved(((Boolean) row.get("is_loved")));
+        return message;
     }
 } 

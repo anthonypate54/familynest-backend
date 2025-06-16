@@ -819,8 +819,8 @@ public class UserController {
                         "  COALESCE(vc.count, 0) as view_count, " +
                         "  m.like_count, m.love_count, " +
                         "  COALESCE(cc.count, 0) as comment_count, " +
-                        " CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
-                        " CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
+                        "  CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
+                        "  CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
                         "FROM message m " +
                         "JOIN message_subset ms ON m.id = ms.id " +
                         "LEFT JOIN app_user s ON m.sender_id = s.id " +
@@ -829,12 +829,8 @@ public class UserController {
                         "  ON m.id = vc.message_id " +
                         "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
                         "  ON m.id = cc.parent_message_id " +
-                        "LEFT JOIN message_reaction mr ON m.id = mr.message_id " +
-                        " AND mr.user_id = ? " +
-                        " AND mr.reaction_type = 'LIKE'" +
-                        "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id " +
-                        " AND mr2.user_id = ? " +
-                        " AND mr2.reaction_type = 'LOVE'" +
+                        "LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE' " +
+                        "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE' " +
                         "ORDER BY m.id DESC";
 
             // Check if user exists first for a better error message
@@ -962,7 +958,6 @@ public class UserController {
                 logger.debug("User {} is not authorized to view members of family for user {}", tokenUserId, id);
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
             }
-            
             // Transform results into the response format
             List<Map<String, Object>> response = results.stream().map(member -> {
                 Map<String, Object> memberMap = new HashMap<>();
@@ -1551,6 +1546,6 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
     @GetMapping(value = "/plaintest", produces = MediaType.TEXT_PLAIN_VALUE)
     @CrossOrigin(origins = "*")
     public ResponseEntity<String> plainTextTest() {
-        return ResponseEntity.ok("SERVER TEST OK: " + java.time.LocalDateTime.now());
+        return ResponseEntity.ok("Plain text test successful");
     }
 }
