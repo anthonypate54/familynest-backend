@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.lang.Math;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -93,7 +94,7 @@ public class DMController {
             }
 
             // Get other user info
-            String userSql = "SELECT id, username, first_name, last_name FROM app_user WHERE id = ?";
+            String userSql = "SELECT id, username, first_name, last_name, photo FROM app_user WHERE id = ?";
             Map<String, Object> otherUser = jdbcTemplate.queryForMap(userSql, otherUserId);
 
             // Build response
@@ -133,7 +134,7 @@ public class DMController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
             }
 
-            // Get all conversations with last message info (simplified approach)
+            // Get all conversations with last message info (fixed SQL query)
             String sql = """
                 SELECT 
                     c.id as conversation_id,
@@ -141,15 +142,24 @@ public class DMController {
                     u.id as other_user_id,
                     u.username as other_username,
                     u.first_name as other_first_name,
-                    u.last_name as other_last_name
+                    u.last_name as other_last_name,
+                    u.photo as other_user_photo,
+                    m.content as last_message_content,
+                    m.created_at as last_message_created_at
                 FROM dm_conversation c
                 JOIN app_user u ON (
                     (c.user1_id = ? AND u.id = c.user2_id) OR 
                     (c.user2_id = ? AND u.id = c.user1_id)
                 )
+                LEFT JOIN (
+                    SELECT DISTINCT ON (conversation_id) 
+                        conversation_id, content, created_at
+                    FROM dm_message
+                    ORDER BY conversation_id, created_at DESC
+                ) m ON m.conversation_id = c.id
                 WHERE c.user1_id = ? OR c.user2_id = ?
-                ORDER BY c.created_at DESC
-                """;
+                ORDER BY COALESCE(m.created_at, c.created_at) DESC                
+            """;
 
             List<Map<String, Object>> conversations = jdbcTemplate.queryForList(sql, 
                 currentUserId, currentUserId, currentUserId, currentUserId);
@@ -162,6 +172,9 @@ public class DMController {
                     otherUser.put("username", conv.get("other_username"));
                     otherUser.put("first_name", conv.get("other_first_name"));
                     otherUser.put("last_name", conv.get("other_last_name"));
+                    otherUser.put("photo", conv.get("other_user_photo"));
+                    otherUser.put("last_message_content", conv.get("last_message_content"));
+                    otherUser.put("last_message_created_at", conv.get("last_message_created_at"));
 
                     Map<String, Object> formattedConv = new HashMap<>();
                     formattedConv.put("conversation_id", conv.get("conversation_id"));
@@ -273,10 +286,10 @@ public class DMController {
                 }
             }
     
-            // Insert the DM message and get the new ID
+            // Insert the DM message and get the new ID (fixed parameter count)
             String insertSql = "INSERT INTO dm_message (conversation_id, sender_id, content, " +
-                "media_url, media_type, media_thumbnail, media_filename, media_size, media_duration, created_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id";
+                "media_url, media_type, media_thumbnail, created_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id";
     
             Long newMessageId = jdbcTemplate.queryForObject(insertSql, Long.class,
                 conversationId,
@@ -285,9 +298,6 @@ public class DMController {
                 mediaUrl,
                 mediaType,
                 thumbnailUrl,
-                null, // media_filename
-                null, // media_size
-                null, // media_duration
                 Timestamp.valueOf(LocalDateTime.now())
             );
     
@@ -369,8 +379,8 @@ public class DMController {
             }
 
             Map<String, Object> conv = convData.get(0);
-            Long user1Id = (Long) conv.get("user1_id");
-            Long user2Id = (Long) conv.get("user2_id");
+            Long user1Id = ((Number) conv.get("user1_id")).longValue();
+            Long user2Id = ((Number) conv.get("user2_id")).longValue();
             
             if (!currentUserId.equals(user1Id) && !currentUserId.equals(user2Id)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
@@ -383,7 +393,8 @@ public class DMController {
                     m.id, m.conversation_id, m.sender_id, m.content, m.media_url, m.media_type, 
                     m.media_thumbnail, m.media_filename, m.media_size, m.media_duration,
                     m.is_read, m.created_at,
-                    u.username as sender_username, u.first_name as sender_first_name, u.last_name as sender_last_name
+                    u.username as sender_username, u.first_name as sender_first_name, u.last_name as sender_last_name,
+                    u.photo as sender_photo
                 FROM dm_message m
                 JOIN app_user u ON m.sender_id = u.id
                 WHERE m.conversation_id = ?
@@ -452,8 +463,8 @@ public class DMController {
             }
 
             Map<String, Object> conv = convData.get(0);
-            Long user1Id = (Long) conv.get("user1_id");
-            Long user2Id = (Long) conv.get("user2_id");
+            Long user1Id = ((Number) conv.get("user1_id")).longValue();
+            Long user2Id = ((Number) conv.get("user2_id")).longValue();
             
             if (!currentUserId.equals(user1Id) && !currentUserId.equals(user2Id)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
