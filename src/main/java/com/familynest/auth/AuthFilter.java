@@ -26,7 +26,13 @@ public class AuthFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String path = request.getRequestURI();
         logger.error("⚠️ AUTH FILTER - PROCESSING REQUEST FOR URI: {}", path);
-        
+
+           // BYPASS AUTH FOR WEBSOCKET HANDSHAKE
+        if (path.equals("/ws") || path.startsWith("/ws/")) {
+            logger.error("⭐⭐⭐ BYPASSING AUTH FOR WEBSOCKET HANDSHAKE: {}", path);
+            chain.doFilter(request, response);
+            return;
+}
         // PUBLIC ENDPOINTS - explicitly without auth
         // These are high-priority bypass paths that should never require auth
         if (path.equals("/api/users/connection-test") || 

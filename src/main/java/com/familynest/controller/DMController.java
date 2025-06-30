@@ -2,7 +2,10 @@ package com.familynest.controller;
 
 import com.familynest.auth.AuthUtil;
 import com.familynest.auth.JwtUtil;
+import com.familynest.dto.DMMessagePayload;
 import com.familynest.service.MediaService;
+import com.familynest.service.WebSocketBroadcastService;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +44,9 @@ public class DMController {
 
     @Autowired
     private MediaService mediaService;
+
+    @Autowired
+    private WebSocketBroadcastService webSocketBroadcastService;
 
     /**
      * Get or create a conversation with another user
@@ -299,8 +305,7 @@ public class DMController {
                 """;
             
             Map<String, Object> messageData = jdbcTemplate.queryForMap(fetchSql, newMessageId);
-            
-            // Transform to response format
+             // Transform to response format
             Map<String, Object> response = new HashMap<>();
             response.put("id", messageData.get("id"));
             response.put("conversation_id", messageData.get("conversation_id"));
@@ -318,7 +323,14 @@ public class DMController {
             response.put("sender_last_name", messageData.get("sender_last_name"));
             response.put("sender_photo", messageData.get("sender_photo"));
     
-            // Return the fully-formed message as the response
+            // Determine recipient ID (the other user in the conversation)
+            Long recipientId = senderId.equals(user1Id) ? user2Id : user1Id;
+
+            // Broadcast the raw database result directly
+            logger.debug("Broadcasting DM message: {}", messageData);
+            webSocketBroadcastService.broadcastDMMessage(messageData, recipientId);
+            
+      // Return the fully-formed message as the response
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
     
         } catch (Exception e) {

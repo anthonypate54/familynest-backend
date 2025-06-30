@@ -58,6 +58,7 @@ public class SecurityConfig {
                     .requestMatchers("/public/**").permitAll() // Permit public endpoints
                     .requestMatchers("/test/**").permitAll() // Permit test endpoints
                     .requestMatchers("/uploads/**").permitAll() // Permit access to uploaded files
+                    .requestMatchers("/ws/**").permitAll()
                     .anyRequest().permitAll(); // Allow our AuthFilter to handle actual authorization
             })
             .headers(headers -> {
