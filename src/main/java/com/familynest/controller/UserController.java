@@ -174,83 +174,6 @@ public class UserController {
                 .body(html);
     }
 
-    /**
-     * Test token endpoint to help debug auth issues
-     * Generates a valid test token
-     */
-    @GetMapping("/test-token")
-    @CrossOrigin(origins = "*")
-    public ResponseEntity<Map<String, Object>> getTestToken() {
-        logger.info("TEST TOKEN ENDPOINT ACCESSED");
-        
-        try {
-            // Find a valid test user from the database
-            User testUser = userRepository.findAll()
-                .stream()
-                .findFirst()
-                .orElse(null);
-                
-            if (testUser == null) {
-                return ResponseEntity.status(500).body(Map.of("error", "No test user found"));
-            }
-            
-            // Create a test token for the test user
-            String token = authUtil.generateToken(testUser.getId(), "USER");
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("message", "Test token generated");
-            response.put("userId", testUser.getId());
-            response.put("username", testUser.getUsername());
-            response.put("token", token);
-            response.put("role", "USER");
-            
-            logger.info("Generated test token for user: {}", testUser.getUsername());
-            
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            logger.error("Error generating test token: {}", e.getMessage(), e);
-            
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", "Failed to generate test token");
-            errorResponse.put("error", e.getMessage());
-            
-            return ResponseEntity.status(500).body(errorResponse);
-        }
-    }
-    
-    /**
-     * Token debug endpoint
-     */
-    @GetMapping("/debug-token")
-    @CrossOrigin(origins = "*")
-    public ResponseEntity<Map<String, Object>> debugToken(@RequestParam String token) {
-        logger.error("Debug token endpoint called with token: {}", token);
-        
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", System.currentTimeMillis());
-        
-        try {
-            // Check if token is valid
-            boolean valid = authUtil.validateToken(token);
-            response.put("valid", valid);
-            
-            // Get claims from token 
-            if (valid) {
-                Map<String, Object> claims = authUtil.validateTokenAndGetClaims(token);
-                response.put("claims", claims);
-                response.put("userId", authUtil.extractUserId(token));
-                response.put("role", authUtil.getUserRole(token));
-            }
-        } catch (Exception e) {
-            response.put("error", e.getMessage());
-            response.put("exceptionType", e.getClass().getName());
-        }
-        
-        return ResponseEntity.ok(response);
-    }
-
     @GetMapping("/{id}")
     @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getUserById(@PathVariable Long id) {
@@ -258,37 +181,37 @@ public class UserController {
         
         try {
             // Use a single optimized SQL query to get user data with all related information
-            // Avoid using u.family_id which doesn't exist
+            // Get the user's primary/active family (first active membership)
             String sql = "WITH user_data AS (" +
                         "  SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.role, " +
                         "         u.photo, u.phone_number, u.address, u.city, " +
-                        "         u.state, u.zip_code, u.country, u.birth_date, u.bio, u.show_demographics, " +
-                        "         (SELECT family_id FROM user_family_membership WHERE user_id = u.id LIMIT 1) as family_id " +
+                        "         u.state, u.zip_code, u.country, u.birth_date, u.bio, u.show_demographics " +
                         "  FROM app_user u WHERE u.id = ? " +
+                        "), " +
+                        "primary_family AS (" +
+                        "  SELECT ufm.family_id, ufm.role as membership_role, ufm.is_active " +
+                        "  FROM user_family_membership ufm " +
+                        "  WHERE ufm.user_id = ? " +
+                        "  ORDER BY ufm.is_active DESC, ufm.id ASC " +
+                        "  LIMIT 1 " +
                         "), " +
                         "family_data AS (" +
                         "  SELECT f.id, f.name, f.created_by, " +
                         "         (SELECT COUNT(*) FROM user_family_membership ufm WHERE ufm.family_id = f.id) as member_count " +
                         "  FROM family f " +
-                        "  JOIN user_family_membership ufm ON f.id = ufm.family_id " +
-                        "  WHERE ufm.user_id = ? " +
-                        "), " +
-                        "membership_data AS (" +
-                        "  SELECT ufm.family_id, ufm.role as membership_role, ufm.is_active " +
-                        "  FROM user_family_membership ufm " +
-                        "  WHERE ufm.user_id = ? " +
+                        "  JOIN primary_family pf ON f.id = pf.family_id " +
                         ") " +
                         "SELECT ud.*, fd.id as family_id, fd.name as family_name, " +
                         "       fd.created_by as family_created_by, fd.member_count, " +
-                        "       md.membership_role, md.is_active " +
+                        "       pf.membership_role, pf.is_active " +
                         "FROM user_data ud " +
                         "LEFT JOIN family_data fd ON 1=1 " +
-                        "LEFT JOIN membership_data md ON fd.id = md.family_id";
+                        "LEFT JOIN primary_family pf ON 1=1";
                         
             logger.debug("Executing optimized query for user ID: {}", id);
             
             // Execute the optimized query
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id);
             
             if (results.isEmpty()) {
                 logger.debug("User not found for ID: {}", id);
@@ -1096,16 +1019,11 @@ public class UserController {
             }
             
             // Use a single optimized SQL query to get all family data with one database call
-            // Avoid using the non-existent family_id column
-            String sql = "WITH user_active_family AS (" +
-                        "  SELECT family_id FROM user_family_membership WHERE user_id = ? LIMIT 1" +
-                        "), " +
-                        "user_memberships AS (" +
+            // Remove the LIMIT 1 to get ALL families the user belongs to
+            String sql = "WITH user_memberships AS (" +
                         "  SELECT " +
-                        "    ufm.family_id, ufm.role, " +
-                        "    CASE WHEN uaf.family_id = ufm.family_id THEN true ELSE false END as is_active " +
+                        "    ufm.family_id, ufm.role, ufm.is_active " +
                         "  FROM user_family_membership ufm " +
-                        "  LEFT JOIN user_active_family uaf ON 1=1 " +
                         "  WHERE ufm.user_id = ? " +
                         ") " +
                         "SELECT " +
@@ -1114,11 +1032,12 @@ public class UserController {
                         "  um.role, um.is_active, " +
                         "  CASE WHEN f.created_by = ? THEN true ELSE false END as is_owner " +
                         "FROM family f " +
-                        "JOIN user_memberships um ON f.id = um.family_id";
+                        "JOIN user_memberships um ON f.id = um.family_id " +
+                        "ORDER BY um.is_active DESC, f.name ASC";
             
             logger.debug("Executing optimized query for families for user ID: {}", id);
             
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id);
             
             // Transform results into the response format  
             List<Map<String, Object>> families = results.stream().map(family -> {
@@ -1404,148 +1323,10 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
             return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
         }
     }
-    /**
-     * Public test endpoint for uploading videos without authentication
-     * ONLY FOR DEVELOPMENT TESTING - REMOVE IN PRODUCTION
-     */
-    @PostMapping(value = "/public-test-upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @CrossOrigin(origins = "*")
-    public ResponseEntity<Map<String, Object>> publicTestUpload(
-            @RequestPart(value = "media", required = true) MultipartFile media,
-            @RequestParam(value = "content", required = false) String content) {
-        
-        logger.info("PUBLIC TEST UPLOAD ENDPOINT ACCESSED");
-        
-        try {
-            // Create directory structure if it doesn't exist
-            String subdir = "videos";
-            Path uploadPath = Paths.get(videosDir);
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
-            
-            // Create filename with timestamp - using simple naming pattern
-            String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
-            Path mediaPath = uploadPath.resolve(mediaFileName);
-            
-            // Write the file
-            Files.write(mediaPath, media.getBytes());
-            logger.info("Test upload - Media file saved at: {}", mediaPath);
-            
-            // Generate relative URL
-            String mediaUrl = videosUrlPath + "/" + mediaFileName;
-            
-            // For videos, generate thumbnail
-            String thumbnailUrl = null;
-            Path thumbnailPath = null;
-            
-            // Create thumbnails directory if needed
-            Path thumbnailDirPath = Paths.get(thumbnailDir);
-            if (!Files.exists(thumbnailDirPath)) {
-                Files.createDirectories(thumbnailDirPath);
-            }
-            
-            // Generate thumbnail filename - using simple replacement pattern
-            String thumbnailFileName = mediaFileName.replace(".mp4", "_thumbnail.jpg");
-            thumbnailPath = thumbnailDirPath.resolve(thumbnailFileName);
-            
-            // Generate thumbnail (delegate to ThumbnailService)
-            boolean thumbnailCreated = false;
-            try {
-                // Use a relative file name, not an absolute path, to avoid path duplication
-                logger.error("PATH DEBUG: Video path being used for thumbnail: {}", mediaPath.toString());
-                logger.error("PATH DEBUG: Thumbnail path being used: {}", thumbnailPath.toString());
-                
-                // Just pass the filename to the thumbnail service, not the full path
-                String generatedThumbnailPath = thumbnailService.generateThumbnail(
-                    mediaPath.toString(), thumbnailFileName);
-                    
-                logger.error("PATH DEBUG: Generated thumbnail result: {}", generatedThumbnailPath);
-                thumbnailCreated = generatedThumbnailPath != null;
-                
-                // Add a verification step to ensure thumbnail file exists
-                if (thumbnailCreated) {
-                    // Extract the filename from the generated path
-                    String extractedFilename = generatedThumbnailPath.substring(generatedThumbnailPath.lastIndexOf('/') + 1);
-                    Path verifyThumbnailPath = Paths.get(thumbnailDir, extractedFilename);
-                    
-                    // Verify the thumbnail file actually exists on disk
-                    int maxRetries = 5;
-                    int retryCount = 0;
-                    while (!Files.exists(verifyThumbnailPath) && retryCount < maxRetries) {
-                        logger.debug("Waiting for thumbnail file to appear on disk: {}", verifyThumbnailPath);
-                        Thread.sleep(100); // Wait 100ms
-                        retryCount++;
-                    }
-                    
-                    if (Files.exists(verifyThumbnailPath)) {
-                        logger.debug("Verified thumbnail exists on disk: {}", verifyThumbnailPath);
-                    } else {
-                        logger.warn("Could not verify thumbnail exists after {} retries: {}", maxRetries, verifyThumbnailPath);
-                        thumbnailCreated = false;
-                    }
-                }
-            } catch (Exception ex) {
-                logger.error("Error generating thumbnail: {}", ex.getMessage(), ex);
-            }
-            
-            if (thumbnailCreated) {
-                thumbnailUrl = thumbnailsUrlPath + "/" + thumbnailFileName;
-                logger.info("Test upload - Thumbnail created at: {}", thumbnailPath);
-            }
-            
-            // Return success response with file paths
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("mediaUrl", mediaUrl);
-            if (thumbnailUrl != null) {
-                response.put("thumbnailUrl", thumbnailUrl);
-            }
-            response.put("message", "Test upload successful");
-            
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            logger.error("Error in public test upload: {}", e.getMessage(), e);
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
+
 
  
-    @GetMapping("/android-test")
-    public ResponseEntity<String> androidTest() {
-        String html = "<!DOCTYPE html>" +
-                      "<html>" +
-                      "<head>" +
-                      "    <title>Android Connection Test</title>" +
-                      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
-                      "    <style>" +
-                      "        body { font-family: Arial, sans-serif; padding: 20px; }" +
-                      "        .success { color: green; font-weight: bold; font-size: 24px; }" +
-                      "    </style>" +
-                      "</head>" +
-                      "<body>" +
-                      "    <h1>FamilyNest Android Test</h1>" +
-                      "    <p class=\"success\">✅ CONNECTION SUCCESSFUL!</p>" +
-                      "    <p>Your Android device can successfully reach the FamilyNest server.</p>" +
-                      "    <p>The Flutter app should now be able to connect properly.</p>" +
-                      "    <p>Server time: " + java.time.LocalDateTime.now() + "</p>" +
-                      "</body>" +
-                      "</html>";
-        
-        return ResponseEntity.ok()
-                .contentType(MediaType.TEXT_HTML)
-                .body(html);
-    }
 
-    /**
-     * Super-simple plain text test endpoint with no HTML
-     */
-    @GetMapping(value = "/plaintest", produces = MediaType.TEXT_PLAIN_VALUE)
-    @CrossOrigin(origins = "*")
-    public ResponseEntity<String> plainTextTest() {
-        return ResponseEntity.ok("Plain text test successful");
-    }
+
+
 }

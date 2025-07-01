@@ -511,6 +511,83 @@ public class FamilyController {
      * Check if user owns a family and return family details if they do
      * GET /api/families/owned
      */
+    /**
+     * Get all family members across all families the user belongs to
+     * This is specifically for DM recipient selection
+     * GET /api/families/all-members
+     */
+    @GetMapping("/all-members")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getAllFamilyMembers(
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Received request to get all family members for DM recipient selection");
+        try {
+            // Extract userId from token and validate authorization
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long tokenUserId = authUtil.extractUserId(token);
+            if (tokenUserId == null) {
+                logger.debug("Token validation failed or userId could not be extracted");
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+            
+            // Get ALL families the user belongs to (not just the first one)
+            String sql = "WITH user_families AS (" +
+                        "  SELECT ufm.family_id " +
+                        "  FROM user_family_membership ufm " +
+                        "  WHERE ufm.user_id = ? " +
+                        "  AND ufm.is_active = true" +
+                        "), " +
+                        "all_family_members AS (" +
+                        "  SELECT DISTINCT " +
+                        "    u.id, u.username, u.first_name, u.last_name, u.photo, ufm2.family_id, " +
+                        "    f.name as family_name, f.created_by as family_owner_id, " +
+                        "    ufm.role as membership_role, " +
+                        "    CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
+                        "    of.name as owned_family_name " +
+                        "  FROM user_families uf " +
+                        "  JOIN user_family_membership ufm2 ON ufm2.family_id = uf.family_id " + 
+                        "  JOIN app_user u ON u.id = ufm2.user_id " +
+                        "  JOIN family f ON f.id = uf.family_id " +
+                        "  LEFT JOIN user_family_membership ufm ON ufm.user_id = u.id AND ufm.family_id = uf.family_id " +
+                        "  LEFT JOIN family of ON of.created_by = u.id " +
+                        "  WHERE u.id != ? " + // Exclude the requesting user
+                        ") " +
+                        "SELECT * FROM all_family_members " +
+                        "ORDER BY family_name, first_name, last_name";
+                        
+            logger.debug("Executing query for all family members for user ID: {}", tokenUserId);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, tokenUserId, tokenUserId);
+            
+            // Transform results into the response format
+            List<Map<String, Object>> response = results.stream().map(member -> {
+                Map<String, Object> memberMap = new HashMap<>();
+                memberMap.put("id", member.get("id"));
+                memberMap.put("userId", member.get("id")); // Add userId field for consistency
+                memberMap.put("username", member.get("username"));
+                memberMap.put("firstName", member.get("first_name"));
+                memberMap.put("lastName", member.get("last_name"));
+                memberMap.put("photo", member.get("photo"));
+                memberMap.put("familyId", member.get("family_id"));
+                memberMap.put("familyName", member.get("family_name"));
+                memberMap.put("isOwner", member.get("is_owner"));
+                
+                // Only include ownedFamilyName if user is an owner
+                if ((boolean)member.get("is_owner") && member.get("owned_family_name") != null) {
+                    memberMap.put("ownedFamilyName", member.get("owned_family_name"));
+                }
+                
+                return memberMap;
+            }).collect(Collectors.toList());
+            
+            logger.debug("Returning {} family members across all families for user {}", response.size(), tokenUserId);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error retrieving all family members: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
+        }
+    }
+
     @GetMapping("/owned")
     @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getOwnedFamily(

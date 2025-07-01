@@ -38,9 +38,6 @@ public class AuthFilter extends OncePerRequestFilter {
         if (path.equals("/api/users/connection-test") || 
             path.equals("/api/users/login") || 
             path.equals("/api/users") ||
-            path.equals("/api/users/test-token") ||
-            path.equals("/api/users/debug-token") ||
-            path.equals("/api/users/plaintest") ||
             path.equals("/api/users/test") ||
             path.startsWith("/api/videos/public") ||
             path.startsWith("/api/videos/test") ||

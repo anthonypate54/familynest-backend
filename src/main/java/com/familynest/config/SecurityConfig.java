@@ -48,15 +48,11 @@ public class SecurityConfig {
                 auth.requestMatchers("/api/users/login").permitAll()
                     .requestMatchers("/api/users").permitAll()
                     .requestMatchers("/api/users/connection-test").permitAll()
-                    .requestMatchers("/api/users/test-token").permitAll()
-                    .requestMatchers("/api/users/debug-token").permitAll()
                     .requestMatchers("/api/users/test").permitAll()
                     .requestMatchers("/api/users/current").permitAll()
                     .requestMatchers("/api/emergency/**").permitAll()  // Allow all emergency endpoints
                     .requestMatchers("/api/videos/**").permitAll()
                     .requestMatchers("/error").permitAll()
-                    .requestMatchers("/public/**").permitAll() // Permit public endpoints
-                    .requestMatchers("/test/**").permitAll() // Permit test endpoints
                     .requestMatchers("/uploads/**").permitAll() // Permit access to uploaded files
                     .requestMatchers("/ws/**").permitAll()
                     .anyRequest().permitAll(); // Allow our AuthFilter to handle actual authorization
