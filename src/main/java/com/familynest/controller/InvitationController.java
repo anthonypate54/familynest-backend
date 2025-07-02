@@ -272,6 +272,18 @@ public class InvitationController {
                     userFamilyMembershipRepository.findByUserIdAndFamilyId(userId, invitation.getFamilyId());
                 
                 if (existingMembership.isEmpty()) {
+                    // IMPORTANT: Deactivate any other active memberships first
+                    // This prevents users from having multiple active family memberships
+                    Optional<UserFamilyMembership> currentActiveMembership = 
+                        userFamilyMembershipRepository.findByUserIdAndIsActiveTrue(userId);
+                    if (currentActiveMembership.isPresent()) {
+                        UserFamilyMembership activeToDeactivate = currentActiveMembership.get();
+                        activeToDeactivate.setActive(false);
+                        userFamilyMembershipRepository.save(activeToDeactivate);
+                        logger.debug("Deactivated previous active membership for user {} in family {} when accepting invitation to family {}", 
+                                     userId, activeToDeactivate.getFamilyId(), invitation.getFamilyId());
+                    }
+                    
                     // Create family membership
                     UserFamilyMembership membership = new UserFamilyMembership();
                     membership.setUserId(userId);
@@ -282,7 +294,26 @@ public class InvitationController {
                     
                     logger.debug("User {} accepted invitation to family {}", userId, invitation.getFamilyId());
                 } else {
-                    logger.debug("User {} already a member of family {}", userId, invitation.getFamilyId());
+                    // User is already a member - just activate this membership and deactivate others
+                    UserFamilyMembership existingMember = existingMembership.get();
+                    
+                    // Deactivate any other active memberships
+                    Optional<UserFamilyMembership> currentActiveMembership = 
+                        userFamilyMembershipRepository.findByUserIdAndIsActiveTrue(userId);
+                    if (currentActiveMembership.isPresent() && 
+                        !currentActiveMembership.get().getFamilyId().equals(invitation.getFamilyId())) {
+                        UserFamilyMembership activeToDeactivate = currentActiveMembership.get();
+                        activeToDeactivate.setActive(false);
+                        userFamilyMembershipRepository.save(activeToDeactivate);
+                        logger.debug("Deactivated previous active membership for user {} in family {} when reactivating membership in family {}", 
+                                     userId, activeToDeactivate.getFamilyId(), invitation.getFamilyId());
+                    }
+                    
+                    // Activate this membership
+                    existingMember.setActive(true);
+                    userFamilyMembershipRepository.save(existingMember);
+                    
+                    logger.debug("User {} already a member of family {} - reactivated membership", userId, invitation.getFamilyId());
                 }
             } else {
                 // Decline invitation

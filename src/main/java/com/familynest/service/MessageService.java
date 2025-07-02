@@ -3,11 +3,17 @@ package com.familynest.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.HashMap;
 
 @Service
 public class MessageService {
+
+    private static final Logger logger = LoggerFactory.getLogger(MessageService.class);
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -25,8 +31,14 @@ public class MessageService {
             "LEFT JOIN family f ON m.family_id = f.id " +
             "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
             "  ON m.id = vc.message_id " +
-            "WHERE m.id = ?";       
+            "WHERE m.id = ?";
+        
+        try {
             return jdbcTemplate.queryForMap(sql, commentId);
+        } catch (EmptyResultDataAccessException e) {
+            logger.warn("Comment not found with ID: {}", commentId);
+            throw new RuntimeException("Comment not found with ID: " + commentId);
+        }
     }
 
     public Map<String, Object> getMessageById(Long messageId) {
@@ -43,6 +55,12 @@ public class MessageService {
                      "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
                      "  ON m.id = vc.message_id " +
                      "WHERE m.id = ?";
-        return jdbcTemplate.queryForMap(sql, messageId);
+        
+        try {
+            return jdbcTemplate.queryForMap(sql, messageId);
+        } catch (EmptyResultDataAccessException e) {
+            logger.warn("Message not found with ID: {} - this could be a race condition during WebSocket broadcasting", messageId);
+            throw new RuntimeException("Message not found with ID: " + messageId);
+        }
     }
 }

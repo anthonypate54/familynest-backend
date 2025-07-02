@@ -10,6 +10,7 @@ import com.familynest.auth.AuthUtil; // Add this import
 import com.familynest.service.ThumbnailService; // Add ThumbnailService import
 import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
+import com.familynest.service.WebSocketBroadcastService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -127,6 +128,9 @@ public class UserController {
 
     @Autowired
     private MediaService mediaService;
+
+    @Autowired
+    private WebSocketBroadcastService webSocketBroadcastService;
 
     @GetMapping("/test")
     public ResponseEntity<String> testEndpoint(HttpServletRequest request) {
@@ -611,7 +615,7 @@ public class UserController {
             @RequestParam(value = "media", required = false) MultipartFile media,
             @RequestParam(value = "mediaType", required = false) String mediaType,
             @RequestParam(value = "videoUrl", required = false) String videoUrl,
-            @RequestParam("familyId") Long familyId,
+            @RequestParam(value = "familyId", required = false) Long familyId,
             @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
         try {
@@ -661,7 +665,36 @@ public class UserController {
                 }
             }
     
-            // Insert the message and get the new ID
+            // Determine target family ID
+            Long targetFamilyId;
+            if (familyId != null) {
+                // Post to specific family only
+                targetFamilyId = familyId;
+                logger.debug("Posting message to specific family: {}", familyId);
+            } else {
+                // Post to user's active/primary family only (not all families)
+                String activeFamilySql = "SELECT family_id FROM user_family_membership WHERE user_id = ? AND is_active = true LIMIT 1";
+                List<Map<String, Object>> familyResults = jdbcTemplate.queryForList(activeFamilySql, userId);
+                
+                if (!familyResults.isEmpty()) {
+                    targetFamilyId = ((Number) familyResults.get(0).get("family_id")).longValue();
+                    logger.debug("Posting message to user's active family: {}", targetFamilyId);
+                } else {
+                    // Fallback: get the first family they belong to
+                    String fallbackFamilySql = "SELECT family_id FROM user_family_membership WHERE user_id = ? LIMIT 1";
+                    List<Map<String, Object>> fallbackResults = jdbcTemplate.queryForList(fallbackFamilySql, userId);
+                    
+                    if (!fallbackResults.isEmpty()) {
+                        targetFamilyId = ((Number) fallbackResults.get(0).get("family_id")).longValue();
+                        logger.debug("Posting message to user's first family (fallback): {}", targetFamilyId);
+                    } else {
+                        return ResponseEntity.badRequest()
+                               .body(Map.of("error", "User is not a member of any family"));
+                    }
+                }
+            }
+    
+            // Insert the message to the target family
             String insertSql = "INSERT INTO message (content, user_id, sender_id, sender_username, " +
                 "media_type, media_url, thumbnail_url, family_id, like_count, love_count) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0) RETURNING id";
@@ -674,15 +707,26 @@ public class UserController {
                 mediaType,
                 mediaUrl,
                 thumbnailUrl,
-                familyId
+                targetFamilyId
             );
+            
+            // Fetch the full message with all joins using the service and broadcast via WebSocket
+            try {
+                Map<String, Object> messageData = messageService.getMessageById(newMessageId);
+                
+                // Broadcast the message to family members via WebSocket
+                logger.debug("Broadcasting family message to family {}: {}", targetFamilyId, messageData);
+                webSocketBroadcastService.broadcastFamilyMessage(messageData, targetFamilyId);
+            } catch (Exception e) {
+                logger.error("Error broadcasting WebSocket message for messageId {}: {}", newMessageId, e.getMessage());
+                // Continue processing - don't let WebSocket errors break message posting
+            }
     
-            // Fetch the full message with all joins using the service
+            // Return the message data
             Map<String, Object> messageData = messageService.getMessageById(newMessageId);
-    
-            // Return the fully-formed message as the response
+            
+            logger.debug("Successfully posted message to family {}", targetFamilyId);
             return ResponseEntity.status(HttpStatus.CREATED).body(messageData);
-    
         } catch (Exception e) {
             logger.error("Error posting message: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
