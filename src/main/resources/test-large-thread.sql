@@ -260,8 +260,8 @@ BEGIN
         ORDER BY RANDOM()
         LIMIT 1;
         
-        -- Insert comment
-        INSERT INTO message_comment (message_id, user_id, content, created_at)
+        -- Insert comment (using parent_message_id and timestamp columns)
+        INSERT INTO message_comment (parent_message_id, user_id, content, timestamp)
         VALUES (
             message_id,
             user_id,
@@ -301,5 +301,5 @@ WHERE m.content LIKE 'This is the start of our load testing thread%' OR m.id > (
 UNION ALL
 SELECT 'Large Thread Comments', COUNT(*) 
 FROM message_comment mc
-JOIN message m ON mc.message_id = m.id
+JOIN message m ON mc.parent_message_id = m.id
 WHERE m.content LIKE 'This is the start of our load testing thread%' OR m.id > (SELECT MIN(id) FROM message WHERE content LIKE 'This is the start of our load testing thread%'); 

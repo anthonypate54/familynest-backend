@@ -8,6 +8,7 @@ import com.familynest.auth.JwtUtil;
 import com.familynest.service.ThumbnailService;
 import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
+import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.model.Message;
 import java.sql.Timestamp;
 
@@ -76,6 +77,9 @@ public class CommentController {
     @Autowired
     private AuthUtil authUtil; // Add this dependency
 
+    @Autowired
+    private WebSocketBroadcastService webSocketBroadcastService;
+
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
 
@@ -138,16 +142,17 @@ public class CommentController {
             "message_subset AS (" +
             "  SELECT m.id " +
             "  FROM message_comment m " +
-            "  JOIN active_families af ON m.family_id = af.family_id " +
+            "  JOIN message_comment_family_link mcfl2 ON m.id = mcfl2.message_comment_id " +
+            "  JOIN active_families af ON mcfl2.family_id = af.family_id " +
             "  WHERE m.parent_message_id = ? " +
             "  ORDER BY m.id ASC " + 
             "  LIMIT 100" +
             ") " +
-            "SELECT " +
-            "  m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
+            "SELECT DISTINCT " +
+            "  m.id, m.content, m.sender_username, m.sender_id, " +
             "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
             "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
-            "  f.name as family_name, m.parent_message_id as parent_message_id, " +
+            "  m.parent_message_id as parent_message_id, " +
             "  COALESCE(vc.count, 0) as view_count, " +
             "  m.like_count, m.love_count, " +
             "  COALESCE(cc.count, 0) as comment_count, " +
@@ -155,8 +160,9 @@ public class CommentController {
             "  CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
             "FROM message_comment m " +
             "JOIN message_subset ms ON m.id = ms.id " +
+            "LEFT JOIN message_comment_family_link mcfl ON m.id = mcfl.message_comment_id " +
+            "LEFT JOIN family f ON mcfl.family_id = f.id " +
             "LEFT JOIN app_user s ON m.sender_id = s.id " +
-            "LEFT JOIN family f ON m.family_id = f.id " +
             "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
             "  ON m.id = vc.message_id " +
             "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
@@ -190,8 +196,6 @@ public class CommentController {
                 messageMap.put("senderPhoto", message.get("sender_photo"));
                 messageMap.put("senderFirstName", message.get("sender_first_name"));
                 messageMap.put("senderLastName", message.get("sender_last_name"));
-                messageMap.put("familyId", message.get("family_id"));
-                messageMap.put("familyName", message.get("family_name"));
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
@@ -355,7 +359,7 @@ public class CommentController {
         @RequestParam(value = "media", required = false) MultipartFile media,
         @RequestParam(value = "mediaType", required = false) String mediaType,
         @RequestParam(value = "videoUrl", required = false) String videoUrl,  // ADD THIS
-        @RequestParam("familyId") Long familyId,
+        @RequestParam(value = "familyId", required = false) Long familyId,
         @RequestHeader("Authorization") String authHeader,
         HttpServletRequest request) {
         try {
@@ -407,10 +411,10 @@ public class CommentController {
                 }
             }
         
-            // Insert the comment and get the new ID
+            // Insert the comment with family_id = NULL (using new schema)
             String insertSql = "INSERT INTO message_comment (content, user_id, sender_id, sender_username, " +
                 "media_type, media_url, thumbnail_url, family_id, parent_message_id, like_count, love_count) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0) RETURNING id";
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 0) RETURNING id";
     
             Long newCommentId = jdbcTemplate.queryForObject(insertSql, Long.class,
                 content, 
@@ -420,12 +424,58 @@ public class CommentController {
                 mediaType,
                 mediaUrl,
                 thumbnailUrl,
-                familyId,
                 parentMessageId
             );
+            
+            // Find all families where the parent message is visible
+            String findFamiliesSql = "SELECT family_id FROM message_family_link WHERE message_id = ?";
+            List<Map<String, Object>> parentMessageFamilies = jdbcTemplate.queryForList(findFamiliesSql, parentMessageId);
+            
+            // Insert comment into message_comment_family_link table for each family
+            String linkSql = "INSERT INTO message_comment_family_link (message_comment_id, family_id) VALUES (?, ?)";
+            for (Map<String, Object> family : parentMessageFamilies) {
+                Long targetFamilyId = ((Number) family.get("family_id")).longValue();
+                jdbcTemplate.update(linkSql, newCommentId, targetFamilyId);
+                logger.debug("Linked comment {} to family {}", newCommentId, targetFamilyId);
+            }
+            
+            logger.debug("Created comment {} visible in {} families", newCommentId, parentMessageFamilies.size());
     
             // Fetch the full comment with all joins using the service
             Map<String, Object> commentData = messageService.getCommentById(newCommentId);
+    
+            // Broadcast the comment via WebSocket using thread-specific approach
+            // This separates concerns from main message broadcasts
+            try {
+                logger.debug("Broadcasting comment via thread-specific WebSocket: {}", commentData);
+                // Broadcast to each family the parent message is visible in
+                for (Map<String, Object> family : parentMessageFamilies) {
+                    Long targetFamilyId = ((Number) family.get("family_id")).longValue();
+                    webSocketBroadcastService.broadcastComment(commentData, parentMessageId, targetFamilyId);
+                }
+            } catch (Exception e) {
+                logger.error("Error broadcasting WebSocket comment for commentId {}: {}", newCommentId, e.getMessage());
+                // Continue processing - don't let WebSocket errors break comment posting
+            }
+
+            // Broadcast updated comment count for parent message (exclude comment poster)
+            try {
+                // Calculate current comment count dynamically from message_comment table
+                String getCommentCountSql = "SELECT COUNT(*) FROM message_comment WHERE parent_message_id = ?";
+                Integer commentCount = jdbcTemplate.queryForObject(getCommentCountSql, Integer.class, parentMessageId);
+                
+                // Broadcast comment count update to each family (excluding the comment poster)
+                for (Map<String, Object> family : parentMessageFamilies) {
+                    Long targetFamilyId = ((Number) family.get("family_id")).longValue();
+                    webSocketBroadcastService.broadcastCommentCountExcludingUser(parentMessageId, 
+                        commentCount != null ? commentCount : 0, targetFamilyId, userId);
+                }
+                logger.debug("Broadcasted comment count update for message {} (count: {}) excluding poster {}", 
+                    parentMessageId, commentCount, userId);
+            } catch (Exception e) {
+                logger.error("Error broadcasting comment count update for messageId {}: {}", parentMessageId, e.getMessage());
+                // Continue processing - don't let WebSocket errors break comment posting
+            }
     
             // Return the fully-formed comment as the response
             return ResponseEntity.status(HttpStatus.CREATED).body(commentData);

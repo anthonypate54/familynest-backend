@@ -9,6 +9,7 @@ import com.familynest.repository.UserRepository;
 import com.familynest.repository.UserFamilyMembershipRepository;
 import com.familynest.repository.InvitationRepository;
 import com.familynest.auth.AuthUtil;
+import com.familynest.service.WebSocketBroadcastService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +47,9 @@ public class InvitationController {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private WebSocketBroadcastService webSocketBroadcastService;
 
     /**
      * Get invitations for the current user
@@ -184,13 +188,62 @@ public class InvitationController {
             if (inviteeEmail == null || inviteeEmail.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Invitee email is required"));
             }
+
+            // HYBRID APPROACH: Check if email exists and provide enhanced feedback
+            User recipient = userRepository.findByEmail(inviteeEmail).orElse(null);
+            boolean userExists = recipient != null;
+            
+            // If user doesn't exist, check for similar emails to help with typos
+            List<String> suggestedEmails = new ArrayList<>();
+            if (!userExists) {
+                // Find emails that are similar (basic similarity check)
+                String emailUsername = inviteeEmail.contains("@") ? inviteeEmail.split("@")[0] : inviteeEmail;
+                String emailDomain = inviteeEmail.contains("@") ? inviteeEmail.split("@")[1] : "";
+                
+                // Query for similar usernames or emails
+                String similarEmailQuery = "SELECT email FROM app_user WHERE " +
+                    "LOWER(email) LIKE LOWER(?) OR " +
+                    "LOWER(username) LIKE LOWER(?) OR " +
+                    "LOWER(email) LIKE LOWER(?) " +
+                    "LIMIT 3";
+                
+                try {
+                    List<String> similarResults = jdbcTemplate.queryForList(
+                        similarEmailQuery, 
+                        String.class, 
+                        "%" + emailUsername + "%",
+                        "%" + emailUsername + "%", 
+                        "%" + emailDomain + "%"
+                    );
+                    
+                    // Filter out exact matches and add to suggestions
+                    suggestedEmails = similarResults.stream()
+                        .filter(email -> !email.equalsIgnoreCase(inviteeEmail))
+                        .distinct()
+                        .collect(Collectors.toList());
+                        
+                    if (!suggestedEmails.isEmpty()) {
+                        logger.debug("Found {} similar emails for '{}': {}", 
+                            suggestedEmails.size(), inviteeEmail, suggestedEmails);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error finding similar emails: {}", e.getMessage());
+                    // Continue without suggestions
+                }
+            }
     
             // Check if invitee already has a pending invitation to this family
             List<Invitation> existingInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
                 inviteeEmail, familyId, "PENDING");
                 
             if (!existingInvitations.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "An invitation to this family is already pending for this email"));
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("error", "An invitation to this family is already pending for this email");
+                errorResponse.put("userExists", userExists);
+                if (!suggestedEmails.isEmpty()) {
+                    errorResponse.put("suggestedEmails", suggestedEmails);
+                }
+                return ResponseEntity.badRequest().body(errorResponse);
             }
     
             // Create and save the invitation
@@ -204,16 +257,58 @@ public class InvitationController {
             
             Invitation savedInvitation = invitationRepository.save(invitation);
     
-            logger.debug("Invitation created successfully: ID={}, familyId={}, email={}", 
-                savedInvitation.getId(), familyId, inviteeEmail);
+            logger.debug("Invitation created successfully: ID={}, familyId={}, email={}, userExists={}", 
+                savedInvitation.getId(), familyId, inviteeEmail, userExists);
+
+            // Broadcast new invitation to recipient via WebSocket (only if user exists)
+            if (userExists) {
+                try {
+                    Map<String, Object> invitationData = new HashMap<>();
+                    invitationData.put("id", savedInvitation.getId());
+                    invitationData.put("familyId", familyId);
+                    invitationData.put("inviterId", userId);
+                    invitationData.put("status", savedInvitation.getStatus());
+                    invitationData.put("createdAt", savedInvitation.getCreatedAt().toString());
+                    invitationData.put("expiresAt", savedInvitation.getExpiresAt().toString());
+                    invitationData.put("email", inviteeEmail);
+                    invitationData.put("type", "NEW_INVITATION");
+                    
+                    // Get family and inviter names
+                    Family family = familyRepository.findById(familyId).orElse(null);
+                    if (family != null) {
+                        invitationData.put("familyName", family.getName());
+                    }
+                    invitationData.put("inviterName", inviter.getFirstName() + " " + inviter.getLastName());
+                    
+                    webSocketBroadcastService.broadcastInvitation(invitationData, recipient.getId());
+                    logger.debug("Broadcasted new invitation to user: {}", recipient.getId());
+                } catch (Exception e) {
+                    logger.error("Error broadcasting new invitation: {}", e.getMessage(), e);
+                    // Don't fail the request if WebSocket broadcast fails
+                }
+            } else {
+                logger.debug("No WebSocket broadcast sent - user does not exist yet for email: {}", inviteeEmail);
+            }
     
+            // Enhanced response with user existence info and suggestions
             Map<String, Object> response = new HashMap<>();
             response.put("invitationId", savedInvitation.getId());
             response.put("familyId", familyId);
             response.put("email", inviteeEmail);
             response.put("status", savedInvitation.getStatus());
             response.put("expiresAt", savedInvitation.getExpiresAt().toString());
-            response.put("message", "Invitation sent successfully");
+            response.put("userExists", userExists);
+            
+            if (userExists) {
+                response.put("message", "Invitation sent successfully to registered user");
+                response.put("recipientName", recipient.getFirstName() + " " + recipient.getLastName());
+            } else {
+                response.put("message", "Invitation sent to unregistered email - they can join when they sign up");
+                if (!suggestedEmails.isEmpty()) {
+                    response.put("suggestedEmails", suggestedEmails);
+                    response.put("suggestionMessage", "Did you mean one of these registered emails?");
+                }
+            }
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -272,48 +367,23 @@ public class InvitationController {
                     userFamilyMembershipRepository.findByUserIdAndFamilyId(userId, invitation.getFamilyId());
                 
                 if (existingMembership.isEmpty()) {
-                    // IMPORTANT: Deactivate any other active memberships first
-                    // This prevents users from having multiple active family memberships
-                    Optional<UserFamilyMembership> currentActiveMembership = 
-                        userFamilyMembershipRepository.findByUserIdAndIsActiveTrue(userId);
-                    if (currentActiveMembership.isPresent()) {
-                        UserFamilyMembership activeToDeactivate = currentActiveMembership.get();
-                        activeToDeactivate.setActive(false);
-                        userFamilyMembershipRepository.save(activeToDeactivate);
-                        logger.debug("Deactivated previous active membership for user {} in family {} when accepting invitation to family {}", 
-                                     userId, activeToDeactivate.getFamilyId(), invitation.getFamilyId());
-                    }
-                    
-                    // Create family membership
+                    // MULTI-FAMILY MEMBERSHIP: User can belong to multiple families simultaneously
                     UserFamilyMembership membership = new UserFamilyMembership();
                     membership.setUserId(userId);
                     membership.setFamilyId(invitation.getFamilyId());
                     membership.setRole("MEMBER");
-                    membership.setActive(true);
+                    membership.setActive(true);  // Keep all family memberships active
                     userFamilyMembershipRepository.save(membership);
                     
-                    logger.debug("User {} accepted invitation to family {}", userId, invitation.getFamilyId());
+                    logger.debug("User {} accepted invitation to family {} (multi-family: added to new family)", 
+                                 userId, invitation.getFamilyId());
                 } else {
-                    // User is already a member - just activate this membership and deactivate others
+                    // User is already a member - just ensure membership is active
                     UserFamilyMembership existingMember = existingMembership.get();
-                    
-                    // Deactivate any other active memberships
-                    Optional<UserFamilyMembership> currentActiveMembership = 
-                        userFamilyMembershipRepository.findByUserIdAndIsActiveTrue(userId);
-                    if (currentActiveMembership.isPresent() && 
-                        !currentActiveMembership.get().getFamilyId().equals(invitation.getFamilyId())) {
-                        UserFamilyMembership activeToDeactivate = currentActiveMembership.get();
-                        activeToDeactivate.setActive(false);
-                        userFamilyMembershipRepository.save(activeToDeactivate);
-                        logger.debug("Deactivated previous active membership for user {} in family {} when reactivating membership in family {}", 
-                                     userId, activeToDeactivate.getFamilyId(), invitation.getFamilyId());
-                    }
-                    
-                    // Activate this membership
                     existingMember.setActive(true);
                     userFamilyMembershipRepository.save(existingMember);
                     
-                    logger.debug("User {} already a member of family {} - reactivated membership", userId, invitation.getFamilyId());
+                    logger.debug("User {} reactivated membership in family {}", userId, invitation.getFamilyId());
                 }
             } else {
                 // Decline invitation
@@ -322,6 +392,33 @@ public class InvitationController {
             }
             
             invitationRepository.save(invitation);
+
+            // Broadcast invitation response to the sender via WebSocket
+            try {
+                Map<String, Object> invitationResponseData = new HashMap<>();
+                invitationResponseData.put("id", invitation.getId());
+                invitationResponseData.put("familyId", invitation.getFamilyId());
+                invitationResponseData.put("status", invitation.getStatus());
+                invitationResponseData.put("email", invitation.getEmail());
+                invitationResponseData.put("responderId", userId);
+                invitationResponseData.put("type", accept ? "INVITATION_ACCEPTED" : "INVITATION_DECLINED");
+                
+                // Add responder name
+                invitationResponseData.put("responderName", user.getFirstName() + " " + user.getLastName());
+                
+                // Get family name
+                Family family = familyRepository.findById(invitation.getFamilyId()).orElse(null);
+                if (family != null) {
+                    invitationResponseData.put("familyName", family.getName());
+                }
+                
+                webSocketBroadcastService.broadcastInvitation(invitationResponseData, invitation.getSenderId());
+                logger.debug("Broadcasted invitation response to sender: {}", invitation.getSenderId());
+                
+            } catch (Exception e) {
+                logger.error("Error broadcasting invitation response: {}", e.getMessage(), e);
+                // Don't fail the request if WebSocket broadcast fails
+            }
             
             Map<String, Object> response = new HashMap<>();
             response.put("status", invitation.getStatus());

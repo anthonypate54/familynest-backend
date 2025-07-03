@@ -221,11 +221,11 @@ BEGIN
       
       -- Comments
       IF i % 10 = 0 THEN
-        INSERT INTO message_comment (message_id, user_id, content, created_at)
+        INSERT INTO message_comment (parent_message_id, user_id, content, timestamp)
         VALUES (current_message_id, 101, 'Test comment on message ' || current_message_id, NOW());
       END IF;
       IF i % 13 = 0 THEN
-        INSERT INTO message_comment (message_id, user_id, content, created_at)
+        INSERT INTO message_comment (parent_message_id, user_id, content, timestamp)
         VALUES (current_message_id, 999, 'Another test comment', NOW());
       END IF;
     END LOOP;
@@ -290,7 +290,7 @@ PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELEC
 PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Thread Count: ' || COUNT(*) FROM (SELECT DISTINCT family_id FROM message WHERE sender_id = 888 AND content LIKE 'Stress test thread%') as t;"
 PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Views: ' || COUNT(*) FROM message_view mv JOIN message m ON mv.message_id = m.id WHERE m.sender_id = 888;"
 PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Reactions: ' || COUNT(*) FROM message_reaction mr JOIN message m ON mr.message_id = m.id WHERE m.sender_id = 888;"
-PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Comments: ' || COUNT(*) FROM message_comment mc JOIN message m ON mc.message_id = m.id WHERE m.sender_id = 888;"
+PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Comments: ' || COUNT(*) FROM message_comment mc JOIN message m ON mc.parent_message_id = m.id WHERE m.sender_id = 888;"
 echo "=================================================================="
 
 # Apply performance indexes immediately after database creation

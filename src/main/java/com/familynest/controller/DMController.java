@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import java.nio.charset.StandardCharsets;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -184,7 +185,10 @@ public class DMController {
                 })
                 .collect(Collectors.toList());
 
-            return ResponseEntity.ok(Map.of("conversations", formattedConversations));
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .body(Map.of("conversations", formattedConversations));
 
         } catch (DataAccessException e) {
             logger.error("Database error getting conversations: {}", e.getMessage());
@@ -341,7 +345,10 @@ public class DMController {
             webSocketBroadcastService.broadcastDMMessage(messageData, recipientId);
             
       // Return the fully-formed message as the response
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .body(response);
     
         } catch (Exception e) {
             logger.error("Error posting DM message: {}", e.getMessage(), e);
@@ -423,7 +430,10 @@ public class DMController {
                 "totalPages", (int) Math.ceil((double) totalCount / size)
             ));
 
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .body(response);
 
         } catch (DataAccessException e) {
             logger.error("Database error getting messages: {}", e.getMessage());

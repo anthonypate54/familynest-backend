@@ -193,7 +193,7 @@ public class SearchController {
                         m.content,
                         m.sender_id,
                         m.sender_username,
-                        m.family_id,
+                        mfl.family_id,
                         m.timestamp,
                         m.media_type,
                         m.media_url,
@@ -204,11 +204,12 @@ public class SearchController {
                         s.photo as sender_photo,
                         'family' as message_type
                     FROM message m
-                    JOIN user_families uf ON m.family_id = uf.family_id
-                    JOIN family f ON m.family_id = f.id
+                    JOIN message_family_link mfl ON m.id = mfl.message_id
+                    JOIN user_families uf ON mfl.family_id = uf.family_id
+                    JOIN family f ON mfl.family_id = f.id
                     LEFT JOIN app_user s ON m.sender_id = s.id
                     WHERE LOWER(m.content) LIKE LOWER(?)
-                    AND m.family_id = ?
+                    AND mfl.family_id = ?
                     ORDER BY m.timestamp DESC
                     LIMIT ? OFFSET ?
                 )

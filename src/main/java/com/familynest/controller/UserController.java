@@ -572,17 +572,7 @@ public class UserController {
             membership.setActive(true);
             membership.setRole("MEMBER");
             
-            // If this is the user's first family, or they have no active family, set this as active
-            // First, deactivate any other active memberships
-            Optional<UserFamilyMembership> activeMembership = userFamilyMembershipRepository.findByUserIdAndIsActiveTrue(id);
-            if (activeMembership.isPresent()) {
-                // Deactivate the existing active membership
-                UserFamilyMembership existingActive = activeMembership.get();
-                existingActive.setActive(false);
-                userFamilyMembershipRepository.save(existingActive);
-                logger.debug("Deactivated previous active membership for user ID: {} in family ID: {}", 
-                             id, existingActive.getFamilyId());
-            }
+            // Multi-family support: User can belong to multiple families simultaneously
             
             // Save the new membership as active
             userFamilyMembershipRepository.save(membership);
@@ -665,39 +655,32 @@ public class UserController {
                 }
             }
     
-            // Determine target family ID
-            Long targetFamilyId;
+            // Determine target families for the message
+            List<Long> targetFamilyIds = new ArrayList<>();
             if (familyId != null) {
                 // Post to specific family only
-                targetFamilyId = familyId;
+                targetFamilyIds.add(familyId);
                 logger.debug("Posting message to specific family: {}", familyId);
             } else {
-                // Post to user's active/primary family only (not all families)
-                String activeFamilySql = "SELECT family_id FROM user_family_membership WHERE user_id = ? AND is_active = true LIMIT 1";
-                List<Map<String, Object>> familyResults = jdbcTemplate.queryForList(activeFamilySql, userId);
+                // Post to ALL families the user belongs to (new behavior)
+                String allFamiliesSql = "SELECT family_id FROM user_family_membership WHERE user_id = ?";
+                List<Map<String, Object>> familyResults = jdbcTemplate.queryForList(allFamiliesSql, userId);
                 
                 if (!familyResults.isEmpty()) {
-                    targetFamilyId = ((Number) familyResults.get(0).get("family_id")).longValue();
-                    logger.debug("Posting message to user's active family: {}", targetFamilyId);
-                } else {
-                    // Fallback: get the first family they belong to
-                    String fallbackFamilySql = "SELECT family_id FROM user_family_membership WHERE user_id = ? LIMIT 1";
-                    List<Map<String, Object>> fallbackResults = jdbcTemplate.queryForList(fallbackFamilySql, userId);
-                    
-                    if (!fallbackResults.isEmpty()) {
-                        targetFamilyId = ((Number) fallbackResults.get(0).get("family_id")).longValue();
-                        logger.debug("Posting message to user's first family (fallback): {}", targetFamilyId);
-                    } else {
-                        return ResponseEntity.badRequest()
-                               .body(Map.of("error", "User is not a member of any family"));
+                    for (Map<String, Object> family : familyResults) {
+                        targetFamilyIds.add(((Number) family.get("family_id")).longValue());
                     }
+                    logger.debug("Posting message to {} families user belongs to: {}", targetFamilyIds.size(), targetFamilyIds);
+                } else {
+                    return ResponseEntity.badRequest()
+                           .body(Map.of("error", "User is not a member of any family"));
                 }
             }
     
-            // Insert the message to the target family
+            // Insert the message with family_id = NULL (using new schema)
             String insertSql = "INSERT INTO message (content, user_id, sender_id, sender_username, " +
                 "media_type, media_url, thumbnail_url, family_id, like_count, love_count) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0) RETURNING id";
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0) RETURNING id";
     
             Long newMessageId = jdbcTemplate.queryForObject(insertSql, Long.class,
                 content, 
@@ -706,17 +689,25 @@ public class UserController {
                 userData.get("username"),
                 mediaType,
                 mediaUrl,
-                thumbnailUrl,
-                targetFamilyId
+                thumbnailUrl
             );
+            
+            // Insert into message_family_link table for each target family
+            String linkSql = "INSERT INTO message_family_link (message_id, family_id) VALUES (?, ?)";
+            for (Long targetFamilyId : targetFamilyIds) {
+                jdbcTemplate.update(linkSql, newMessageId, targetFamilyId);
+                logger.debug("Linked message {} to family {}", newMessageId, targetFamilyId);
+            }
             
             // Fetch the full message with all joins using the service and broadcast via WebSocket
             try {
                 Map<String, Object> messageData = messageService.getMessageById(newMessageId);
                 
-                // Broadcast the message to family members via WebSocket
-                logger.debug("Broadcasting family message to family {}: {}", targetFamilyId, messageData);
-                webSocketBroadcastService.broadcastFamilyMessage(messageData, targetFamilyId);
+                // Broadcast the NEW MESSAGE to all target families via WebSocket
+                for (Long targetFamilyId : targetFamilyIds) {
+                    logger.debug("Broadcasting new message to family {}: {}", targetFamilyId, messageData);
+                    webSocketBroadcastService.broadcastNewMessage(messageData, targetFamilyId);
+                }
             } catch (Exception e) {
                 logger.error("Error broadcasting WebSocket message for messageId {}: {}", newMessageId, e.getMessage());
                 // Continue processing - don't let WebSocket errors break message posting
@@ -725,7 +716,7 @@ public class UserController {
             // Return the message data
             Map<String, Object> messageData = messageService.getMessageById(newMessageId);
             
-            logger.debug("Successfully posted message to family {}", targetFamilyId);
+            logger.debug("Successfully posted message to {} families", targetFamilyIds.size());
             return ResponseEntity.status(HttpStatus.CREATED).body(messageData);
         } catch (Exception e) {
             logger.error("Error posting message: {}", e.getMessage(), e);
@@ -772,17 +763,17 @@ public class UserController {
                         "  WHERE mf.family_id IS NULL" +
                         "), " +
                         "message_subset AS (" +
-                        "  SELECT m.id " +
+                        "  SELECT DISTINCT m.id " +
                         "  FROM message m " +
-                        "  JOIN active_families af ON m.family_id = af.family_id " +
+                        "  JOIN message_family_link mfl ON m.id = mfl.message_id " +
+                        "  JOIN active_families af ON mfl.family_id = af.family_id " +
                         "  ORDER BY m.id DESC " + 
                         "  LIMIT 100" +
                         ") " +
-                        "SELECT " +
-                        "  m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
+                        "SELECT DISTINCT " +
+                        "  m.id, m.content, m.sender_username, m.sender_id, " +
                         "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
                         "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
-                        "  f.name as family_name, " +
                         "  COALESCE(vc.count, 0) as view_count, " +
                         "  m.like_count, m.love_count, " +
                         "  COALESCE(cc.count, 0) as comment_count, " +
@@ -790,8 +781,9 @@ public class UserController {
                         "  CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
                         "FROM message m " +
                         "JOIN message_subset ms ON m.id = ms.id " +
+                        "JOIN message_family_link mfl ON m.id = mfl.message_id " +
+                        "JOIN active_families af ON mfl.family_id = af.family_id " +
                         "LEFT JOIN app_user s ON m.sender_id = s.id " +
-                        "LEFT JOIN family f ON m.family_id = f.id " +
                         "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
                         "  ON m.id = vc.message_id " +
                         "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
@@ -881,36 +873,38 @@ public class UserController {
             String sql = "WITH requested_user AS (" +
                         "  SELECT u.id FROM app_user u WHERE u.id = ?" +
                         "), " +
-                        "user_family AS (" +
-                        "  SELECT ufm.family_id " +
-                        "  FROM user_family_membership ufm " +
-                        "  WHERE ufm.user_id = ? " +
-                        "  LIMIT 1" +
-                        "), " +
+                                    "user_families AS (" +
+            "  SELECT ufm.family_id " +
+            "  FROM user_family_membership ufm " +
+            "  WHERE ufm.user_id = ? " +
+            "), " +
                         "token_user_memberships AS (" +
                         "  SELECT ufm.family_id FROM user_family_membership ufm WHERE ufm.user_id = ?" +
                         "), " +
                         "authorized AS (" +
                         "  SELECT CASE " +
                         "    WHEN ? = ? THEN true " + // tokenUserId = requestedUserId
-                        "    WHEN EXISTS (SELECT 1 FROM token_user_memberships tum JOIN user_family uf ON tum.family_id = uf.family_id) THEN true " +
+                        "    WHEN EXISTS (SELECT 1 FROM token_user_memberships tum JOIN user_families uf ON tum.family_id = uf.family_id) THEN true " +
                         "    ELSE false " +
                         "  END as is_authorized" +
                         "), " +
-                        "family_members AS (" +
-                        "  SELECT " +
-                        "    u.id, u.username, u.first_name, u.last_name, u.photo, ufm2.family_id, " +
-                        "    f.name as family_name, f.created_by as family_owner_id, " +
-                        "    ufm.role as membership_role, " +
-                        "    CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
-                        "    of.name as owned_family_name " +
-                        "  FROM user_family uf " +
-                        "  JOIN user_family_membership ufm2 ON ufm2.family_id = uf.family_id " + 
-                        "  JOIN app_user u ON u.id = ufm2.user_id " +
-                        "  JOIN family f ON f.id = uf.family_id " +
-                        "  LEFT JOIN user_family_membership ufm ON ufm.user_id = u.id AND ufm.family_id = uf.family_id " +
-                        "  LEFT JOIN family of ON of.created_by = u.id " +
-                        ") " +
+                                                "family_members AS (" +
+            "  SELECT DISTINCT " +
+            "    u.id, u.username, u.first_name, u.last_name, u.photo, " +
+            "    MIN(ufm2.family_id) as family_id, " +
+            "    MIN(f.name) as family_name, MIN(f.created_by) as family_owner_id, " +
+            "    MIN(ufm.role) as membership_role, " +
+            "    CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
+            "    MIN(of.name) as owned_family_name " +
+            "  FROM user_families uf " +
+            "  JOIN user_family_membership ufm2 ON ufm2.family_id = uf.family_id " + 
+            "  JOIN app_user u ON u.id = ufm2.user_id " +
+            "  JOIN family f ON f.id = uf.family_id " +
+            "  LEFT JOIN user_family_membership ufm ON ufm.user_id = u.id AND ufm.family_id = uf.family_id " +
+            "  LEFT JOIN family of ON of.created_by = u.id " +
+            "  WHERE u.id != ? " + // Exclude the requesting user
+            "  GROUP BY u.id, u.username, u.first_name, u.last_name, u.photo, of.id " +
+            ") " +
                         "SELECT a.is_authorized, fm.* " +
                         "FROM authorized a " +
                         "CROSS JOIN family_members fm " +
@@ -918,7 +912,7 @@ public class UserController {
                         
             logger.debug("Executing optimized query for family members for user ID: {}", id);
             
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, tokenUserId, tokenUserId, id);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, tokenUserId, tokenUserId, id, id);
             
             // Check authorization from first row
             if (results.isEmpty() || !(boolean)results.get(0).get("is_authorized")) {

@@ -362,15 +362,7 @@ public class FamilyController {
             membership.setActive(true);
             membership.setRole("MEMBER");
             
-            // Deactivate any existing active memberships for this user
-            Optional<UserFamilyMembership> activeMembership = userFamilyMembershipRepository.findByUserIdAndIsActiveTrue(userId);
-            if (activeMembership.isPresent()) {
-                UserFamilyMembership existingActive = activeMembership.get();
-                existingActive.setActive(false);
-                userFamilyMembershipRepository.save(existingActive);
-                logger.debug("Deactivated previous active membership for user ID: {} in family ID: {}", 
-                             userId, existingActive.getFamilyId());
-            }
+            // Multi-family support: User can belong to multiple families simultaneously
             
             // Save the new membership as active
             userFamilyMembershipRepository.save(membership);
@@ -530,7 +522,7 @@ public class FamilyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
             }
             
-            // Get ALL families the user belongs to (not just the first one)
+            // Get ALL families the user belongs to (only active memberships for DM purposes)
             String sql = "WITH user_families AS (" +
                         "  SELECT ufm.family_id " +
                         "  FROM user_family_membership ufm " +

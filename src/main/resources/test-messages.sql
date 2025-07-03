@@ -1,8 +1,10 @@
 -- Test Messages Dataset for FamilyNest
 -- This script creates realistic message data for testing the messaging functionality
+-- Updated to use message_family_link table for multi-family message visibility
 -- It generates 50 message threads with approximately 200 total messages
 
 -- Clear existing message data to avoid duplication
+DELETE FROM message_family_link;
 DELETE FROM message_comment;
 DELETE FROM message_reaction;
 DELETE FROM message_view;
@@ -24,7 +26,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Generate messages for each family
+-- Generate messages for each family using NEW schema approach
 DO $$
 DECLARE
     family_rec RECORD;
@@ -45,6 +47,11 @@ DECLARE
     thread_family_id BIGINT;
     thread_starter_id BIGINT;
     has_media BOOLEAN;
+    
+    -- Variables for multi-family message visibility
+    sender_family RECORD;
+    all_sender_families REFCURSOR;
+    
     media_messages TEXT[] := ARRAY[
         'Check out this photo I took yesterday!',
         'Here''s the video from our gathering',
@@ -170,12 +177,12 @@ BEGIN
                 media_url := NULL;
             END IF;
             
-            -- Insert thread starter message
+            -- Insert thread starter message using NEW SCHEMA (family_id = NULL)
             INSERT INTO message (id, content, family_id, media_type, media_url, sender_id, sender_username, timestamp, user_id)
             VALUES (
                 message_id,
                 message_content,
-                family_rec.id,
+                NULL,  -- NEW: family_id = NULL, use link table instead
                 media_type,
                 media_url,
                 user_rec.id,
@@ -183,6 +190,29 @@ BEGIN
                 thread_start_timestamp,
                 user_rec.id
             );
+            
+            -- NEW: Create message_family_link entries for ALL families the sender belongs to
+            -- This demonstrates multi-family message visibility!
+            OPEN all_sender_families FOR
+                SELECT ufm.family_id
+                FROM user_family_membership ufm 
+                WHERE ufm.user_id = user_rec.id;
+            
+            LOOP
+                FETCH all_sender_families INTO sender_family;
+                EXIT WHEN NOT FOUND;
+                
+                -- Insert link for each family the sender belongs to
+                INSERT INTO message_family_link (message_id, family_id, created_at)
+                VALUES (message_id, sender_family.family_id, thread_start_timestamp);
+                
+                -- Debug: Show multi-family visibility
+                IF sender_family.family_id != family_rec.id THEN
+                    RAISE NOTICE 'Multi-family message: Message % from user % visible to family % (in addition to family %)', 
+                        message_id, user_rec.id, sender_family.family_id, family_rec.id;
+                END IF;
+            END LOOP;
+            CLOSE all_sender_families;
             
             total_messages := total_messages + 1;
             last_message_id := message_id;
@@ -241,12 +271,12 @@ BEGIN
                     media_url := NULL;
                 END IF;
                 
-                -- Insert reply message
+                -- Insert reply message using NEW SCHEMA (family_id = NULL)
                 INSERT INTO message (id, content, family_id, media_type, media_url, sender_id, sender_username, timestamp, user_id)
                 VALUES (
                     message_id,
                     message_content,
-                    thread_family_id,
+                    NULL,  -- NEW: family_id = NULL, use link table instead
                     media_type,
                     media_url,
                     reply_user_rec.id,
@@ -255,48 +285,71 @@ BEGIN
                     reply_user_rec.id
                 );
                 
+                -- NEW: Create message_family_link entries for ALL families the reply sender belongs to
+                OPEN all_sender_families FOR
+                    SELECT ufm.family_id
+                    FROM user_family_membership ufm 
+                    WHERE ufm.user_id = reply_user_rec.id;
+                
+                LOOP
+                    FETCH all_sender_families INTO sender_family;
+                    EXIT WHEN NOT FOUND;
+                    
+                    -- Insert link for each family the sender belongs to
+                    INSERT INTO message_family_link (message_id, family_id, created_at)
+                    VALUES (message_id, sender_family.family_id, msg_timestamp);
+                END LOOP;
+                CLOSE all_sender_families;
+                
                 total_messages := total_messages + 1;
                 thread_start_timestamp := msg_timestamp; -- For next reply in thread
             END LOOP;
         END LOOP;
     END LOOP;
     
-    -- Add message views (70% of messages are viewed by someone)
-    INSERT INTO message_view (message_id, user_id, viewed_at)
-    SELECT 
-        m.id, 
-        ufm.user_id,
-        m.timestamp + (random() * 24 * interval '1 hour')
-    FROM 
-        message m
-        JOIN user_family_membership ufm ON m.family_id = ufm.family_id
-    WHERE 
-        random() < 0.7 -- 70% chance of being viewed
-        AND ufm.user_id != m.sender_id; -- Don't view your own message
-    
-    -- Add some message reactions (20% of messages get reactions)
-    INSERT INTO message_reaction (message_id, user_id, reaction_type, created_at)
-    SELECT 
-        m.id, 
-        ufm.user_id,
-        CASE floor(random() * 5)
-            WHEN 0 THEN 'LIKE'
-            WHEN 1 THEN 'LOVE'
-            WHEN 2 THEN 'HAHA'
-            WHEN 3 THEN 'WOW'
-            ELSE 'SAD'
-        END,
-        m.timestamp + (random() * 48 * interval '1 hour')
-    FROM 
-        message m
-        JOIN user_family_membership ufm ON m.family_id = ufm.family_id
-    WHERE 
-        random() < 0.2 -- 20% chance of reaction
-        AND ufm.user_id != m.sender_id; -- Don't react to your own message
+    -- Message views and reactions will be generated after the main block to avoid variable conflicts
     
     -- Print summary
-    RAISE NOTICE 'Generated % total messages across % threads', total_messages, thread_count;
+    RAISE NOTICE 'Generated % total messages across % threads using NEW message_family_link schema', total_messages, thread_count;
 END $$;
+
+-- Generate message views using the new link table structure
+-- This is done outside the main block to avoid variable name conflicts
+INSERT INTO message_view (message_id, user_id, viewed_at)
+SELECT 
+    mfl.message_id, 
+    ufm.user_id,
+    m.timestamp + (random() * 24 * interval '1 hour')
+FROM 
+    message_family_link mfl
+    JOIN message m ON mfl.message_id = m.id
+    JOIN user_family_membership ufm ON mfl.family_id = ufm.family_id
+WHERE 
+    random() < 0.7 -- 70% chance of being viewed
+    AND ufm.user_id != m.sender_id -- Don't view your own message
+ON CONFLICT (message_id, user_id) DO NOTHING; -- Handle duplicate views from multiple families
+
+-- Generate message reactions using the new link table structure
+INSERT INTO message_reaction (message_id, user_id, reaction_type, created_at)
+SELECT 
+    mfl.message_id, 
+    ufm.user_id,
+    CASE floor(random() * 5)
+        WHEN 0 THEN 'LIKE'
+        WHEN 1 THEN 'LOVE'
+        WHEN 2 THEN 'HAHA'
+        WHEN 3 THEN 'WOW'
+        ELSE 'SAD'
+    END,
+    m.timestamp + (random() * 48 * interval '1 hour')
+FROM 
+    message_family_link mfl
+    JOIN message m ON mfl.message_id = m.id
+    JOIN user_family_membership ufm ON mfl.family_id = ufm.family_id
+WHERE 
+    random() < 0.2 -- 20% chance of reaction
+    AND ufm.user_id != m.sender_id -- Don't react to your own message
+ON CONFLICT (message_id, user_id, reaction_type, target_type) DO NOTHING; -- Handle duplicate reactions
 
 -- Add message comments (10% of messages get comments)
 DO $$
@@ -327,10 +380,11 @@ DECLARE
         'Best message of the day'
     ];
 BEGIN
-    -- Loop through messages that will have comments
+    -- Loop through messages that will have comments (using new link table structure)
     FOR message_rec IN (
-        SELECT m.id, m.family_id, m.timestamp
+        SELECT DISTINCT m.id, m.timestamp
         FROM message m
+        JOIN message_family_link mfl ON m.id = mfl.message_id
         WHERE random() < 0.1 -- 10% of messages get comments
     ) LOOP
         -- 1-3 comments per message
@@ -338,17 +392,18 @@ BEGIN
         
         -- Add comments
         FOR i IN 1..comment_count LOOP
-            -- Get a random user from the same family (not the message sender)
+            -- Get a random user from any family that can see this message
             SELECT u.id
             INTO user_rec
             FROM app_user u
             JOIN user_family_membership ufm ON u.id = ufm.user_id
-            WHERE ufm.family_id = message_rec.family_id
+            JOIN message_family_link mfl ON ufm.family_id = mfl.family_id
+            WHERE mfl.message_id = message_rec.id
             ORDER BY random()
             LIMIT 1;
             
-            -- Insert comment
-            INSERT INTO message_comment (message_id, user_id, content, created_at)
+            -- Insert comment (using parent_message_id and timestamp columns)
+            INSERT INTO message_comment (parent_message_id, user_id, content, timestamp)
             VALUES (
                 message_rec.id,
                 user_rec.id,

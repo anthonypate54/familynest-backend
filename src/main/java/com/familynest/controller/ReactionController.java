@@ -3,6 +3,7 @@ package com.familynest.controller;
 import com.familynest.model.MessageReaction;
 import com.familynest.model.User;
 import com.familynest.service.EngagementService;
+import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.repository.UserRepository;
 import com.familynest.auth.JwtUtil;
 import com.familynest.auth.AuthUtil;
@@ -42,6 +43,9 @@ public class ReactionController {
 
     @Autowired
     private AuthUtil authUtil;
+
+    @Autowired
+    private WebSocketBroadcastService webSocketBroadcastService;
 
     /*
      * Note on Message vs Comment Reactions:
@@ -205,28 +209,51 @@ public class ReactionController {
             String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, messageId, userId);
 
+            String action;
             if (!existingReaction.isEmpty()) {
                 // Remove like
                 jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'", 
                     messageId, userId);
                     
-                    int likeCount = jdbcTemplate.queryForObject(
-                        "UPDATE message SET like_count = like_count - 1 WHERE id = ? RETURNING like_count", 
-                        Integer.class, 
-                        messageId);    
-                    return ResponseEntity.ok(Map.of("action", "removed", "type", "like", "like_count", likeCount));
+                jdbcTemplate.update("UPDATE message SET like_count = like_count - 1 WHERE id = ?", messageId);
+                action = "removed";
             } else {
                 // Add like
                 jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LIKE', 'MESSAGE')", 
                     messageId, userId);
 
-                    int likeCount = jdbcTemplate.queryForObject(
-                        "UPDATE message SET like_count = like_count + 1 WHERE id = ? RETURNING like_count", 
-                        Integer.class, 
-                        messageId
-                    );    
-                return ResponseEntity.ok(Map.of("action", "added", "type", "like", "like_count", likeCount));
+                jdbcTemplate.update("UPDATE message SET like_count = like_count + 1 WHERE id = ?", messageId);
+                action = "added";
             }
+
+            // Get the complete reaction data using the same query pattern as getMessages
+            String reactionDataSql = """
+                SELECT 
+                    m.id, m.like_count, m.love_count,
+                    CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
+                    CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
+                FROM message m
+                LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
+                WHERE m.id = ?
+                """;
+            
+            Map<String, Object> reactionData = jdbcTemplate.queryForMap(reactionDataSql, userId, userId, messageId);
+
+            // Get families where this message is visible
+            String familiesSql = "SELECT family_id FROM message_family_link WHERE message_id = ?";
+            List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, messageId);
+
+            // Broadcast reaction update to all families
+            for (Map<String, Object> family : families) {
+                Long familyId = ((Number) family.get("family_id")).longValue();
+                reactionData.put("target_type", "MESSAGE");
+                reactionData.put("action", action);
+                reactionData.put("reaction_type", "LIKE");
+                webSocketBroadcastService.broadcastReaction(reactionData, messageId, familyId);
+            }
+
+            return ResponseEntity.ok(Map.of("action", action, "type", "like", "like_count", reactionData.get("like_count")));
         } catch (Exception e) {
             logger.error("Error toggling message like: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -252,25 +279,49 @@ public class ReactionController {
             String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, messageId, userId);
 
+            String action;
             if (!existingReaction.isEmpty()) {
                 // Remove love
                 jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'", 
                     messageId, userId);
-                int loveCount = jdbcTemplate.queryForObject(
-                    "UPDATE message SET love_count = love_count - 1 WHERE id = ? RETURNING love_count", 
-                    Integer.class, 
-                    messageId);
-                return ResponseEntity.ok(Map.of("action", "removed", "type", "love", "love_count", loveCount));
+                jdbcTemplate.update("UPDATE message SET love_count = love_count - 1 WHERE id = ?", messageId);
+                action = "removed";
             } else {
                 // Add love
                 jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LOVE', 'MESSAGE')", 
                     messageId, userId);
-                int loveCount = jdbcTemplate.queryForObject(
-                    "UPDATE message SET love_count = love_count + 1 WHERE id = ? RETURNING love_count", 
-                    Integer.class, 
-                    messageId);
-                return ResponseEntity.ok(Map.of("action", "added", "type", "love", "love_count", loveCount));
+                jdbcTemplate.update("UPDATE message SET love_count = love_count + 1 WHERE id = ?", messageId);
+                action = "added";
             }
+
+            // Get the complete reaction data using the same query pattern as getMessages
+            String reactionDataSql = """
+                SELECT 
+                    m.id, m.like_count, m.love_count,
+                    CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
+                    CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
+                FROM message m
+                LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
+                WHERE m.id = ?
+                """;
+            
+            Map<String, Object> reactionData = jdbcTemplate.queryForMap(reactionDataSql, userId, userId, messageId);
+
+            // Get families where this message is visible
+            String familiesSql = "SELECT family_id FROM message_family_link WHERE message_id = ?";
+            List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, messageId);
+
+            // Broadcast reaction update to all families
+            for (Map<String, Object> family : families) {
+                Long familyId = ((Number) family.get("family_id")).longValue();
+                reactionData.put("target_type", "MESSAGE");
+                reactionData.put("action", action);
+                reactionData.put("reaction_type", "LOVE");
+                webSocketBroadcastService.broadcastReaction(reactionData, messageId, familyId);
+            }
+
+            return ResponseEntity.ok(Map.of("action", action, "type", "love", "love_count", reactionData.get("love_count")));
         } catch (Exception e) {
             logger.error("Error toggling message love: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -292,8 +343,8 @@ public class ReactionController {
                        .body(Map.of("error", "User not authenticated"));
             }
 
-            // First check if comment exists
-            String commentCheckSql = "SELECT id FROM message_comment WHERE id = ?";
+            // First check if comment exists and get parent message ID
+            String commentCheckSql = "SELECT id, parent_message_id FROM message_comment WHERE id = ?";
             List<Map<String, Object>> commentData = jdbcTemplate.queryForList(commentCheckSql, commentId);
             logger.info("Checking comment {}: found {} results", commentId, commentData.size());
             
@@ -302,37 +353,61 @@ public class ReactionController {
                        .body(Map.of("error", "Comment not found"));
             }
 
+            Long parentMessageId = ((Number) commentData.get(0).get("parent_message_id")).longValue();
+
             // Check if like already exists
             String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
             logger.info("Checking existing reaction for comment {}: found {} results", commentId, existingReaction.size());
 
+            String action;
             if (!existingReaction.isEmpty()) {
                 // Remove like
                 jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'", 
                     commentId, userId);
                 logger.info("Removed like reaction for comment {}", commentId);
                     
-                int likeCount = jdbcTemplate.queryForObject(
-                    "UPDATE message_comment SET like_count = like_count - 1 WHERE id = ? RETURNING like_count", 
-                    Integer.class, 
-                    commentId);    
-                logger.info("Updated like count for comment {} to {}", commentId, likeCount);
-                return ResponseEntity.ok(Map.of("action", "removed", "type", "like", "like_count", likeCount));
+                jdbcTemplate.update("UPDATE message_comment SET like_count = like_count - 1 WHERE id = ?", commentId);
+                action = "removed";
             } else {
                 // Add like
                 jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LIKE', 'COMMENT')", 
                     commentId, userId);
                 logger.info("Added like reaction for comment {}", commentId);
 
-                int likeCount = jdbcTemplate.queryForObject(
-                    "UPDATE message_comment SET like_count = like_count + 1 WHERE id = ? RETURNING like_count", 
-                    Integer.class, 
-                    commentId
-                );    
-                logger.info("Updated like count for comment {} to {}", commentId, likeCount);
-                return ResponseEntity.ok(Map.of("action", "added", "type", "like", "like_count", likeCount));
+                jdbcTemplate.update("UPDATE message_comment SET like_count = like_count + 1 WHERE id = ?", commentId);
+                action = "added";
             }
+
+            // Get the complete comment reaction data using the same query pattern as getComments
+            String reactionDataSql = """
+                SELECT 
+                    mc.id, mc.parent_message_id, mc.like_count, mc.love_count,
+                    CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
+                    CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
+                FROM message_comment mc
+                LEFT JOIN message_reaction mr ON mc.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT'
+                LEFT JOIN message_reaction mr2 ON mc.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
+                WHERE mc.id = ?
+                """;
+            
+            Map<String, Object> reactionData = jdbcTemplate.queryForMap(reactionDataSql, userId, userId, commentId);
+
+            // Get families where the parent message is visible
+            String familiesSql = "SELECT family_id FROM message_family_link WHERE message_id = ?";
+            List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, parentMessageId);
+
+            // Broadcast reaction update to all families
+            for (Map<String, Object> family : families) {
+                Long familyId = ((Number) family.get("family_id")).longValue();
+                reactionData.put("target_type", "COMMENT");
+                reactionData.put("action", action);
+                reactionData.put("reaction_type", "LIKE");
+                webSocketBroadcastService.broadcastReaction(reactionData, commentId, familyId);
+            }
+
+            logger.info("Updated like count for comment {} to {}", commentId, reactionData.get("like_count"));
+            return ResponseEntity.ok(Map.of("action", action, "type", "like", "like_count", reactionData.get("like_count")));
         } catch (Exception e) {
             logger.error("Error toggling comment like: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -354,32 +429,66 @@ public class ReactionController {
                        .body(Map.of("error", "User not authenticated"));
             }
 
+            // Get parent message ID for the comment
+            String commentCheckSql = "SELECT parent_message_id FROM message_comment WHERE id = ?";
+            List<Map<String, Object>> commentData = jdbcTemplate.queryForList(commentCheckSql, commentId);
+            
+            if (commentData.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                       .body(Map.of("error", "Comment not found"));
+            }
+
+            Long parentMessageId = ((Number) commentData.get(0).get("parent_message_id")).longValue();
+
             // Check if love already exists
             String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
 
+            String action;
             if (!existingReaction.isEmpty()) {
                 // Remove love
                 jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'", 
                     commentId, userId);
                 
-                int loveCount = jdbcTemplate.queryForObject(
-                    "UPDATE message_comment SET love_count = love_count - 1 WHERE id = ? RETURNING love_count", 
-                    Integer.class, 
-                    commentId);    
-                return ResponseEntity.ok(Map.of("action", "removed", "type", "love", "love_count", loveCount));
+                jdbcTemplate.update("UPDATE message_comment SET love_count = love_count - 1 WHERE id = ?", commentId);
+                action = "removed";
             } else {
                 // Add love
                 jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LOVE', 'COMMENT')", 
                     commentId, userId);
 
-                int loveCount = jdbcTemplate.queryForObject(
-                    "UPDATE message_comment SET love_count = love_count + 1 WHERE id = ? RETURNING love_count", 
-                    Integer.class, 
-                    commentId
-                );    
-                return ResponseEntity.ok(Map.of("action", "added", "type", "love", "love_count", loveCount));
+                jdbcTemplate.update("UPDATE message_comment SET love_count = love_count + 1 WHERE id = ?", commentId);
+                action = "added";
             }
+
+            // Get the complete comment reaction data using the same query pattern as getComments
+            String reactionDataSql = """
+                SELECT 
+                    mc.id, mc.parent_message_id, mc.like_count, mc.love_count,
+                    CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
+                    CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
+                FROM message_comment mc
+                LEFT JOIN message_reaction mr ON mc.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT'
+                LEFT JOIN message_reaction mr2 ON mc.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
+                WHERE mc.id = ?
+                """;
+            
+            Map<String, Object> reactionData = jdbcTemplate.queryForMap(reactionDataSql, userId, userId, commentId);
+
+            // Get families where the parent message is visible
+            String familiesSql = "SELECT family_id FROM message_family_link WHERE message_id = ?";
+            List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, parentMessageId);
+
+            // Broadcast reaction update to all families
+            for (Map<String, Object> family : families) {
+                Long familyId = ((Number) family.get("family_id")).longValue();
+                reactionData.put("target_type", "COMMENT");
+                reactionData.put("action", action);
+                reactionData.put("reaction_type", "LOVE");
+                webSocketBroadcastService.broadcastReaction(reactionData, commentId, familyId);
+            }
+
+            return ResponseEntity.ok(Map.of("action", action, "type", "love", "love_count", reactionData.get("love_count")));
         } catch (Exception e) {
             logger.error("Error toggling comment love: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

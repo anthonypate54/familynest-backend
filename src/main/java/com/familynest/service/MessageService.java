@@ -19,18 +19,15 @@ public class MessageService {
     private JdbcTemplate jdbcTemplate;
 
     public Map<String, Object> getCommentById(Long commentId) {
-        String sql = "SELECT m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
+        String sql = "SELECT " +
+            "m.id, m.content, m.sender_username, m.sender_id, " +
             "m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
             "s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
-            "f.name as family_name, m.parent_message_id as parent_message_id, " +
-            "COALESCE(vc.count, 0) as view_count, " +
+            "m.parent_message_id as parent_message_id, " +
             "m.like_count, m.love_count, " +
             "(SELECT COUNT(*) FROM message_comment WHERE parent_message_id = m.parent_message_id) as comment_count " +
             "FROM message_comment m " +
             "LEFT JOIN app_user s ON m.sender_id = s.id " +
-            "LEFT JOIN family f ON m.family_id = f.id " +
-            "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
-            "  ON m.id = vc.message_id " +
             "WHERE m.id = ?";
         
         try {
@@ -42,7 +39,7 @@ public class MessageService {
     }
 
     public Map<String, Object> getMessageById(Long messageId) {
-        String sql = "SELECT m.id, m.content, m.sender_username, m.sender_id, m.family_id, " +
+        String sql = "SELECT m.id, m.content, m.sender_username, m.sender_id, mfl.family_id, " +
                      "m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
                      "s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                      "f.name as family_name, " +
@@ -50,11 +47,13 @@ public class MessageService {
                      "m.like_count, m.love_count, " +
                      "(SELECT COUNT(*) FROM message_comment WHERE parent_message_id = m.id) as comment_count " +
                      "FROM message m " +
+                     "LEFT JOIN message_family_link mfl ON m.id = mfl.message_id " +
+                     "LEFT JOIN family f ON mfl.family_id = f.id " +
                      "LEFT JOIN app_user s ON m.sender_id = s.id " +
-                     "LEFT JOIN family f ON m.family_id = f.id " +
                      "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
                      "  ON m.id = vc.message_id " +
-                     "WHERE m.id = ?";
+                     "WHERE m.id = ? " +
+                     "LIMIT 1";
         
         try {
             return jdbcTemplate.queryForMap(sql, messageId);
