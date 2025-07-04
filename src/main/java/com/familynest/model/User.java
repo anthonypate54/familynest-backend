@@ -11,6 +11,8 @@ import jakarta.persistence.OneToOne;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.FetchType;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -76,6 +78,30 @@ public class User {
     private String bio;
     
     private Boolean showDemographics = false;
+
+    // Subscription and trial fields
+    private String subscriptionStatus = "trial";
+    
+    private LocalDateTime trialStartDate;
+    
+    private LocalDateTime trialEndDate;
+    
+    private LocalDateTime subscriptionStartDate;
+    
+    private LocalDateTime subscriptionEndDate;
+    
+    private String paymentMethod;
+    
+    private String stripeCustomerId;
+    
+    private String stripeSubscriptionId;
+    
+    @Column(precision = 10, scale = 2)
+    private BigDecimal monthlyPrice = new BigDecimal("4.99");
+    
+    private LocalDateTime createdAt;
+    
+    private LocalDateTime updatedAt;
 
     // Getters and setters
     public Long getId() {
@@ -263,5 +289,111 @@ public class User {
 
     public void setShowDemographics(Boolean showDemographics) {
         this.showDemographics = showDemographics;
+    }
+
+    // Subscription and trial getters and setters
+    public String getSubscriptionStatus() {
+        return subscriptionStatus;
+    }
+
+    public void setSubscriptionStatus(String subscriptionStatus) {
+        this.subscriptionStatus = subscriptionStatus;
+    }
+
+    public LocalDateTime getTrialStartDate() {
+        return trialStartDate;
+    }
+
+    public void setTrialStartDate(LocalDateTime trialStartDate) {
+        this.trialStartDate = trialStartDate;
+    }
+
+    public LocalDateTime getTrialEndDate() {
+        return trialEndDate;
+    }
+
+    public void setTrialEndDate(LocalDateTime trialEndDate) {
+        this.trialEndDate = trialEndDate;
+    }
+
+    public LocalDateTime getSubscriptionStartDate() {
+        return subscriptionStartDate;
+    }
+
+    public void setSubscriptionStartDate(LocalDateTime subscriptionStartDate) {
+        this.subscriptionStartDate = subscriptionStartDate;
+    }
+
+    public LocalDateTime getSubscriptionEndDate() {
+        return subscriptionEndDate;
+    }
+
+    public void setSubscriptionEndDate(LocalDateTime subscriptionEndDate) {
+        this.subscriptionEndDate = subscriptionEndDate;
+    }
+
+    public String getPaymentMethod() {
+        return paymentMethod;
+    }
+
+    public void setPaymentMethod(String paymentMethod) {
+        this.paymentMethod = paymentMethod;
+    }
+
+    public String getStripeCustomerId() {
+        return stripeCustomerId;
+    }
+
+    public void setStripeCustomerId(String stripeCustomerId) {
+        this.stripeCustomerId = stripeCustomerId;
+    }
+
+    public String getStripeSubscriptionId() {
+        return stripeSubscriptionId;
+    }
+
+    public void setStripeSubscriptionId(String stripeSubscriptionId) {
+        this.stripeSubscriptionId = stripeSubscriptionId;
+    }
+
+    public BigDecimal getMonthlyPrice() {
+        return monthlyPrice;
+    }
+
+    public void setMonthlyPrice(BigDecimal monthlyPrice) {
+        this.monthlyPrice = monthlyPrice;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    // Helper methods for subscription logic
+    public boolean isInTrial() {
+        return "trial".equals(subscriptionStatus) && 
+               trialEndDate != null && 
+               trialEndDate.isAfter(LocalDateTime.now());
+    }
+
+    public boolean hasActiveSubscription() {
+        return "active".equals(subscriptionStatus) ||
+               ("trial".equals(subscriptionStatus) && isInTrial());
+    }
+
+    public long getDaysLeftInTrial() {
+        if (trialEndDate == null) return 0;
+        return java.time.Duration.between(LocalDateTime.now(), trialEndDate).toDays();
     }
 }

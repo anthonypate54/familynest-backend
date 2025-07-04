@@ -30,4 +30,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Also make this case-insensitive
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.email) = LOWER(:email)")
     boolean existsByEmail(@Param("email") String email);
+    
+    // Trial expiry methods
+    @Query("SELECT u FROM User u WHERE u.subscriptionStatus = 'trial' AND u.trialEndDate < CURRENT_TIMESTAMP")
+    List<User> findExpiredTrials();
+    
+    @Query("SELECT u FROM User u WHERE u.subscriptionStatus = 'trial' AND u.trialEndDate BETWEEN CURRENT_TIMESTAMP AND CURRENT_TIMESTAMP + 1 HOUR")
+    List<User> findTrialsExpiringSoon();
 }
