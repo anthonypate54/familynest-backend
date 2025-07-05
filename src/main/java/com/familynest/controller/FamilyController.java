@@ -300,6 +300,7 @@ public class FamilyController {
                 memberMap.put("firstName", member.get("first_name"));
                 memberMap.put("lastName", member.get("last_name"));
                 memberMap.put("photo", member.get("photo"));
+                memberMap.put("familyId", familyId); // Add the missing familyId field
                 memberMap.put("familyName", member.get("family_name"));
                 memberMap.put("isOwner", member.get("is_owner"));
                 
@@ -617,6 +618,151 @@ public class FamilyController {
         } catch (Exception e) {
             logger.error("Error checking owned family: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "User does not own a family"));
+        }
+    }
+
+    /**
+     * Get complete family data for a user - families, members, and preferences in one call
+     * GET /api/families/complete-data
+     */
+    @GetMapping("/complete-data")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getCompleteFamilyData(
+            @RequestHeader("Authorization") String authHeader) {
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            logger.debug("Getting complete family data for user {} with backend processing", userId);
+
+            // Query 1: Get all families for the user
+            String familiesSql = "SELECT " +
+                    "f.id as family_id, f.name as family_name, f.created_by as owner_id, " +
+                    "(SELECT COUNT(*) FROM user_family_membership ufm WHERE ufm.family_id = f.id) as member_count, " +
+                    "ufm.role, ufm.is_active, " +
+                    "CASE WHEN f.created_by = ? THEN true ELSE false END as is_owner " +
+                    "FROM family f " +
+                    "JOIN user_family_membership ufm ON f.id = ufm.family_id " +
+                    "WHERE ufm.user_id = ?";
+
+            List<Map<String, Object>> familyResults = jdbcTemplate.queryForList(familiesSql, userId, userId);
+
+            // Query 2: Get all members across all families
+            String membersSql = "WITH user_families AS (" +
+                    "  SELECT ufm.family_id " +
+                    "  FROM user_family_membership ufm " +
+                    "  WHERE ufm.user_id = ? " +
+                    ") " +
+                    "SELECT DISTINCT " +
+                    "  u.id, u.username, u.first_name, u.last_name, u.photo, " +
+                    "  ufm.family_id, f.name as family_name, " +
+                    "  ufm.role as membership_role, ufm.joined_at, " +
+                    "  CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
+                    "  of.name as owned_family_name " +
+                    "FROM user_families uf " +
+                    "JOIN user_family_membership ufm ON ufm.family_id = uf.family_id " +
+                    "JOIN app_user u ON u.id = ufm.user_id " +
+                    "JOIN family f ON f.id = uf.family_id " +
+                    "LEFT JOIN family of ON of.created_by = u.id " +
+                    "ORDER BY f.name, u.first_name, u.last_name";
+
+            List<Map<String, Object>> memberResults = jdbcTemplate.queryForList(membersSql, userId);
+
+            // Query 3: Get family-level message preferences
+            String preferencesSql = "SELECT family_id, receive_messages FROM user_family_message_settings WHERE user_id = ?";
+            List<Map<String, Object>> familyPreferences = jdbcTemplate.queryForList(preferencesSql, userId);
+
+            // Query 4: Get member-specific message preferences
+            String memberPreferencesSql = "SELECT family_id, member_user_id, receive_messages " +
+                    "FROM user_member_message_settings WHERE user_id = ?";
+            List<Map<String, Object>> memberPreferences = jdbcTemplate.queryForList(memberPreferencesSql, userId);
+
+            // Build lookup maps for preferences (done once in backend)
+            Map<Long, Boolean> familyPrefsMap = new HashMap<>();
+            for (Map<String, Object> pref : familyPreferences) {
+                familyPrefsMap.put((Long) pref.get("family_id"), (Boolean) pref.get("receive_messages"));
+            }
+
+            Map<String, Boolean> memberPrefsMap = new HashMap<>();
+            for (Map<String, Object> pref : memberPreferences) {
+                String key = pref.get("family_id") + "_" + pref.get("member_user_id");
+                memberPrefsMap.put(key, (Boolean) pref.get("receive_messages"));
+            }
+
+            // Group members by family (done once in backend)
+            Map<Long, List<Map<String, Object>>> membersByFamily = new HashMap<>();
+            for (Map<String, Object> member : memberResults) {
+                Long familyId = (Long) member.get("family_id");
+                membersByFamily.computeIfAbsent(familyId, k -> new ArrayList<>()).add(member);
+            }
+
+            // Build final families with embedded members and preferences
+            List<Map<String, Object>> families = new ArrayList<>();
+            for (Map<String, Object> familyData : familyResults) {
+                Long familyId = (Long) familyData.get("family_id");
+                
+                // Build family object
+                Map<String, Object> family = new HashMap<>();
+                family.put("familyId", familyId);
+                family.put("familyName", familyData.get("family_name"));
+                family.put("memberCount", familyData.get("member_count"));
+                family.put("isOwner", familyData.get("is_owner"));
+                family.put("role", familyData.get("role"));
+                family.put("isActive", familyData.get("is_active"));
+                family.put("isMuted", !familyPrefsMap.getOrDefault(familyId, true));
+                family.put("receiveMessages", familyPrefsMap.getOrDefault(familyId, true));
+
+                // Add members with their preferences applied
+                List<Map<String, Object>> familyMembers = new ArrayList<>();
+                List<Map<String, Object>> rawMembers = membersByFamily.getOrDefault(familyId, new ArrayList<>());
+                
+                for (Map<String, Object> memberData : rawMembers) {
+                    Map<String, Object> member = new HashMap<>();
+                    member.put("id", memberData.get("id"));
+                    member.put("userId", memberData.get("id"));
+                    member.put("username", memberData.get("username"));
+                    member.put("firstName", memberData.get("first_name"));
+                    member.put("lastName", memberData.get("last_name"));
+                    member.put("photo", memberData.get("photo"));
+                    member.put("familyId", familyId);
+                    member.put("familyName", memberData.get("family_name"));
+                    member.put("role", memberData.get("membership_role"));
+                    member.put("joinedAt", memberData.get("joined_at"));
+                    member.put("isOwner", memberData.get("is_owner"));
+                    
+                    // Apply member preferences
+                    String prefKey = familyId + "_" + memberData.get("id");
+                    boolean receiveMessages = memberPrefsMap.getOrDefault(prefKey, true);
+                    member.put("isMuted", !receiveMessages);
+                    member.put("receiveMessages", receiveMessages);
+                    
+                    if ((Boolean) memberData.get("is_owner") && memberData.get("owned_family_name") != null) {
+                        member.put("ownedFamilyName", memberData.get("owned_family_name"));
+                    }
+                    
+                    familyMembers.add(member);
+                }
+                
+                family.put("members", familyMembers);
+                families.add(family);
+            }
+
+            // Build simple response - no raw data, just the final structure
+            Map<String, Object> response = new HashMap<>();
+            response.put("families", families);
+            response.put("userId", userId);
+
+            logger.debug("Returning processed family data for user {} - {} families with embedded members", 
+                    userId, families.size());
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error getting complete family data: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error getting family data: " + e.getMessage()));
         }
     }
 } 

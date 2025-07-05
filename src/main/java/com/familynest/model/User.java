@@ -102,6 +102,13 @@ public class User {
     private LocalDateTime createdAt;
     
     private LocalDateTime updatedAt;
+    
+    // Password reset fields
+    private String passwordResetToken;
+    
+    private LocalDateTime passwordResetTokenExpiresAt;
+    
+    private LocalDateTime passwordResetRequestedAt;
 
     // Getters and setters
     public Long getId() {
@@ -395,5 +402,43 @@ public class User {
     public long getDaysLeftInTrial() {
         if (trialEndDate == null) return 0;
         return java.time.Duration.between(LocalDateTime.now(), trialEndDate).toDays();
+    }
+    
+    // Password reset getters and setters
+    public String getPasswordResetToken() {
+        return passwordResetToken;
+    }
+
+    public void setPasswordResetToken(String passwordResetToken) {
+        this.passwordResetToken = passwordResetToken;
+    }
+
+    public LocalDateTime getPasswordResetTokenExpiresAt() {
+        return passwordResetTokenExpiresAt;
+    }
+
+    public void setPasswordResetTokenExpiresAt(LocalDateTime passwordResetTokenExpiresAt) {
+        this.passwordResetTokenExpiresAt = passwordResetTokenExpiresAt;
+    }
+
+    public LocalDateTime getPasswordResetRequestedAt() {
+        return passwordResetRequestedAt;
+    }
+
+    public void setPasswordResetRequestedAt(LocalDateTime passwordResetRequestedAt) {
+        this.passwordResetRequestedAt = passwordResetRequestedAt;
+    }
+    
+    // Helper methods for password reset
+    public boolean isPasswordResetTokenValid() {
+        return passwordResetToken != null && 
+               passwordResetTokenExpiresAt != null && 
+               passwordResetTokenExpiresAt.isAfter(LocalDateTime.now());
+    }
+    
+    public void clearPasswordResetToken() {
+        this.passwordResetToken = null;
+        this.passwordResetTokenExpiresAt = null;
+        this.passwordResetRequestedAt = null;
     }
 }

@@ -32,9 +32,16 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByEmail(@Param("email") String email);
     
     // Trial expiry methods
-    @Query("SELECT u FROM User u WHERE u.subscriptionStatus = 'trial' AND u.trialEndDate < CURRENT_TIMESTAMP")
+    @Query(value = "SELECT * FROM app_user WHERE subscription_status = 'trial' AND trial_end_date < CURRENT_TIMESTAMP", nativeQuery = true)
     List<User> findExpiredTrials();
     
-    @Query("SELECT u FROM User u WHERE u.subscriptionStatus = 'trial' AND u.trialEndDate BETWEEN CURRENT_TIMESTAMP AND CURRENT_TIMESTAMP + 1 HOUR")
+    @Query(value = "SELECT * FROM app_user WHERE subscription_status = 'trial' AND trial_end_date BETWEEN CURRENT_TIMESTAMP AND CURRENT_TIMESTAMP + INTERVAL '3 days'", nativeQuery = true)
     List<User> findTrialsExpiringSoon();
+    
+    // Password reset methods
+    @Query("SELECT u FROM User u WHERE u.passwordResetToken = :token AND u.passwordResetTokenExpiresAt > CURRENT_TIMESTAMP")
+    Optional<User> findByValidPasswordResetToken(@Param("token") String token);
+    
+    @Query("SELECT u FROM User u WHERE u.passwordResetToken IS NOT NULL AND u.passwordResetTokenExpiresAt < CURRENT_TIMESTAMP")
+    List<User> findUsersWithExpiredPasswordResetTokens();
 }

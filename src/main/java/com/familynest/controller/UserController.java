@@ -902,7 +902,6 @@ public class UserController {
             "  JOIN family f ON f.id = uf.family_id " +
             "  LEFT JOIN user_family_membership ufm ON ufm.user_id = u.id AND ufm.family_id = uf.family_id " +
             "  LEFT JOIN family of ON of.created_by = u.id " +
-            "  WHERE u.id != ? " + // Exclude the requesting user
             "  GROUP BY u.id, u.username, u.first_name, u.last_name, u.photo, of.id " +
             ") " +
                         "SELECT a.is_authorized, fm.* " +
@@ -912,7 +911,7 @@ public class UserController {
                         
             logger.debug("Executing optimized query for family members for user ID: {}", id);
             
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, tokenUserId, tokenUserId, id, id);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, tokenUserId, tokenUserId, id);
             
             // Check authorization from first row
             if (results.isEmpty() || !(boolean)results.get(0).get("is_authorized")) {
@@ -928,6 +927,7 @@ public class UserController {
                 memberMap.put("firstName", member.get("first_name"));
                 memberMap.put("lastName", member.get("last_name"));
                 memberMap.put("photo", member.get("photo"));
+                memberMap.put("familyId", member.get("family_id")); // Add the missing familyId field
                 memberMap.put("familyName", member.get("family_name"));
                 memberMap.put("isOwner", member.get("is_owner"));
                 
@@ -1361,10 +1361,4 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
             return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
         }
     }
-
-
- 
-
-
-
 }
