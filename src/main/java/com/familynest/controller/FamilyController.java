@@ -660,7 +660,7 @@ public class FamilyController {
                     "SELECT DISTINCT " +
                     "  u.id, u.username, u.first_name, u.last_name, u.photo, " +
                     "  ufm.family_id, f.name as family_name, " +
-                    "  ufm.role as membership_role, ufm.joined_at, " +
+                    "  ufm.role as membership_role, ufm.joined_at, ufm.is_new_member, " +
                     "  CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
                     "  of.name as owned_family_name " +
                     "FROM user_families uf " +
@@ -739,6 +739,7 @@ public class FamilyController {
                     boolean receiveMessages = memberPrefsMap.getOrDefault(prefKey, true);
                     member.put("isMuted", !receiveMessages);
                     member.put("receiveMessages", receiveMessages);
+                    member.put("isNewMember", memberData.get("is_new_member"));
                     
                     if ((Boolean) memberData.get("is_owner") && memberData.get("owned_family_name") != null) {
                         member.put("ownedFamilyName", memberData.get("owned_family_name"));
@@ -763,6 +764,76 @@ public class FamilyController {
         } catch (Exception e) {
             logger.error("Error getting complete family data: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error getting family data: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Send welcome message to family and mark member as no longer new
+     * POST /api/families/{familyId}/welcome/{memberId}
+     */
+    @PostMapping("/{familyId}/welcome/{memberId}")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> sendWelcomeMessage(
+            @PathVariable Long familyId,
+            @PathVariable Long memberId,
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, String> messageData) {
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            // Verify user is the family owner
+            String ownerCheckSql = "SELECT created_by FROM family WHERE id = ?";
+            List<Map<String, Object>> ownerResult = jdbcTemplate.queryForList(ownerCheckSql, familyId);
+            if (ownerResult.isEmpty() || !userId.equals(ownerResult.get(0).get("created_by"))) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Only family owner can send welcome messages"));
+            }
+
+            // Verify the member is actually in this family and is new
+            String memberCheckSql = "SELECT is_new_member FROM user_family_membership WHERE user_id = ? AND family_id = ?";
+            List<Map<String, Object>> memberResult = jdbcTemplate.queryForList(memberCheckSql, memberId, familyId);
+            if (memberResult.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Member not found in this family"));
+            }
+            if (!(Boolean) memberResult.get(0).get("is_new_member")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Member is not marked as new"));
+            }
+
+            String welcomeMessage = messageData.get("message");
+            if (welcomeMessage == null || welcomeMessage.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Welcome message is required"));
+            }
+
+            // Get member name for the message
+            String memberNameSql = "SELECT first_name, last_name FROM app_user WHERE id = ?";
+            List<Map<String, Object>> memberNameResult = jdbcTemplate.queryForList(memberNameSql, memberId);
+            String memberName = memberNameResult.isEmpty() ? "New Member" : 
+                (memberNameResult.get(0).get("first_name") + " " + memberNameResult.get(0).get("last_name")).trim();
+
+            // Create the welcome message as a family announcement
+            String insertMessageSql = "INSERT INTO message (user_id, family_id, content, message_type, created_at) VALUES (?, ?, ?, 'WELCOME', NOW())";
+            String finalMessage = welcomeMessage + " Welcome to the family, " + memberName + "! 🎉";
+            jdbcTemplate.update(insertMessageSql, userId, familyId, finalMessage);
+
+            // Mark member as no longer new
+            String updateMemberSql = "UPDATE user_family_membership SET is_new_member = false WHERE user_id = ? AND family_id = ?";
+            jdbcTemplate.update(updateMemberSql, memberId, familyId);
+
+            logger.debug("Welcome message sent for member {} in family {} by owner {}", memberId, familyId, userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Welcome message sent successfully");
+            response.put("familyId", familyId);
+            response.put("memberId", memberId);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error sending welcome message: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error sending welcome message: " + e.getMessage()));
         }
     }
 } 
