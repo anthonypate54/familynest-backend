@@ -42,12 +42,9 @@ import com.familynest.model.UserFamilyMembership;
 import com.familynest.repository.UserFamilyMembershipRepository;
 import com.familynest.repository.UserFamilyMessageSettingsRepository;
 import java.time.LocalDate;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -55,6 +52,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -189,7 +190,7 @@ public class UserController {
             String sql = "WITH user_data AS (" +
                         "  SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.role, " +
                         "         u.photo, u.phone_number, u.address, u.city, " +
-                        "         u.state, u.zip_code, u.country, u.birth_date, u.bio, u.show_demographics " +
+                        "         u.state, u.zip_code, u.country, u.birth_date, u.bio, u.show_demographics, u.onboarding_state " +
                         "  FROM app_user u WHERE u.id = ? " +
                         "), " +
                         "primary_family AS (" +
@@ -244,6 +245,7 @@ public class UserController {
             sanitizedUser.put("birthDate", userData.get("birth_date"));
             sanitizedUser.put("bio", userData.get("bio"));
             sanitizedUser.put("showDemographics", userData.get("show_demographics"));
+            sanitizedUser.put("onboardingState", userData.get("onboarding_state"));
             
             // Add family data if present
             if (userData.get("family_id") != null) {
@@ -999,7 +1001,7 @@ public class UserController {
             
             // Use a single optimized SQL query that returns everything in one go
             String sql = "WITH user_data AS (" +
-                        "  SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.role, u.photo " +
+                        "  SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.role, u.photo, u.onboarding_state " +
                         "  FROM app_user u WHERE u.id = ? " +
                         "), " +
                         "membership_data AS (" +
@@ -1036,8 +1038,9 @@ public class UserController {
             response.put("role", userData.get("role") != null ? userData.get("role") : "USER");
             response.put("photo", userData.get("photo"));
             response.put("familyId", userData.get("family_id"));
+            response.put("onboardingState", userData.get("onboarding_state"));
             
-            logger.debug("Returning current user data from single query: {}", response);
+            logger.debug("***Returning current user data from single query: {}", response);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error retrieving current user: {}", e.getMessage(), e);
@@ -1201,10 +1204,19 @@ public class UserController {
                 String birthDateStr = (String) profileData.get("birthDate");
                 if (birthDateStr != null && !birthDateStr.isEmpty()) {
                     try {
-                        LocalDate birthDate = LocalDate.parse(birthDateStr);
+                        LocalDate birthDate;
+                        // Try different date formats
+                        if (birthDateStr.contains("/")) {
+                            // Handle MM/dd/yyyy format
+                            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy");
+                            birthDate = LocalDate.parse(birthDateStr, formatter);
+                        } else {
+                            // Handle yyyy-MM-dd format (ISO)
+                            birthDate = LocalDate.parse(birthDateStr);
+                        }
                         user.setBirthDate(birthDate);
-                    } catch (Exception e) {
-                        logger.error("Error parsing birth date: {}", e.getMessage());
+                    } catch (DateTimeParseException e) {
+                        logger.error("Error parsing birth date '{}': {}", birthDateStr, e.getMessage());
                         // Continue without updating birth date
                     }
                 }

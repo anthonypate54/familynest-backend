@@ -474,4 +474,84 @@ public class InvitationController {
             return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error getting families: " + e.getMessage())));
         }
     }
+
+    /**
+     * Get sent invitations by the current user, grouped by family
+     * GET /api/invitations/sent
+     */
+    @GetMapping("/sent")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getSentInvitations(@RequestHeader(value = "Authorization", required = true) String authHeader) {
+        logger.debug("Getting sent invitations for current user");
+        try {
+            if (authHeader == null || authHeader.trim().isEmpty()) {
+                return ResponseEntity.status(403).body(Map.of("error", "Missing authorization header"));
+            }
+
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(403).body(Map.of("error", "Unauthorized access"));
+            }
+
+            // Get all invitations sent by the current user
+            String sql = "SELECT i.id, i.family_id, i.email, i.status, i.created_at, i.expires_at, " +
+                        "       f.name as family_name " +
+                        "FROM invitation i " +
+                        "LEFT JOIN family f ON i.family_id = f.id " +
+                        "WHERE i.sender_id = ? " +
+                        "ORDER BY i.created_at DESC";
+            
+            logger.info("🔍 SENT INVITATIONS DEBUG: Executing query for user ID: {}", userId);
+            logger.info("🔍 SENT INVITATIONS DEBUG: SQL = {}", sql);
+            
+            // First, let's do a direct count to see what we expect
+            String countSql = "SELECT COUNT(*) FROM invitation WHERE sender_id = ? AND status = 'PENDING'";
+            Integer expectedPendingCount = jdbcTemplate.queryForObject(countSql, Integer.class, userId);
+            logger.info("🔍 SENT INVITATIONS DEBUG: Expected PENDING count from direct query: {}", expectedPendingCount);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId);
+            
+            logger.info("🔍 SENT INVITATIONS DEBUG: Found {} raw database records", results.size());
+            
+            // Log each raw record for debugging
+            for (int i = 0; i < results.size(); i++) {
+                Map<String, Object> record = results.get(i);
+                logger.info("🔍 SENT INVITATIONS DEBUG: Record {}: id={}, family_id={}, email={}, status={}, family_name={}", 
+                    i, record.get("id"), record.get("family_id"), record.get("email"), 
+                    record.get("status"), record.get("family_name"));
+            }
+            
+            // Transform results into the response format
+            List<Map<String, Object>> invitations = results.stream().map(inv -> {
+                Map<String, Object> invMap = new HashMap<>();
+                invMap.put("id", inv.get("id"));
+                invMap.put("familyId", inv.get("family_id"));
+                invMap.put("email", inv.get("email"));
+                invMap.put("status", inv.get("status"));
+                invMap.put("createdAt", inv.get("created_at").toString());
+                invMap.put("expiresAt", inv.get("expires_at").toString());
+                invMap.put("familyName", inv.get("family_name"));
+                return invMap;
+            }).collect(Collectors.toList());
+            
+            logger.info("🔍 SENT INVITATIONS DEBUG: Returning {} sent invitations for user ID: {}", invitations.size(), userId);
+            
+            // Count pending invitations by family for debug
+            Map<Object, Long> pendingByFamily = invitations.stream()
+                .filter(inv -> "PENDING".equals(inv.get("status")))
+                .collect(Collectors.groupingBy(inv -> inv.get("familyId"), Collectors.counting()));
+            
+            logger.info("🔍 SENT INVITATIONS DEBUG: Pending invitations by family: {}", pendingByFamily);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("invitations", invitations);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error retrieving sent invitations: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Error retrieving sent invitations: " + e.getMessage()));
+        }
+    }
 }

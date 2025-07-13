@@ -778,6 +778,7 @@ public class FamilyController {
             @PathVariable Long memberId,
             @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, String> messageData) {
+        logger.debug("Sending welcome message to member {} in family {}", memberId, familyId);
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -786,54 +787,515 @@ public class FamilyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
             }
 
-            // Verify user is the family owner
-            String ownerCheckSql = "SELECT created_by FROM family WHERE id = ?";
-            List<Map<String, Object>> ownerResult = jdbcTemplate.queryForList(ownerCheckSql, familyId);
-            if (ownerResult.isEmpty() || !userId.equals(ownerResult.get(0).get("created_by"))) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Only family owner can send welcome messages"));
+            // Verify user is admin of this family
+            boolean isAdmin = false;
+            Family family = familyRepository.findById(familyId).orElse(null);
+            if (family != null && family.getCreatedBy() != null && family.getCreatedBy().getId().equals(userId)) {
+                isAdmin = true;
+            } else {
+                Optional<UserFamilyMembership> membership = userFamilyMembershipRepository.findByUserIdAndFamilyId(userId, familyId);
+                isAdmin = membership.isPresent() && "ADMIN".equals(membership.get().getRole());
             }
 
-            // Verify the member is actually in this family and is new
-            String memberCheckSql = "SELECT is_new_member FROM user_family_membership WHERE user_id = ? AND family_id = ?";
-            List<Map<String, Object>> memberResult = jdbcTemplate.queryForList(memberCheckSql, memberId, familyId);
-            if (memberResult.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Member not found in this family"));
+            if (!isAdmin) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized to send welcome messages"));
             }
-            if (!(Boolean) memberResult.get(0).get("is_new_member")) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Member is not marked as new"));
-            }
-
-            String welcomeMessage = messageData.get("message");
-            if (welcomeMessage == null || welcomeMessage.trim().isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Welcome message is required"));
-            }
-
-            // Get member name for the message
-            String memberNameSql = "SELECT first_name, last_name FROM app_user WHERE id = ?";
-            List<Map<String, Object>> memberNameResult = jdbcTemplate.queryForList(memberNameSql, memberId);
-            String memberName = memberNameResult.isEmpty() ? "New Member" : 
-                (memberNameResult.get(0).get("first_name") + " " + memberNameResult.get(0).get("last_name")).trim();
-
-            // Create the welcome message as a family announcement
-            String insertMessageSql = "INSERT INTO message (user_id, family_id, content, message_type, created_at) VALUES (?, ?, ?, 'WELCOME', NOW())";
-            String finalMessage = welcomeMessage + " Welcome to the family, " + memberName + "! 🎉";
-            jdbcTemplate.update(insertMessageSql, userId, familyId, finalMessage);
 
             // Mark member as no longer new
             String updateMemberSql = "UPDATE user_family_membership SET is_new_member = false WHERE user_id = ? AND family_id = ?";
-            jdbcTemplate.update(updateMemberSql, memberId, familyId);
-
-            logger.debug("Welcome message sent for member {} in family {} by owner {}", memberId, familyId, userId);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Welcome message sent successfully");
-            response.put("familyId", familyId);
-            response.put("memberId", memberId);
+            int updated = jdbcTemplate.update(updateMemberSql, memberId, familyId);
             
-            return ResponseEntity.ok(response);
+            if (updated == 0) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Member not found in family"));
+            }
+
+            return ResponseEntity.ok(Map.of("message", "Welcome message sent and member status updated"));
         } catch (Exception e) {
             logger.error("Error sending welcome message: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(Map.of("error", "Error sending welcome message: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Get upcoming birthdays in the next 7 days for a family
+     * GET /api/families/{familyId}/birthdays
+     */
+    @GetMapping("/{familyId}/birthdays")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getUpcomingBirthdays(
+            @PathVariable Long familyId,
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Getting upcoming birthdays for family ID: {}", familyId);
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Check if user is a member of this family
+            String membershipSql = "SELECT COUNT(*) FROM user_family_membership WHERE user_id = ? AND family_id = ?";
+            Integer memberCount = jdbcTemplate.queryForObject(membershipSql, Integer.class, userId, familyId);
+            
+            if (memberCount == null || memberCount == 0) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Complex SQL query to find birthdays in the next 7 days, handling year rollover
+            String sql = "WITH upcoming_dates AS (" +
+                        "  SELECT " +
+                        "    CURRENT_DATE + generate_series(0, 6) AS target_date " +
+                        "), " +
+                        "birthday_matches AS (" +
+                        "  SELECT DISTINCT " +
+                        "    u.id, u.first_name, u.last_name, u.birth_date, u.photo, " +
+                        "    ud.target_date, " +
+                        "    CASE " +
+                        "      WHEN ud.target_date = CURRENT_DATE THEN 0 " +
+                        "      ELSE (ud.target_date - CURRENT_DATE) " +
+                        "    END AS days_until " +
+                        "  FROM user_family_membership ufm " +
+                        "  JOIN app_user u ON u.id = ufm.user_id " +
+                        "  CROSS JOIN upcoming_dates ud " +
+                        "  WHERE ufm.family_id = ? " +
+                        "    AND u.birth_date IS NOT NULL " +
+                        "    AND EXTRACT(MONTH FROM u.birth_date) = EXTRACT(MONTH FROM ud.target_date) " +
+                        "    AND EXTRACT(DAY FROM u.birth_date) = EXTRACT(DAY FROM ud.target_date) " +
+                        ") " +
+                        "SELECT * FROM birthday_matches " +
+                        "ORDER BY days_until ASC, first_name ASC";
+
+            logger.debug("Executing birthday query for family ID: {}", familyId);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, familyId);
+            
+            // Transform results into response format
+            List<Map<String, Object>> birthdays = results.stream().map(birthday -> {
+                Map<String, Object> birthdayMap = new HashMap<>();
+                birthdayMap.put("id", birthday.get("id"));
+                birthdayMap.put("firstName", birthday.get("first_name"));
+                birthdayMap.put("lastName", birthday.get("last_name"));
+                birthdayMap.put("birthDate", birthday.get("birth_date").toString());
+                birthdayMap.put("photo", birthday.get("photo"));
+                birthdayMap.put("targetDate", birthday.get("target_date").toString());
+                birthdayMap.put("daysUntil", birthday.get("days_until"));
+                
+                // Add a readable date description
+                int daysUntil = ((Number) birthday.get("days_until")).intValue();
+                String description;
+                if (daysUntil == 0) {
+                    description = "Today";
+                } else if (daysUntil == 1) {
+                    description = "Tomorrow";
+                } else {
+                    description = "In " + daysUntil + " days";
+                }
+                birthdayMap.put("description", description);
+                
+                return birthdayMap;
+            }).collect(Collectors.toList());
+            
+            logger.debug("Found {} upcoming birthdays for family {}", birthdays.size(), familyId);
+            return ResponseEntity.ok(birthdays);
+            
+        } catch (Exception e) {
+            logger.error("Error getting upcoming birthdays: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
+        }
+    }
+
+    /**
+     * Get weekly message activity for a family (past 7 days)
+     * GET /api/families/{familyId}/weekly-activity
+     */
+    @GetMapping("/{familyId}/weekly-activity")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getWeeklyActivity(
+            @PathVariable Long familyId,
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Getting weekly activity for family ID: {}", familyId);
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Check if user is a member of this family
+            String membershipSql = "SELECT COUNT(*) FROM user_family_membership WHERE user_id = ? AND family_id = ?";
+            Integer memberCount = jdbcTemplate.queryForObject(membershipSql, Integer.class, userId, familyId);
+            
+            if (memberCount == null || memberCount == 0) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Get message counts for the past 7 days
+            String sql = "WITH date_series AS (" +
+                        "  SELECT " +
+                        "    (CURRENT_DATE - generate_series(6, 0, -1)) AS message_date " +
+                        "), " +
+                        "family_members AS (" +
+                        "  SELECT user_id FROM user_family_membership WHERE family_id = ? " +
+                        "), " +
+                        "daily_counts AS (" +
+                        "  SELECT " +
+                        "    ds.message_date, " +
+                        "    COALESCE(COUNT(m.id), 0) as message_count " +
+                        "  FROM date_series ds " +
+                        "  LEFT JOIN message m ON DATE(m.timestamp) = ds.message_date " +
+                        "    AND m.sender_id IN (SELECT user_id FROM family_members) " +
+                        "  GROUP BY ds.message_date " +
+                        "  ORDER BY ds.message_date " +
+                        ") " +
+                        "SELECT " +
+                        "  message_date, " +
+                        "  message_count, " +
+                        "  EXTRACT(DOW FROM message_date) as day_of_week " +
+                        "FROM daily_counts " +
+                        "ORDER BY message_date";
+
+            logger.debug("Executing weekly activity query for family ID: {}", familyId);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, familyId);
+            
+            // Get total message count for this family
+            String totalSql = "SELECT COUNT(*) as total_messages " +
+                             "FROM message m " +
+                             "WHERE m.sender_id IN (SELECT user_id FROM user_family_membership WHERE family_id = ?)";
+            
+            Integer totalMessages = jdbcTemplate.queryForObject(totalSql, Integer.class, familyId);
+            
+            // Transform results into response format
+            List<Map<String, Object>> dailyActivity = results.stream().map(day -> {
+                Map<String, Object> dayMap = new HashMap<>();
+                dayMap.put("date", day.get("message_date").toString());
+                dayMap.put("messageCount", day.get("message_count"));
+                dayMap.put("dayOfWeek", day.get("day_of_week"));
+                
+                // Add day label (M, T, W, T, F, S, S)
+                int dow = ((Number) day.get("day_of_week")).intValue();
+                String[] dayLabels = {"S", "M", "T", "W", "T", "F", "S"}; // 0=Sunday
+                dayMap.put("dayLabel", dayLabels[dow]);
+                
+                return dayMap;
+            }).collect(Collectors.toList());
+            
+            // Calculate weekly total
+            int weeklyTotal = dailyActivity.stream()
+                .mapToInt(day -> ((Number) day.get("messageCount")).intValue())
+                .sum();
+            
+            // Build response
+            Map<String, Object> response = new HashMap<>();
+            response.put("dailyActivity", dailyActivity);
+            response.put("weeklyTotal", weeklyTotal);
+            response.put("totalMessages", totalMessages != null ? totalMessages : 0);
+            response.put("familyId", familyId);
+            
+            logger.debug("Found weekly activity for family {}: {} messages this week, {} total", 
+                        familyId, weeklyTotal, totalMessages);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error getting weekly activity: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
+        }
+    }
+
+    /**
+     * Get monthly message activity for a family (past 30 days)
+     * GET /api/families/{familyId}/monthly-activity
+     */
+    @GetMapping("/{familyId}/monthly-activity")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getMonthlyActivity(
+            @PathVariable Long familyId,
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Getting monthly activity for family ID: {}", familyId);
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Check if user is a member of this family
+            String membershipSql = "SELECT COUNT(*) FROM user_family_membership WHERE user_id = ? AND family_id = ?";
+            Integer memberCount = jdbcTemplate.queryForObject(membershipSql, Integer.class, userId, familyId);
+            
+            if (memberCount == null || memberCount == 0) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Get message counts for the past 30 days
+            String sql = "WITH date_series AS (" +
+                        "  SELECT " +
+                        "    (CURRENT_DATE - generate_series(29, 0, -1)) AS message_date " +
+                        "), " +
+                        "family_members AS (" +
+                        "  SELECT user_id FROM user_family_membership WHERE family_id = ? " +
+                        "), " +
+                        "daily_counts AS (" +
+                        "  SELECT " +
+                        "    ds.message_date, " +
+                        "    COALESCE(COUNT(m.id), 0) as message_count " +
+                        "  FROM date_series ds " +
+                        "  LEFT JOIN message m ON DATE(m.timestamp) = ds.message_date " +
+                        "    AND m.sender_id IN (SELECT user_id FROM family_members) " +
+                        "  GROUP BY ds.message_date " +
+                        "  ORDER BY ds.message_date " +
+                        ") " +
+                        "SELECT " +
+                        "  message_date, " +
+                        "  message_count, " +
+                        "  EXTRACT(DAY FROM message_date) as day_of_month " +
+                        "FROM daily_counts " +
+                        "ORDER BY message_date";
+
+            logger.debug("Executing monthly activity query for family ID: {}", familyId);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, familyId);
+            
+            // Get total message count for this family
+            String totalSql = "SELECT COUNT(*) as total_messages " +
+                             "FROM message m " +
+                             "WHERE m.sender_id IN (SELECT user_id FROM user_family_membership WHERE family_id = ?)";
+            
+            Integer totalMessages = jdbcTemplate.queryForObject(totalSql, Integer.class, familyId);
+            
+            // Transform results into response format
+            List<Map<String, Object>> dailyActivity = results.stream().map(day -> {
+                Map<String, Object> dayMap = new HashMap<>();
+                dayMap.put("date", day.get("message_date").toString());
+                dayMap.put("messageCount", day.get("message_count"));
+                dayMap.put("dayOfMonth", day.get("day_of_month"));
+                
+                // Add day label (just the day number for monthly view)
+                int dayOfMonth = ((Number) day.get("day_of_month")).intValue();
+                dayMap.put("dayLabel", String.valueOf(dayOfMonth));
+                
+                return dayMap;
+            }).collect(Collectors.toList());
+            
+            // Calculate monthly total
+            int monthlyTotal = dailyActivity.stream()
+                .mapToInt(day -> ((Number) day.get("messageCount")).intValue())
+                .sum();
+            
+            // Build response
+            Map<String, Object> response = new HashMap<>();
+            response.put("dailyActivity", dailyActivity);
+            response.put("monthlyTotal", monthlyTotal);
+            response.put("totalMessages", totalMessages != null ? totalMessages : 0);
+            response.put("familyId", familyId);
+            
+            logger.debug("Found monthly activity for family {}: {} messages this month, {} total", 
+                        familyId, monthlyTotal, totalMessages);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error getting monthly activity: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
+        }
+    }
+
+    /**
+     * Get yearly message activity for a family (past 12 months)
+     * GET /api/families/{familyId}/yearly-activity
+     */
+    @GetMapping("/{familyId}/yearly-activity")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getYearlyActivity(
+            @PathVariable Long familyId,
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Getting yearly activity for family ID: {}", familyId);
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Check if user is a member of this family
+            String membershipSql = "SELECT COUNT(*) FROM user_family_membership WHERE user_id = ? AND family_id = ?";
+            Integer memberCount = jdbcTemplate.queryForObject(membershipSql, Integer.class, userId, familyId);
+            
+            if (memberCount == null || memberCount == 0) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Get message counts for the past 12 months
+            String sql = "WITH month_series AS (" +
+                        "  SELECT " +
+                        "    DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month' * generate_series(11, 0, -1)) AS month_start " +
+                        "), " +
+                        "family_members AS (" +
+                        "  SELECT user_id FROM user_family_membership WHERE family_id = ? " +
+                        "), " +
+                        "monthly_counts AS (" +
+                        "  SELECT " +
+                        "    ms.month_start, " +
+                        "    COALESCE(COUNT(m.id), 0) as message_count " +
+                        "  FROM month_series ms " +
+                        "  LEFT JOIN message m ON DATE_TRUNC('month', m.timestamp) = ms.month_start " +
+                        "    AND m.sender_id IN (SELECT user_id FROM family_members) " +
+                        "  GROUP BY ms.month_start " +
+                        "  ORDER BY ms.month_start " +
+                        ") " +
+                        "SELECT " +
+                        "  month_start, " +
+                        "  message_count, " +
+                        "  EXTRACT(MONTH FROM month_start) as month_number " +
+                        "FROM monthly_counts " +
+                        "ORDER BY month_start";
+
+            logger.debug("Executing yearly activity query for family ID: {}", familyId);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, familyId);
+            
+            // Get total message count for this family
+            String totalSql = "SELECT COUNT(*) as total_messages " +
+                             "FROM message m " +
+                             "WHERE m.sender_id IN (SELECT user_id FROM user_family_membership WHERE family_id = ?)";
+            
+            Integer totalMessages = jdbcTemplate.queryForObject(totalSql, Integer.class, familyId);
+            
+            // Transform results into response format
+            List<Map<String, Object>> monthlyActivity = results.stream().map(month -> {
+                Map<String, Object> monthMap = new HashMap<>();
+                monthMap.put("date", month.get("month_start").toString());
+                monthMap.put("messageCount", month.get("message_count"));
+                monthMap.put("monthNumber", month.get("month_number"));
+                
+                // Add month label (abbreviated month names)
+                int monthNumber = ((Number) month.get("month_number")).intValue();
+                String[] monthLabels = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+                monthMap.put("monthLabel", monthLabels[monthNumber]);
+                
+                return monthMap;
+            }).collect(Collectors.toList());
+            
+            // Calculate yearly total
+            int yearlyTotal = monthlyActivity.stream()
+                .mapToInt(month -> ((Number) month.get("messageCount")).intValue())
+                .sum();
+            
+            // Build response
+            Map<String, Object> response = new HashMap<>();
+            response.put("monthlyActivity", monthlyActivity);
+            response.put("yearlyTotal", yearlyTotal);
+            response.put("totalMessages", totalMessages != null ? totalMessages : 0);
+            response.put("familyId", familyId);
+            
+            logger.debug("Found yearly activity for family {}: {} messages this year, {} total", 
+                        familyId, yearlyTotal, totalMessages);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error getting yearly activity: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
+        }
+    }
+
+    /**
+     * Get multi-year message activity for a family (past 5 years)
+     * GET /api/families/{familyId}/multi-year-activity
+     */
+    @GetMapping("/{familyId}/multi-year-activity")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getMultiYearActivity(
+            @PathVariable Long familyId,
+            @RequestHeader("Authorization") String authHeader) {
+        logger.debug("Getting multi-year activity for family ID: {}", familyId);
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Check if user is a member of this family
+            String membershipSql = "SELECT COUNT(*) FROM user_family_membership WHERE user_id = ? AND family_id = ?";
+            Integer memberCount = jdbcTemplate.queryForObject(membershipSql, Integer.class, userId, familyId);
+            
+            if (memberCount == null || memberCount == 0) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Get message counts for the past 5 years
+            String sql = "WITH year_series AS (" +
+                        "  SELECT " +
+                        "    EXTRACT(YEAR FROM CURRENT_DATE) - generate_series(4, 0, -1) AS year_value " +
+                        "), " +
+                        "family_members AS (" +
+                        "  SELECT user_id FROM user_family_membership WHERE family_id = ? " +
+                        "), " +
+                        "yearly_counts AS (" +
+                        "  SELECT " +
+                        "    ys.year_value, " +
+                        "    COALESCE(COUNT(m.id), 0) as message_count " +
+                        "  FROM year_series ys " +
+                        "  LEFT JOIN message m ON EXTRACT(YEAR FROM m.timestamp) = ys.year_value " +
+                        "    AND m.sender_id IN (SELECT user_id FROM family_members) " +
+                        "  GROUP BY ys.year_value " +
+                        "  ORDER BY ys.year_value " +
+                        ") " +
+                        "SELECT " +
+                        "  year_value, " +
+                        "  message_count " +
+                        "FROM yearly_counts " +
+                        "ORDER BY year_value";
+
+            logger.debug("Executing multi-year activity query for family ID: {}", familyId);
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, familyId);
+            
+            // Get total message count for this family
+            String totalSql = "SELECT COUNT(*) as total_messages " +
+                             "FROM message m " +
+                             "WHERE m.sender_id IN (SELECT user_id FROM user_family_membership WHERE family_id = ?)";
+            
+            Integer totalMessages = jdbcTemplate.queryForObject(totalSql, Integer.class, familyId);
+            
+            // Transform results into response format
+            List<Map<String, Object>> yearlyActivity = results.stream().map(year -> {
+                Map<String, Object> yearMap = new HashMap<>();
+                yearMap.put("date", year.get("year_value").toString());
+                yearMap.put("messageCount", year.get("message_count"));
+                yearMap.put("year", year.get("year_value"));
+                
+                // Add year label
+                String yearLabel = year.get("year_value").toString();
+                yearMap.put("yearLabel", yearLabel);
+                
+                return yearMap;
+            }).collect(Collectors.toList());
+            
+            // Calculate total for all years
+            int allYearsTotal = yearlyActivity.stream()
+                .mapToInt(year -> ((Number) year.get("messageCount")).intValue())
+                .sum();
+            
+            // Build response
+            Map<String, Object> response = new HashMap<>();
+            response.put("yearlyActivity", yearlyActivity);
+            response.put("allYearsTotal", allYearsTotal);
+            response.put("totalMessages", totalMessages != null ? totalMessages : 0);
+            response.put("familyId", familyId);
+            
+            logger.debug("Found multi-year activity for family {}: {} messages across years, {} total", 
+                        familyId, allYearsTotal, totalMessages);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error getting multi-year activity: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(null);
         }
     }
 } 

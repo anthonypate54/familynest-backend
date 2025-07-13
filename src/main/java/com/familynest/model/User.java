@@ -110,6 +110,10 @@ public class User {
     
     private LocalDateTime passwordResetRequestedAt;
 
+    // Onboarding state tracking using bitmap
+    // Bit 0 (1): Has messages, Bit 1 (2): Has DMs, Bit 2 (4): Has family membership, Bit 3 (8): Has pending invitations
+    private Integer onboardingState = 0;
+
     // Getters and setters
     public Long getId() {
         return id;
@@ -440,5 +444,14 @@ public class User {
         this.passwordResetToken = null;
         this.passwordResetTokenExpiresAt = null;
         this.passwordResetRequestedAt = null;
+    }
+    
+    // Onboarding state getters and setters
+    public Integer getOnboardingState() {
+        return onboardingState;
+    }
+
+    public void setOnboardingState(Integer onboardingState) {
+        this.onboardingState = onboardingState;
     }
 }
