@@ -12,13 +12,13 @@ public class WebSocketTestController {
 
     private static final Logger logger = LoggerFactory.getLogger(WebSocketTestController.class);
 
-    @MessageMapping("/test-ping")
+    @MessageMapping("/ping")
     @SendTo("/topic/pong")
     public WebSocketMessage handlePing(WebSocketMessage message) {
-        logger.info("Received test ping message: {}", message.getContent());
+        logger.info("Received ping message: {}", message.getContent());
         
-        WebSocketMessage response = new WebSocketMessage("pong", "Server received your test ping!");
-        logger.info("Sending test pong response");
+        WebSocketMessage response = new WebSocketMessage("pong", "Server received your ping!");
+        logger.info("Sending pong response");
         
         return response;
     }
