@@ -5,6 +5,7 @@ import com.familynest.auth.JwtUtil;
 import com.familynest.dto.DMMessagePayload;
 import com.familynest.service.MediaService;
 import com.familynest.service.WebSocketBroadcastService;
+import com.familynest.service.PushNotificationService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +50,9 @@ public class DMController {
 
     @Autowired
     private WebSocketBroadcastService webSocketBroadcastService;
+
+    @Autowired
+    private PushNotificationService pushNotificationService;
 
     /**
      * Get or create a conversation with another user
@@ -343,6 +347,15 @@ public class DMController {
             // Broadcast the raw database result directly
             logger.debug("Broadcasting DM message: {}", messageData);
             webSocketBroadcastService.broadcastDMMessage(messageData, recipientId);
+            
+            // Send push notification to recipient (background notification)
+            try {
+                String senderName = (String) userData.get("username");
+                pushNotificationService.sendDMNotification(newMessageId, recipientId, senderName, content);
+            } catch (Exception pushError) {
+                logger.error("Error sending DM push notification for message {}: {}", newMessageId, pushError.getMessage());
+                // Don't let push notification errors break the DM posting flow
+            }
             
       // Return the fully-formed message as the response
             return ResponseEntity.status(HttpStatus.CREATED)

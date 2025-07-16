@@ -11,6 +11,7 @@ import com.familynest.service.ThumbnailService; // Add ThumbnailService import
 import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
+import com.familynest.service.PushNotificationService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,6 +133,9 @@ public class UserController {
 
     @Autowired
     private WebSocketBroadcastService webSocketBroadcastService;
+
+    @Autowired
+    private PushNotificationService pushNotificationService;
 
     @GetMapping("/test")
     public ResponseEntity<String> testEndpoint(HttpServletRequest request) {
@@ -709,6 +713,15 @@ public class UserController {
                 for (Long targetFamilyId : targetFamilyIds) {
                     logger.debug("Broadcasting new message to family {}: {}", targetFamilyId, messageData);
                     webSocketBroadcastService.broadcastNewMessage(messageData, targetFamilyId);
+                    
+                    // Send push notifications to family members (background notifications)
+                    try {
+                        String senderName = (String) userData.get("username");
+                        pushNotificationService.sendFamilyMessageNotification(newMessageId, targetFamilyId, senderName, content);
+                    } catch (Exception pushError) {
+                        logger.error("Error sending push notification for message {}: {}", newMessageId, pushError.getMessage());
+                        // Don't let push notification errors break the message posting flow
+                    }
                 }
             } catch (Exception e) {
                 logger.error("Error broadcasting WebSocket message for messageId {}: {}", newMessageId, e.getMessage());
@@ -1379,6 +1392,44 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
         } catch (Exception e) {
             logger.error("Error retrieving invitations: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(List.of(Map.of("error", "Error retrieving invitations: " + e.getMessage())));
+        }
+    }
+
+    /**
+     * Register FCM token for push notifications
+     */
+    @PostMapping("/{userId}/fcm-token")
+    public ResponseEntity<Map<String, Object>> registerFcmToken(
+            @PathVariable Long userId,
+            @RequestBody Map<String, String> request) {
+        try {
+            String fcmToken = request.get("fcmToken");
+            if (fcmToken == null || fcmToken.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "FCM token is required"));
+            }
+
+            logger.debug("Registering FCM token for user {}: {}", userId, fcmToken);
+
+            // Update user's FCM token
+            String updateSql = "UPDATE app_user SET fcm_token = ? WHERE id = ?";
+            int rowsUpdated = jdbcTemplate.update(updateSql, fcmToken, userId);
+
+            if (rowsUpdated == 0) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "User not found"));
+            }
+
+            logger.debug("Successfully updated FCM token for user {}", userId);
+            return ResponseEntity.ok(Map.of(
+                "message", "FCM token registered successfully",
+                "userId", userId
+            ));
+
+        } catch (Exception e) {
+            logger.error("Error registering FCM token for user {}: {}", userId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to register FCM token: " + e.getMessage()));
         }
     }
 }

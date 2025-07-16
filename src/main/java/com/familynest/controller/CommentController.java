@@ -9,6 +9,7 @@ import com.familynest.service.ThumbnailService;
 import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
+import com.familynest.service.PushNotificationService;
 import com.familynest.model.Message;
 import java.sql.Timestamp;
 
@@ -79,6 +80,9 @@ public class CommentController {
 
     @Autowired
     private WebSocketBroadcastService webSocketBroadcastService;
+
+    @Autowired
+    private PushNotificationService pushNotificationService;
 
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
@@ -456,6 +460,18 @@ public class CommentController {
             } catch (Exception e) {
                 logger.error("Error broadcasting WebSocket comment for commentId {}: {}", newCommentId, e.getMessage());
                 // Continue processing - don't let WebSocket errors break comment posting
+            }
+
+            // Send push notification for comment (background notification)
+            try {
+                for (Map<String, Object> family : parentMessageFamilies) {
+                    Long targetFamilyId = ((Number) family.get("family_id")).longValue();
+                    String commenterName = (String) userData.get("username");
+                    pushNotificationService.sendCommentNotification(newCommentId, parentMessageId, targetFamilyId, commenterName, content);
+                }
+            } catch (Exception pushError) {
+                logger.error("Error sending comment push notification for comment {}: {}", newCommentId, pushError.getMessage());
+                // Don't let push notification errors break the comment posting flow
             }
 
             // Broadcast updated comment count for parent message (exclude comment poster)

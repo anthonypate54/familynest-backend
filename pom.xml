@@ -126,6 +126,13 @@
             <artifactId>flyway-core</artifactId>
         </dependency>
         
+        <!-- Firebase Admin SDK for push notifications -->
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>9.2.0</version>
+        </dependency>
+        
         <!-- Liquibase -->
         <dependency>
             <groupId>org.liquibase</groupId>

@@ -40,6 +40,9 @@ out/
 src/main/resources/application.properties
 src/main/*.sql
 
+### Firebase Credentials ###
+src/main/resources/firebase-service-account.json
+
 ### Uploads Directory ###
 uploads/
 testdb-uploads/
