@@ -501,27 +501,15 @@ public class InvitationController {
                         "LEFT JOIN family f ON i.family_id = f.id " +
                         "WHERE i.sender_id = ? " +
                         "ORDER BY i.created_at DESC";
-            
-            logger.info("🔍 SENT INVITATIONS DEBUG: Executing query for user ID: {}", userId);
-            logger.info("🔍 SENT INVITATIONS DEBUG: SQL = {}", sql);
-            
+                        
             // First, let's do a direct count to see what we expect
             String countSql = "SELECT COUNT(*) FROM invitation WHERE sender_id = ? AND status = 'PENDING'";
             Integer expectedPendingCount = jdbcTemplate.queryForObject(countSql, Integer.class, userId);
-            logger.info("🔍 SENT INVITATIONS DEBUG: Expected PENDING count from direct query: {}", expectedPendingCount);
             
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId);
             
-            logger.info("🔍 SENT INVITATIONS DEBUG: Found {} raw database records", results.size());
             
-            // Log each raw record for debugging
-            for (int i = 0; i < results.size(); i++) {
-                Map<String, Object> record = results.get(i);
-                logger.info("🔍 SENT INVITATIONS DEBUG: Record {}: id={}, family_id={}, email={}, status={}, family_name={}", 
-                    i, record.get("id"), record.get("family_id"), record.get("email"), 
-                    record.get("status"), record.get("family_name"));
-            }
-            
+       
             // Transform results into the response format
             List<Map<String, Object>> invitations = results.stream().map(inv -> {
                 Map<String, Object> invMap = new HashMap<>();
@@ -535,15 +523,13 @@ public class InvitationController {
                 return invMap;
             }).collect(Collectors.toList());
             
-            logger.info("🔍 SENT INVITATIONS DEBUG: Returning {} sent invitations for user ID: {}", invitations.size(), userId);
-            
+             
             // Count pending invitations by family for debug
             Map<Object, Long> pendingByFamily = invitations.stream()
                 .filter(inv -> "PENDING".equals(inv.get("status")))
                 .collect(Collectors.groupingBy(inv -> inv.get("familyId"), Collectors.counting()));
             
-            logger.info("🔍 SENT INVITATIONS DEBUG: Pending invitations by family: {}", pendingByFamily);
-            
+             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("invitations", invitations);

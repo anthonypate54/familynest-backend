@@ -1,12 +1,19 @@
 package com.familynest.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class WebSocketMessage {
     private String type;
     private String content;
     private Object data;
+    
+    @JsonProperty("timestamp")
+    @JsonDeserialize(using = TimestampDeserializer.class)
+    @JsonSerialize(using = TimestampSerializer.class)
     private Long timestamp;
 
     // Default constructor

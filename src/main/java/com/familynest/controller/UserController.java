@@ -1175,6 +1175,14 @@ public class UserController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "User not found"));
             }
             
+            // Update personal details
+            if (profileData.containsKey("firstName")) {
+                user.setFirstName((String) profileData.get("firstName"));
+            }
+            if (profileData.containsKey("lastName")) {
+                user.setLastName((String) profileData.get("lastName"));
+            }
+            
             // Update demographic fields
             if (profileData.containsKey("phoneNumber")) {
                 user.setPhoneNumber((String) profileData.get("phoneNumber"));
