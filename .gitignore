@@ -43,6 +43,9 @@ src/main/*.sql
 ### Firebase Credentials ###
 src/main/resources/firebase-service-account.json
 
+### Environment Variables ###
+.env
+
 ### Uploads Directory ###
 uploads/
 testdb-uploads/
