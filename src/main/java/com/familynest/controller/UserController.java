@@ -12,6 +12,7 @@ import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
+import com.familynest.util.ErrorCodes; // Add ErrorCodes import
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -136,6 +137,19 @@ public class UserController {
 
     @Autowired
     private PushNotificationService pushNotificationService;
+
+    /**
+     * Helper method to create consistent error responses with error codes and messages
+     */
+    private ResponseEntity<Map<String, Object>> createErrorResponse(ErrorCodes errorCode, String message) {
+        logger.debug("Creating error response - Code: {}, Message: {}", errorCode.getCode(), message);
+        Map<String, Object> errorResponse = Map.of(
+            "errorCode", errorCode.getCode(),
+            "message", message
+        );
+        logger.debug("Error response created: {}", errorResponse);
+        return ResponseEntity.badRequest().body(errorResponse);
+    }
 
     @GetMapping("/test")
     public ResponseEntity<String> testEndpoint(HttpServletRequest request) {
@@ -283,23 +297,23 @@ public class UserController {
             // Validate required fields
             if (userData.getUsername() == null || userData.getUsername().length() < 3) {
                 logger.debug("Username validation failed: {}", userData.getUsername());
-                return ResponseEntity.badRequest().body(Map.of("error", "Username must be at least 3 characters long"));
+                return createErrorResponse(ErrorCodes.USERNAME_TOO_SHORT, "Username must be at least 3 characters long");
             }
             if (userData.getEmail() == null || !userData.getEmail().contains("@")) {
                 logger.debug("Email validation failed: {}", userData.getEmail());
-                return ResponseEntity.badRequest().body(Map.of("error", "Valid email is required"));
+                return createErrorResponse(ErrorCodes.EMAIL_INVALID, "Valid email is required");
             }
             if (userData.getPassword() == null || userData.getPassword().length() < 6) {
                 logger.debug("Password validation failed: length less than 6");
-                return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least 6 characters long"));
+                return createErrorResponse(ErrorCodes.PASSWORD_TOO_SHORT, "Password must be at least 6 characters long");
             }
             if (userData.getFirstName() == null || userData.getFirstName().isEmpty()) {
                 logger.debug("First name validation failed: {}", userData.getFirstName());
-                return ResponseEntity.badRequest().body(Map.of("error", "First name is required"));
+                return createErrorResponse(ErrorCodes.FIRST_NAME_REQUIRED, "First name is required");
             }
             if (userData.getLastName() == null || userData.getLastName().isEmpty()) {
                 logger.debug("Last name validation failed: {}", userData.getLastName());
-                return ResponseEntity.badRequest().body(Map.of("error", "Last name is required"));
+                return createErrorResponse(ErrorCodes.LAST_NAME_REQUIRED, "Last name is required");
             }
 
             // Check if username already exists
@@ -307,7 +321,7 @@ public class UserController {
             User existingUsername = userRepository.findByUsername(userData.getUsername());
             if (existingUsername != null) {
                 logger.debug("Username already exists: {}", userData.getUsername());
-                return ResponseEntity.badRequest().body(Map.of("error", "Username already exists"));
+                return createErrorResponse(ErrorCodes.USERNAME_ALREADY_TAKEN, "Username already taken. Please choose a different username.");
             }
             
             // Check if email already exists
@@ -315,7 +329,7 @@ public class UserController {
             Optional<User> existingEmailOpt = userRepository.findByEmail(userData.getEmail());
             if (existingEmailOpt.isPresent()) {
                 logger.debug("Email already exists: {}", userData.getEmail());
-                return ResponseEntity.badRequest().body(Map.of("error", "Email already exists"));
+                return createErrorResponse(ErrorCodes.EMAIL_ALREADY_REGISTERED, "Email already registered. Please use a different email or try logging in.");
             } else {
                 logger.debug("Email is available: {}", userData.getEmail());
             }
