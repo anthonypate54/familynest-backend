@@ -18,7 +18,7 @@ import java.util.Map;
 public class LargeDatasetQueryTest {
 
     @Autowired
-    private LargeDatasetLoader datasetLoader;
+    private TestLargeDatasetLoader datasetLoader;
     
     @Autowired
     private JdbcTemplate jdbcTemplate;

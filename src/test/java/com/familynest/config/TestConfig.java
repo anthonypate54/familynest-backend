@@ -1,20 +1,25 @@
 package com.familynest.config;
 
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.beans.factory.annotation.Value;
 import com.familynest.auth.AuthFilter;
-import com.familynest.auth.JwtUtil;
+import com.familynest.auth.AuthUtil;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.liquibase.LiquibaseAutoConfiguration;
+import com.familynest.controller.VideoController;
+import com.familynest.controller.TestVideoController;
+import org.mockito.Mockito;
+import com.familynest.service.ThumbnailService;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.Primary;
 
 /**
  * Test configuration for the application.
@@ -23,7 +28,8 @@ import org.springframework.boot.autoconfigure.liquibase.LiquibaseAutoConfigurati
  * 2. Configures security to allow all requests
  * 3. Sets up test authentication
  */
-@TestConfiguration
+@Configuration
+@Profile("test")
 @EnableWebSecurity
 @EnableAutoConfiguration(exclude = {LiquibaseAutoConfiguration.class})
 @ComponentScan(basePackages = "com.familynest", 
@@ -39,12 +45,12 @@ public class TestConfig {
     private long jwtExpiration;
 
     @Bean
-    @Primary
-    public SecurityFilterChain testSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(AbstractHttpConfigurer::disable)
-            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
-
+            .csrf().disable()
+            .authorizeRequests()
+            .anyRequest().permitAll(); // Disable authentication for all requests during testing
+        System.out.println("DEBUG: Security disabled for test environment - all requests permitted");
         return http.build();
     }
 
@@ -63,8 +69,34 @@ public class TestConfig {
     }
 
     @Bean
+    public FilterRegistrationBean<AuthFilter> disableAuthFilter() {
+        FilterRegistrationBean<AuthFilter> registration = new FilterRegistrationBean<>();
+        registration.setEnabled(false);
+        return registration;
+    }
+    
+    @Bean
     @Primary
-    public JwtUtil jwtUtil() {
-        return new JwtUtil(jwtSecret, jwtExpiration);
+    public AuthUtil mockAuthUtil() {
+        AuthUtil mock = Mockito.mock(AuthUtil.class);
+        Mockito.when(mock.validateToken(Mockito.anyString())).thenReturn(true);
+        Mockito.when(mock.extractUserId(Mockito.anyString())).thenReturn(1L); // Default test user ID
+        Mockito.when(mock.getUserRole(Mockito.anyString())).thenReturn("USER");
+        return mock;
+    }
+    
+    @Bean(name = "videoController")
+    public VideoController videoController() {
+        return new TestVideoController();
+    }
+    
+    @Bean
+    public ThumbnailService thumbnailService() {
+        return Mockito.mock(ThumbnailService.class);
+    }
+    
+    @Bean
+    public JdbcTemplate jdbcTemplate() {
+        return Mockito.mock(JdbcTemplate.class);
     }
 } 

@@ -431,6 +431,8 @@ public class EngagementTestUtil {
         comment.setSenderId(user.getId());
         comment.setContent(content);
         comment.setCreatedAt(LocalDateTime.now().minusDays(messageIdx).minusHours(userIdx));
+        // Set family_id from the associated message's family
+        comment.setFamilyId(message.getFamilyId());
 
         if (parentCommentIdx != null) {
             comment.setParentCommentId(testComments.get(parentCommentIdx).getId());

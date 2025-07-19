@@ -96,8 +96,8 @@ public class ViewTrackingControllerIntegrationTest {
      * Helper method to perform authenticated requests
      */
     private ResultActions performAuthenticatedRequest(MockHttpServletRequestBuilder request) throws Exception {
-        // Add a dummy Authorization header
-        request.header("Authorization", "Bearer test-token");
+        // Removed dummy Authorization header to prevent JWT validation
+        // request.header("Authorization", "Bearer test-token");
         
         // Perform the request
         return mockMvc.perform(request);

@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets;
  * of the member message and family message preferences.
  */
 @Component
-public class LargeDatasetLoader {
+public class TestLargeDatasetLoader {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;

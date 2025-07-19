@@ -13,6 +13,7 @@ import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
 import com.familynest.util.ErrorCodes; // Add ErrorCodes import
+import com.familynest.service.EmailService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +63,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/users")
@@ -137,6 +139,9 @@ public class UserController {
 
     @Autowired
     private PushNotificationService pushNotificationService;
+
+    @Autowired
+    private EmailService emailService;
 
     /**
      * Helper method to create consistent error responses with error codes and messages
@@ -375,26 +380,26 @@ public class UserController {
 
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> loginUser(@RequestBody Map<String, String> loginData) {
-        logger.debug("Received login request for email: {}", loginData.get("email"));
+        logger.debug("Received login request for username: {}", loginData.get("username"));
         try {
-            String email = loginData.get("email");
+            String username = loginData.get("username");
             String password = loginData.get("password");
             
-            if (email == null || password == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Email and password are required"));
+            if (username == null || password == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Username and password are required"));
             }
             
-            // Convert email to lowercase for case-insensitive comparison
-            email = email.toLowerCase();
+            // Convert username to lowercase for case-insensitive comparison
+            username = username.toLowerCase();
             
             // First get the user with password to verify
-            String userSql = "SELECT id, email, username, password, role FROM app_user WHERE LOWER(email) = ?";
-            List<Map<String, Object>> userResults = jdbcTemplate.queryForList(userSql, email);
+            String userSql = "SELECT id, email, username, password, role FROM app_user WHERE LOWER(username) = ?";
+            List<Map<String, Object>> userResults = jdbcTemplate.queryForList(userSql, username);
             
             if (userResults.isEmpty()) {
-                logger.debug("User not found for email: {}", email);
+                logger.debug("User not found for username: {}", username);
                 return ResponseEntity.status(401)
-                    .body(Map.of("error", "Invalid email or password"));
+                    .body(Map.of("error", "Invalid username or password"));
             }
             
             // Get user data and verify password
@@ -404,13 +409,13 @@ public class UserController {
             String role = (String) userData.get("role");
             
             if (!authUtil.verifyPassword(password, hashedPassword)) {
-                logger.debug("Invalid password for email: {}", email);
+                logger.debug("Invalid password for username: {}", username);
                 return ResponseEntity.status(401)
-                    .body(Map.of("error", "Invalid email or password"));
+                    .body(Map.of("error", "Invalid username or password"));
             }
             
             // Password is verified - generate token and return login data
-            logger.debug("Login successful for email: {}", email);
+            logger.debug("Login successful for username: {}", username);
             String token = authUtil.generateToken(userId, role);
             
             Map<String, Object> response = new HashMap<>();
@@ -1444,6 +1449,143 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
             logger.error("Error registering FCM token for user {}: {}", userId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to register FCM token: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/forgot-password")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> forgotPassword(@RequestBody Map<String, String> requestData) {
+        logger.debug("Received request for password reset");
+        try {
+            String email = requestData.get("email");
+            if (email == null || email.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email is required"));
+            }
+
+            // Convert email to lowercase for case-insensitive comparison
+            email = email.toLowerCase();
+            Optional<User> userOpt = userRepository.findByEmail(email);
+            if (userOpt.isEmpty()) {
+                logger.debug("User not found for email: {}", email);
+                // Return success even if user not found to prevent email enumeration
+                return ResponseEntity.ok(Map.of("message", "If an account exists with this email, a password reset link has been sent."));
+            }
+
+            User user = userOpt.get();
+            // Generate a reset token
+            String resetToken = UUID.randomUUID().toString();
+            LocalDateTime expiryDate = LocalDateTime.now().plusHours(24); // Token expires in 24 hours
+
+            // Update user with reset token and expiry
+            user.setPasswordResetToken(resetToken);
+            user.setPasswordResetTokenExpiresAt(expiryDate);
+            user.setPasswordResetRequestedAt(LocalDateTime.now());
+            userRepository.save(user);
+
+            // Send actual email instead of just logging
+            try {
+                emailService.sendPasswordResetEmail(email, resetToken);
+                logger.info("Password reset email sent to: {}", email);
+            } catch (Exception e) {
+                logger.error("Failed to send password reset email: {}", e.getMessage());
+                // Still return success to prevent revealing if email exists
+            }
+
+            return ResponseEntity.ok(Map.of("message", "If an account exists with this email, a password reset link has been sent."));
+        } catch (Exception e) {
+            logger.error("Error processing password reset: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "An error occurred while processing your request."));
+        }
+    }
+
+    @PostMapping("/forgot-username")
+    public ResponseEntity<Map<String, Object>> forgotUsername(@RequestBody Map<String, String> requestData) {
+        logger.debug("Received request for username reminder");
+        try {
+            String email = requestData.get("email");
+            if (email == null || email.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email is required"));
+            }
+
+            // Convert email to lowercase for case-insensitive comparison
+            email = email.toLowerCase();
+            Optional<User> userOpt = userRepository.findByEmail(email);
+            if (userOpt.isEmpty()) {
+                logger.debug("User not found for email: {}", email);
+                // Return success even if user not found to prevent email enumeration
+                return ResponseEntity.ok(Map.of("message", "If an account exists with this email, a username reminder has been sent."));
+            }
+
+            User user = userOpt.get();
+            
+            // Send username reminder email
+            try {
+                emailService.sendUsernameReminderEmail(email, user.getUsername());
+                logger.info("Username reminder email sent to: {}", email);
+            } catch (Exception e) {
+                logger.error("Failed to send username reminder email: {}", e.getMessage());
+                // Still return success to prevent revealing if email exists
+            }
+
+            return ResponseEntity.ok(Map.of("message", "If an account exists with this email, a username reminder has been sent."));
+        } catch (Exception e) {
+            logger.error("Error processing username reminder: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "An error occurred while processing your request."));
+        }
+    }
+
+    @PostMapping("/change-password")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> changePassword(@RequestBody Map<String, String> requestData, HttpServletRequest request) {
+        logger.debug("Received request to change password");
+        try {
+            // Get user ID from request (set by AuthFilter)
+            Long userId = (Long) request.getAttribute("userId");
+            if (userId == null) {
+                logger.debug("No userId found in request");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+            }
+
+            String currentPassword = requestData.get("currentPassword");
+            String newPassword = requestData.get("newPassword");
+
+            if (currentPassword == null || currentPassword.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Current password is required"));
+            }
+
+            if (newPassword == null || newPassword.length() < 6) {
+                return ResponseEntity.badRequest().body(Map.of("error", "New password must be at least 6 characters long"));
+            }
+
+            if (currentPassword.equals(newPassword)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "New password must be different from current password"));
+            }
+
+            // Get user from database
+            Optional<User> userOpt = userRepository.findById(userId);
+            if (userOpt.isEmpty()) {
+                logger.debug("User not found for ID: {}", userId);
+                return ResponseEntity.badRequest().body(Map.of("error", "User not found"));
+            }
+
+            User user = userOpt.get();
+
+            // Verify current password
+            if (!authUtil.verifyPassword(currentPassword, user.getPassword())) {
+                logger.debug("Invalid current password for user: {}", userId);
+                return ResponseEntity.badRequest().body(Map.of("error", "Current password is incorrect"));
+            }
+
+            // Update password
+            user.setPassword(authUtil.hashPassword(newPassword));
+            userRepository.save(user);
+
+            logger.info("Password changed successfully for user: {}", userId);
+            return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
+
+        } catch (Exception e) {
+            logger.error("Error changing password: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "An error occurred while changing password"));
         }
     }
 }

@@ -39,6 +39,11 @@ public class AuthFilter extends OncePerRequestFilter {
             path.equals("/api/users/login") || 
             path.equals("/api/users") ||
             path.equals("/api/users/test") ||
+            path.equals("/api/users/forgot-password") ||
+            path.equals("/api/users/forgot-username") ||
+            path.equals("/reset-password") ||
+            path.equals("/reset-password.html") ||
+            path.startsWith("/api/users/password-reset") ||
             path.startsWith("/api/videos/public") ||
             path.startsWith("/api/videos/test") ||
             path.startsWith("/uploads/")) {

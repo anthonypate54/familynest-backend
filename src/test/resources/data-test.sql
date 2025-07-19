@@ -4,16 +4,43 @@
 -- Reset sequences (must use H2 syntax for sequences)
 ALTER TABLE app_user ALTER COLUMN id RESTART WITH 1;
 ALTER TABLE family ALTER COLUMN id RESTART WITH 1;
+ALTER TABLE message ALTER COLUMN id RESTART WITH 1;
+ALTER TABLE comment ALTER COLUMN id RESTART WITH 1;
+ALTER TABLE reaction ALTER COLUMN id RESTART WITH 1;
+ALTER TABLE message_view ALTER COLUMN id RESTART WITH 1;
 
 -- Add test admin user
 INSERT INTO app_user (id, username, email, password, first_name, last_name, role, enabled) 
 VALUES (1, 'testadmin', 'testadmin@example.com', '{noop}password', 'Test', 'Admin', 'ADMIN', true);
+
+-- Add additional test users
+INSERT INTO app_user (id, username, email, password, first_name, last_name, role, enabled) 
+VALUES 
+  (101, 'user101', 'user101@example.com', '{noop}password', 'User', 'One', 'USER', true),
+  (102, 'user102', 'user102@example.com', '{noop}password', 'User', 'Two', 'USER', true),
+  (103, 'user103', 'user103@example.com', '{noop}password', 'User', 'Three', 'USER', true),
+  (104, 'user104', 'user104@example.com', '{noop}password', 'User', 'Four', 'USER', true);
 
 -- Add 2 test families
 INSERT INTO family (id, name, created_by) 
 VALUES 
   (1, 'Test Family 1', 1),
   (2, 'Test Family 2', 1);
+
+-- Add family memberships for test users
+INSERT INTO user_family_membership (user_id, family_id, role, is_active) 
+VALUES 
+  (1, 1, 'ADMIN', true),
+  (101, 1, 'MEMBER', true),
+  (102, 1, 'MEMBER', true),
+  (103, 1, 'MEMBER', true),
+  (104, 2, 'MEMBER', true);
+
+-- Add test messages for engagement tests
+INSERT INTO message (id, family_id, sender_id, content, message_type, created_at) 
+VALUES 
+  (1, 1, 1, 'This is a test message for engagement tracking.', 'TEXT', CURRENT_TIMESTAMP),
+  (2, 1, 101, 'Another test message.', 'TEXT', CURRENT_TIMESTAMP);
 
 -- Ensure trigger function exists for message preferences
 CREATE OR REPLACE FUNCTION create_default_member_preferences()
