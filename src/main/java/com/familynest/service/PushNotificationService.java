@@ -257,6 +257,8 @@ public class PushNotificationService {
                                             .setBody(body)
                                             .build())
                                     .setSound("default")
+                                    .setBadge(1)  // Add badge count for iOS
+                                    .setContentAvailable(false)  // Ensure it's not a silent notification
                                     .build())
                             .build())
                     .setAndroidConfig(AndroidConfig.builder()
