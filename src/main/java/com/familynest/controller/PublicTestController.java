@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -50,5 +52,25 @@ public class PublicTestController {
         response.put("message", message);
         
         return ResponseEntity.ok(response);
+    }
+    
+    @PostMapping("/print")
+    public ResponseEntity<Map<String, Object>> debugPrint(
+            @RequestBody Map<String, String> request) {
+        try {
+            String message = request.get("message");
+            
+            logger.error("🖨️ FRONTEND_DEBUG: {}", message);
+            
+            return ResponseEntity.ok(Map.of(
+                "status", "logged",
+                "message", "Message logged successfully"
+            ));
+            
+        } catch (Exception e) {
+            logger.error("💥 FRONTEND_DEBUG: Error logging message: {}", e.getMessage(), e);
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Failed to log message: " + e.getMessage()));
+        }
     }
 } 

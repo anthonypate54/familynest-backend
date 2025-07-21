@@ -1424,31 +1424,112 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
         try {
             String fcmToken = request.get("fcmToken");
             if (fcmToken == null || fcmToken.trim().isEmpty()) {
+                logger.warn("🚨 FCM_REGISTER: Empty or null token received for user {}", userId);
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "FCM token is required"));
             }
 
-            logger.debug("Registering FCM token for user {}: {}", userId, fcmToken);
+            logger.info("🔑 FCM_REGISTER: Registering FCM token for user {}", userId);
+            logger.info("🔑 FCM_REGISTER: Token length: {}", fcmToken.length());
+            logger.info("🔑 FCM_REGISTER: Token prefix: {}", fcmToken.substring(0, Math.min(30, fcmToken.length())));
+            
+            // Detect token type
+            if (fcmToken.startsWith("ios_simulator_mock_token_")) {
+                logger.warn("🧪 FCM_REGISTER: MOCK SIMULATOR TOKEN detected for user {} - this should not happen on real device!", userId);
+            } else if (fcmToken.contains(":") && fcmToken.length() > 100) {
+                logger.info("✅ FCM_REGISTER: Real FCM token detected for user {} (length: {})", userId, fcmToken.length());
+            } else {
+                logger.warn("⚠️ FCM_REGISTER: Unknown token format for user {} (length: {})", userId, fcmToken.length());
+            }
 
             // Update user's FCM token
             String updateSql = "UPDATE app_user SET fcm_token = ? WHERE id = ?";
             int rowsUpdated = jdbcTemplate.update(updateSql, fcmToken, userId);
 
             if (rowsUpdated == 0) {
+                logger.error("❌ FCM_REGISTER: User {} not found in database", userId);
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "User not found"));
             }
 
-            logger.debug("Successfully updated FCM token for user {}", userId);
+            logger.info("✅ FCM_REGISTER: Successfully updated FCM token for user {}, rows updated: {}", userId, rowsUpdated);
             return ResponseEntity.ok(Map.of(
                 "message", "FCM token registered successfully",
                 "userId", userId
             ));
 
         } catch (Exception e) {
-            logger.error("Error registering FCM token for user {}: {}", userId, e.getMessage(), e);
+            logger.error("💥 FCM_REGISTER: Error registering FCM token for user {}: {}", userId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to register FCM token: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Debug endpoint to test FCM token reception
+     */
+    @PostMapping("/{userId}/fcm-token-debug")
+    public ResponseEntity<Map<String, Object>> debugFcmToken(
+            @PathVariable Long userId,
+            @RequestBody Map<String, String> request) {
+        try {
+            String fcmToken = request.get("fcmToken");
+            
+            logger.info("🔍 FCM_DEBUG: ================== DEBUG ENDPOINT CALLED ==================");
+            logger.info("🔍 FCM_DEBUG: User ID: {}", userId);
+            logger.info("🔍 FCM_DEBUG: Request body: {}", request);
+            
+            if (fcmToken == null) {
+                logger.warn("🔍 FCM_DEBUG: FCM token is NULL!");
+                return ResponseEntity.ok(Map.of("status", "NULL_TOKEN", "userId", userId));
+            }
+            
+            if (fcmToken.trim().isEmpty()) {
+                logger.warn("🔍 FCM_DEBUG: FCM token is EMPTY!");
+                return ResponseEntity.ok(Map.of("status", "EMPTY_TOKEN", "userId", userId));
+            }
+            
+            logger.info("🔍 FCM_DEBUG: Token received successfully");
+            logger.info("🔍 FCM_DEBUG: Token length: {}", fcmToken.length());
+            logger.info("🔍 FCM_DEBUG: Token first 30 chars: {}", fcmToken.substring(0, Math.min(30, fcmToken.length())));
+            logger.info("🔍 FCM_DEBUG: Token last 30 chars: {}", fcmToken.substring(Math.max(0, fcmToken.length() - 30)));
+            
+            // Detect token type
+            if (fcmToken.startsWith("ios_simulator_mock_token_")) {
+                logger.warn("🔍 FCM_DEBUG: 🧪 MOCK SIMULATOR TOKEN detected!");
+                logger.warn("🔍 FCM_DEBUG: This means device detection failed on real device!");
+                return ResponseEntity.ok(Map.of(
+                    "status", "MOCK_TOKEN_DETECTED", 
+                    "tokenType", "simulator_mock",
+                    "userId", userId,
+                    "length", fcmToken.length()
+                ));
+            } else if (fcmToken.contains(":") && fcmToken.length() > 100) {
+                logger.info("🔍 FCM_DEBUG: ✅ REAL FCM TOKEN detected!");
+                logger.info("🔍 FCM_DEBUG: This is a proper Firebase FCM token");
+                return ResponseEntity.ok(Map.of(
+                    "status", "REAL_TOKEN_DETECTED", 
+                    "tokenType", "real_fcm",
+                    "userId", userId,
+                    "length", fcmToken.length()
+                ));
+            } else {
+                logger.warn("🔍 FCM_DEBUG: ⚠️ UNKNOWN TOKEN FORMAT!");
+                logger.warn("🔍 FCM_DEBUG: Not mock, not standard FCM - investigate!");
+                return ResponseEntity.ok(Map.of(
+                    "status", "UNKNOWN_TOKEN_FORMAT", 
+                    "tokenType", "unknown",
+                    "userId", userId,
+                    "length", fcmToken.length()
+                ));
+            }
+            
+        } catch (Exception e) {
+            logger.error("🔍 FCM_DEBUG: 💥 ERROR in debug endpoint: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Debug endpoint failed: " + e.getMessage()));
+        } finally {
+            logger.info("🔍 FCM_DEBUG: ================== DEBUG ENDPOINT COMPLETE ==================");
         }
     }
 
@@ -1586,6 +1667,29 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
         } catch (Exception e) {
             logger.error("Error changing password: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "An error occurred while changing password"));
+        }
+    }
+
+    /**
+     * Simple debug endpoint - logs any string from frontend
+     */
+    @PostMapping("/test/print")
+    public ResponseEntity<Map<String, Object>> printFromFrontEnd(
+            @RequestBody Map<String, String> request) {
+        try {
+            String message = request.get("message");
+            
+            logger.error("🖨️ FRONTEND_DEBUG: {}", message);
+            
+            return ResponseEntity.ok(Map.of(
+                "status", "logged",
+                "message", "Message logged successfully"
+            ));
+            
+        } catch (Exception e) {
+            logger.error("💥 FRONTEND_DEBUG: Error logging message: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to log message: " + e.getMessage()));
         }
     }
 }
