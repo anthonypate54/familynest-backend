@@ -30,4 +30,4 @@ EXPOSE 8080
 ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 
 # Run the application
-CMD ["java", "-jar", "target/familynest-0.0.1-SNAPSHOT.jar"] 
+CMD ["java", "-jar", "target/familynest-backend-0.0.1-SNAPSHOT.jar"] 

@@ -5,49 +5,35 @@ services:
     image: postgres:15-alpine
     container_name: familynest-postgres
     environment:
-      POSTGRES_DB: familynest_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: familynest
+      POSTGRES_USER: familynest
+      POSTGRES_PASSWORD: familynest123
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Use 5433 to avoid conflict with local PostgreSQL
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Initialize with fresh schema only (no test data)
-      - ./src/main/resources/db/migration:/docker-entrypoint-initdb.d:ro
     networks:
       - familynest-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d familynest_db"]
+      test: ["CMD-SHELL", "pg_isready -U familynest -d familynest"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: familynest-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "8081:8080"  # Use 8081 to avoid conflict with local backend
+    volumes:
+      - backend_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      - SPRING_PROFILES_ACTIVE=docker
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/familynest_db
-      - SPRING_DATASOURCE_USERNAME=postgres
-      - SPRING_DATASOURCE_PASSWORD=postgres
-      - SERVER_PORT=8080
-    ports:
-      - "8080:8080"
-    volumes:
-      - backend_uploads:/app/uploads
     networks:
       - familynest-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/public/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
 volumes:
   postgres_data:
