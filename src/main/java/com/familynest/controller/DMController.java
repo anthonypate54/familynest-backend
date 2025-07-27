@@ -309,20 +309,27 @@ public class DMController {
                 Timestamp.valueOf(LocalDateTime.now())
             );
     
-            // Fetch the full DM message with sender info
+            // Determine recipient ID (the other user in the conversation) 
+            Long recipientId = senderId.equals(user1Id) ? user2Id : user1Id;
+    
+            // Fetch the full DM message with sender info and read status for recipient
             String fetchSql = """
                 SELECT 
                     dm.id, dm.conversation_id, dm.sender_id, dm.content, 
                     dm.media_url, dm.media_type, dm.media_thumbnail, 
                     dm.media_filename, dm.media_size, dm.media_duration, dm.created_at,
                     u.username as sender_username, u.first_name as sender_first_name, 
-                    u.last_name as sender_last_name, u.photo as sender_photo
+                    u.last_name as sender_last_name, u.photo as sender_photo,
+                    CASE WHEN mv.id IS NOT NULL THEN true ELSE false END as is_read
                 FROM dm_message dm
                 JOIN app_user u ON dm.sender_id = u.id
+                LEFT JOIN message_view mv ON mv.dm_message_id = dm.id 
+                    AND mv.user_id = ? 
+                    AND mv.message_type = 'dm'
                 WHERE dm.id = ?
                 """;
             
-            Map<String, Object> messageData = jdbcTemplate.queryForMap(fetchSql, newMessageId);
+            Map<String, Object> messageData = jdbcTemplate.queryForMap(fetchSql, recipientId, newMessageId);
              // Transform to response format
             Map<String, Object> response = new HashMap<>();
             response.put("id", messageData.get("id"));
@@ -340,10 +347,8 @@ public class DMController {
             response.put("sender_first_name", messageData.get("sender_first_name"));
             response.put("sender_last_name", messageData.get("sender_last_name"));
             response.put("sender_photo", messageData.get("sender_photo"));
+            response.put("is_read", messageData.get("is_read"));
     
-            // Determine recipient ID (the other user in the conversation)
-            Long recipientId = senderId.equals(user1Id) ? user2Id : user1Id;
-
             // Broadcast the raw database result directly
             logger.debug("Broadcasting DM message: {}", messageData);
             webSocketBroadcastService.broadcastDMMessage(messageData, recipientId);
@@ -412,17 +417,21 @@ public class DMController {
                 SELECT 
                     m.id, m.conversation_id, m.sender_id, m.content, m.media_url, m.media_type, 
                     m.media_thumbnail, m.media_filename, m.media_size, m.media_duration,
-                    m.is_read, m.created_at,
+                    CASE WHEN mv.id IS NOT NULL THEN true ELSE false END as is_read,
+                    m.created_at,
                     u.username as sender_username, u.first_name as sender_first_name, u.last_name as sender_last_name,
                     u.photo as sender_photo
                 FROM dm_message m
                 JOIN app_user u ON m.sender_id = u.id
+                LEFT JOIN message_view mv ON mv.dm_message_id = m.id 
+                    AND mv.user_id = ? 
+                    AND mv.message_type = 'dm'
                 WHERE m.conversation_id = ?
                 ORDER BY m.created_at DESC
                 LIMIT ? OFFSET ?
                 """;
 
-            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, conversationId, size, offset);
+            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, currentUserId, conversationId, size, offset);
             
             // Debug log each message
             for (Map<String, Object> message : messages) {
@@ -493,16 +502,26 @@ public class DMController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
 
-            // Mark all unread messages from the other user as read
-            String updateSql = """
-                UPDATE dm_message 
-                SET is_read = true 
-                WHERE conversation_id = ? 
-                AND sender_id != ? 
-                AND is_read = false
+            // Mark all unread messages from the other user as read using message_view table
+            String insertViewsSql = """
+                INSERT INTO message_view (dm_message_id, user_id, message_type, viewed_at)
+                SELECT 
+                    dm.id, 
+                    ?, 
+                    'dm',
+                    CURRENT_TIMESTAMP
+                FROM dm_message dm
+                WHERE dm.conversation_id = ? 
+                AND dm.sender_id != ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM message_view mv 
+                    WHERE mv.dm_message_id = dm.id 
+                    AND mv.user_id = ? 
+                    AND mv.message_type = 'dm'
+                )
                 """;
             
-            int updatedCount = jdbcTemplate.update(updateSql, conversationId, currentUserId);
+            int updatedCount = jdbcTemplate.update(insertViewsSql, currentUserId, conversationId, currentUserId, currentUserId);
 
             logger.debug("Marked {} messages as read", updatedCount);
             return ResponseEntity.ok(Map.of("markedAsRead", updatedCount));

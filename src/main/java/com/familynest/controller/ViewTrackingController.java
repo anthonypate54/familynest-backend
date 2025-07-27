@@ -154,6 +154,91 @@ public class ViewTrackingController {
         }
     }
 
+    @PostMapping("/batch-views")
+    public ResponseEntity<Map<String, Object>> markMultipleMessagesAsViewed(
+            @RequestBody Map<String, Object> requestBody,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        logger.debug("Batch marking messages as viewed");
+        
+        try {
+            // Extract message IDs from request body
+            @SuppressWarnings("unchecked")
+            List<Object> messageIdObjects = (List<Object>) requestBody.get("messageIds");
+            
+            if (messageIdObjects == null || messageIdObjects.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "messageIds array is required and cannot be empty"));
+            }
+            
+            if (messageIdObjects.size() > 50) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Cannot mark more than 50 messages at once"));
+            }
+            
+            // Convert to Long list
+            List<Long> messageIds = messageIdObjects.stream()
+                    .map(obj -> Long.parseLong(obj.toString()))
+                    .toList();
+            
+            // Get the user ID either from test attributes or from JWT
+            Long userId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                userId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", userId);
+            } else {
+                String token = authHeader.replace("Bearer ", "");
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                userId = Long.parseLong(claims.get("userId").toString());
+            }
+            
+            // Mark each message as viewed
+            List<Map<String, Object>> results = new ArrayList<>();
+            int successCount = 0;
+            int skippedCount = 0;
+            
+            for (Long messageId : messageIds) {
+                try {
+                    // Check if already viewed to avoid duplicates
+                    boolean alreadyViewed = engagementService.isMessageViewedByUser(messageId, userId);
+                    if (alreadyViewed) {
+                        skippedCount++;
+                        continue;
+                    }
+                    
+                    MessageView view = engagementService.markMessageAsViewed(messageId, userId);
+                    Map<String, Object> viewData = new HashMap<>();
+                    viewData.put("messageId", view.getMessageId());
+                    viewData.put("userId", view.getUserId());
+                    viewData.put("viewedAt", view.getViewedAt());
+                    results.add(viewData);
+                    successCount++;
+                    
+                } catch (Exception e) {
+                    logger.warn("Failed to mark message {} as viewed: {}", messageId, e.getMessage());
+                    // Continue processing other messages
+                }
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("results", results);
+            response.put("successCount", successCount);
+            response.put("skippedCount", skippedCount);
+            response.put("totalRequested", messageIds.size());
+            
+            logger.debug("Batch view marking completed: {} success, {} skipped out of {} requested", 
+                    successCount, skippedCount, messageIds.size());
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error in batch marking messages as viewed: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to batch mark messages as viewed: " + e.getMessage()));
+        }
+    }
+
     @GetMapping("/{messageId}/engagement")
     public ResponseEntity<Map<String, Object>> getMessageEngagementData(
             @PathVariable Long messageId,
@@ -178,6 +263,134 @@ public class ViewTrackingController {
             logger.error("Error getting message engagement data: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to get message engagement data: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/unread-count")
+    public ResponseEntity<Map<String, Object>> getUnreadMessageCount(
+            @RequestParam(required = false) Long familyId,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        logger.debug("Getting unread message count for user");
+        
+        try {
+            // Get the user ID either from test attributes or from JWT
+            Long userId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                userId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", userId);
+            } else {
+                String token = authHeader.replace("Bearer ", "");
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                userId = Long.parseLong(claims.get("userId").toString());
+            }
+            
+            String sql;
+            List<Object> params = new ArrayList<>();
+            
+            if (familyId != null) {
+                // Get unread count for specific family
+                sql = """
+                    SELECT COUNT(DISTINCT m.id) as unread_count
+                    FROM message m
+                    JOIN user_family_membership ufm ON m.family_id = ufm.family_id
+                    LEFT JOIN message_view mv ON (m.id = mv.message_id AND mv.user_id = ?)
+                    WHERE ufm.user_id = ?
+                    AND m.family_id = ?
+                    AND m.sender_id != ?
+                    AND mv.id IS NULL
+                    AND m.timestamp > CURRENT_DATE - INTERVAL '30 days'
+                """;
+                params.add(userId);
+                params.add(userId);
+                params.add(familyId);
+                params.add(userId);
+            } else {
+                // Get total unread count across all families
+                sql = """
+                    SELECT COUNT(DISTINCT m.id) as unread_count
+                    FROM message m
+                    JOIN user_family_membership ufm ON m.family_id = ufm.family_id
+                    LEFT JOIN message_view mv ON (m.id = mv.message_id AND mv.user_id = ?)
+                    WHERE ufm.user_id = ?
+                    AND m.sender_id != ?
+                    AND mv.id IS NULL
+                    AND m.timestamp > CURRENT_DATE - INTERVAL '30 days'
+                """;
+                params.add(userId);
+                params.add(userId);
+                params.add(userId);
+            }
+            
+            Integer unreadCount = jdbcTemplate.queryForObject(sql, Integer.class, params.toArray());
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("unreadCount", unreadCount != null ? unreadCount : 0);
+            response.put("userId", userId);
+            if (familyId != null) {
+                response.put("familyId", familyId);
+            }
+            
+            logger.debug("Unread message count for user {}: {}", userId, unreadCount);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error getting unread message count: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to get unread message count: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/unread-by-family")
+    public ResponseEntity<Map<String, Object>> getUnreadMessageCountByFamily(
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        logger.debug("Getting unread message count by family for user");
+        
+        try {
+            // Get the user ID either from test attributes or from JWT
+            Long userId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                userId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", userId);
+            } else {
+                String token = authHeader.replace("Bearer ", "");
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                userId = Long.parseLong(claims.get("userId").toString());
+            }
+            
+            String sql = """
+                SELECT 
+                    f.id as family_id,
+                    f.name as family_name,
+                    COUNT(DISTINCT m.id) as unread_count
+                FROM family f
+                JOIN user_family_membership ufm ON f.id = ufm.family_id
+                LEFT JOIN message m ON f.id = m.family_id 
+                    AND m.sender_id != ? 
+                    AND m.timestamp > CURRENT_DATE - INTERVAL '30 days'
+                LEFT JOIN message_view mv ON (m.id = mv.message_id AND mv.user_id = ?)
+                WHERE ufm.user_id = ?
+                AND (m.id IS NULL OR mv.id IS NULL)
+                GROUP BY f.id, f.name
+                ORDER BY unread_count DESC, f.name
+            """;
+            
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId, userId);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("families", results);
+            response.put("userId", userId);
+            
+            logger.debug("Unread message count by family for user {}: {} families", userId, results.size());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error getting unread message count by family: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to get unread message count by family: " + e.getMessage()));
         }
     }
 
@@ -330,6 +543,152 @@ public class ViewTrackingController {
             logger.error("Error getting batch message engagement data: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to get batch message engagement data: " + e.getMessage()));
+        }
+    }
+
+    // DM Message View Tracking Endpoints
+
+    @PostMapping("/dm/{dmMessageId}/views")
+    public ResponseEntity<Map<String, Object>> markDMMessageAsViewed(
+            @PathVariable Long dmMessageId,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        logger.debug("Marking DM message ID: {} as viewed", dmMessageId);
+        
+        try {
+            // Get the user ID either from test attributes or from JWT
+            Long userId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                // Use the userId attribute set by the TestAuthFilter
+                userId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", userId);
+            } else {
+                // Normal authentication flow
+                String token = authHeader.replace("Bearer ", "");
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                userId = Long.parseLong(claims.get("userId").toString());
+            }
+
+            MessageView view = engagementService.markDMMessageAsViewed(dmMessageId, userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("view", Map.of(
+                    "id", view.getId(),
+                    "dmMessageId", view.getDmMessageId(),
+                    "userId", view.getUserId(),
+                    "viewedAt", view.getViewedAt().toString(),
+                    "messageType", view.getMessageType()
+            ));
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error marking DM message as viewed: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to mark DM message as viewed: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/dm/batch-views")
+    public ResponseEntity<Map<String, Object>> batchMarkDMMessagesAsViewed(
+            @RequestBody Map<String, Object> requestBody,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        logger.debug("Batch marking DM messages as viewed: {}", requestBody);
+        
+        try {
+            // Get the user ID either from test attributes or from JWT
+            Long userId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                // Use the userId attribute set by the TestAuthFilter
+                userId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", userId);
+            } else {
+                // Normal authentication flow
+                String token = authHeader.replace("Bearer ", "");
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                userId = Long.parseLong(claims.get("userId").toString());
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Integer> dmMessageIds = (List<Integer>) requestBody.get("dmMessageIds");
+            if (dmMessageIds == null || dmMessageIds.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "dmMessageIds is required and cannot be empty"));
+            }
+
+            List<MessageView> views = new ArrayList<>();
+            for (Integer dmMessageId : dmMessageIds) {
+                try {
+                    MessageView view = engagementService.markDMMessageAsViewed(dmMessageId.longValue(), userId);
+                    views.add(view);
+                } catch (Exception e) {
+                    logger.warn("Failed to mark DM message {} as viewed: {}", dmMessageId, e.getMessage());
+                    // Continue with other messages even if one fails
+                }
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("markedCount", views.size());
+            response.put("requestedCount", dmMessageIds.size());
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error batch marking DM messages as viewed: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to batch mark DM messages as viewed: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/dm/unread-count")
+    public ResponseEntity<Map<String, Object>> getUnreadDMMessageCount(
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        logger.debug("Getting unread DM message count");
+        
+        try {
+            // Get the user ID either from test attributes or from JWT
+            Long userId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                // Use the userId attribute set by the TestAuthFilter
+                userId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", userId);
+            } else {
+                // Normal authentication flow
+                String token = authHeader.replace("Bearer ", "");
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                userId = Long.parseLong(claims.get("userId").toString());
+            }
+
+            // Query to count unread DM messages for this user
+            String sql = """
+                    SELECT COUNT(DISTINCT dm.id) 
+                    FROM dm_message dm
+                    JOIN dm_conversation dc ON dm.conversation_id = dc.id
+                    WHERE (dc.user1_id = ? OR dc.user2_id = ?)
+                    AND dm.sender_id != ?
+                    AND NOT EXISTS (
+                        SELECT 1 FROM message_view mv 
+                        WHERE mv.dm_message_id = dm.id 
+                        AND mv.user_id = ? 
+                        AND mv.message_type = 'dm'
+                    )
+                    """;
+
+            Long unreadCount = jdbcTemplate.queryForObject(sql, Long.class, userId, userId, userId, userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("unreadCount", unreadCount != null ? unreadCount : 0L);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error getting unread DM message count: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to get unread DM message count: " + e.getMessage()));
         }
     }
 } 

@@ -1,31 +1,52 @@
 package com.familynest.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import jakarta.persistence.Column;
-import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "message_view", 
-       uniqueConstraints = @UniqueConstraint(columnNames = {"message_id", "user_id"}))
+@Table(name = "message_view")
 public class MessageView {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "message_id", nullable = false)
+    @Column(name = "message_id", nullable = true)
     private Long messageId;
+
+    @Column(name = "dm_message_id", nullable = true)
+    private Long dmMessageId;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
     @Column(name = "viewed_at", nullable = false)
     private LocalDateTime viewedAt;
+
+    @Column(name = "message_type", nullable = false)
+    private String messageType = "family";
+
+    // Constructors
+    public MessageView() {}
+
+    // Factory methods for different message types
+    public static MessageView forFamilyMessage(Long messageId, Long userId) {
+        MessageView view = new MessageView();
+        view.messageId = messageId;
+        view.userId = userId;
+        view.messageType = "family";
+        view.viewedAt = LocalDateTime.now();
+        return view;
+    }
+
+    public static MessageView forDMMessage(Long dmMessageId, Long userId) {
+        MessageView view = new MessageView();
+        view.dmMessageId = dmMessageId;
+        view.userId = userId;
+        view.messageType = "dm";
+        view.viewedAt = LocalDateTime.now();
+        return view;
+    }
 
     // Getters and setters
     public Long getId() {
@@ -44,6 +65,14 @@ public class MessageView {
         this.messageId = messageId;
     }
 
+    public Long getDmMessageId() {
+        return dmMessageId;
+    }
+
+    public void setDmMessageId(Long dmMessageId) {
+        this.dmMessageId = dmMessageId;
+    }
+
     public Long getUserId() {
         return userId;
     }
@@ -58,6 +87,27 @@ public class MessageView {
 
     public void setViewedAt(LocalDateTime viewedAt) {
         this.viewedAt = viewedAt;
+    }
+
+    public String getMessageType() {
+        return messageType;
+    }
+
+    public void setMessageType(String messageType) {
+        this.messageType = messageType;
+    }
+
+    // Utility methods
+    public boolean isFamilyMessage() {
+        return "family".equals(messageType);
+    }
+
+    public boolean isDMMessage() {
+        return "dm".equals(messageType);
+    }
+
+    public Long getActualMessageId() {
+        return isFamilyMessage() ? messageId : dmMessageId;
     }
 
     // Alias method to maintain compatibility

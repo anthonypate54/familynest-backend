@@ -203,7 +203,7 @@ public class EngagementService {
     
     @Transactional
     public MessageView markMessageAsViewed(Long messageId, Long userId) {
-        logger.info("Marking message: {} as viewed by user: {}", messageId, userId);
+        logger.info("Marking family message: {} as viewed by user: {}", messageId, userId);
         
         // Check if message exists
         if (!messageRepository.existsById(messageId)) {
@@ -216,34 +216,72 @@ public class EngagementService {
         }
         
         // Check if already viewed
-        Optional<MessageView> existingView = viewRepository.findByMessageIdAndUserId(messageId, userId);
+        Optional<MessageView> existingView = viewRepository.findByFamilyMessageIdAndUserId(messageId, userId);
         if (existingView.isPresent()) {
-            logger.info("Message already viewed by user");
+            logger.info("Family message already viewed by user");
             return existingView.get();
         }
         
-        // Create and save new view
-        MessageView view = new MessageView();
-        view.setMessageId(messageId);
-        view.setSenderId(userId);
-        view.setViewedAt(LocalDateTime.now());
+        // Create and save new view for family message
+        MessageView view = MessageView.forFamilyMessage(messageId, userId);
+        
+        return viewRepository.save(view);
+    }
+
+    @Transactional
+    public MessageView markDMMessageAsViewed(Long dmMessageId, Long userId) {
+        logger.info("Marking DM message: {} as viewed by user: {}", dmMessageId, userId);
+        
+        // Check if DM message exists (we'll need to inject DMMessageRepository)
+        // For now, we'll assume it exists - we can add validation later
+        
+        // Check if user exists
+        if (!userRepository.existsById(userId)) {
+            throw new IllegalArgumentException("User not found with id: " + userId);
+        }
+        
+        // Check if already viewed
+        Optional<MessageView> existingView = viewRepository.findByDMMessageIdAndUserId(dmMessageId, userId);
+        if (existingView.isPresent()) {
+            logger.info("DM message already viewed by user");
+            return existingView.get();
+        }
+        
+        // Create and save new view for DM message
+        MessageView view = MessageView.forDMMessage(dmMessageId, userId);
         
         return viewRepository.save(view);
     }
     
     public List<MessageView> getMessageViews(Long messageId) {
-        logger.info("Getting views for message: {}", messageId);
-        return viewRepository.findByMessageId(messageId);
+        logger.info("Getting views for family message: {}", messageId);
+        return viewRepository.findByFamilyMessageId(messageId);
     }
-    
+
     public long getMessageViewCount(Long messageId) {
-        logger.info("Getting view count for message: {}", messageId);
-        return viewRepository.countByMessageId(messageId);
+        logger.info("Getting view count for family message: {}", messageId);
+        return viewRepository.countByFamilyMessageId(messageId);
     }
-    
+
     public boolean isMessageViewedByUser(Long messageId, Long userId) {
-        logger.info("Checking if message: {} is viewed by user: {}", messageId, userId);
-        return viewRepository.findByMessageIdAndUserId(messageId, userId).isPresent();
+        logger.info("Checking if family message: {} is viewed by user: {}", messageId, userId);
+        return viewRepository.findByFamilyMessageIdAndUserId(messageId, userId).isPresent();
+    }
+
+    // DM message view methods
+    public List<MessageView> getDMMessageViews(Long dmMessageId) {
+        logger.info("Getting views for DM message: {}", dmMessageId);
+        return viewRepository.findByDMMessageId(dmMessageId);
+    }
+
+    public long getDMMessageViewCount(Long dmMessageId) {
+        logger.info("Getting view count for DM message: {}", dmMessageId);
+        return viewRepository.countByDMMessageId(dmMessageId);
+    }
+
+    public boolean isDMMessageViewedByUser(Long dmMessageId, Long userId) {
+        logger.info("Checking if DM message: {} is viewed by user: {}", dmMessageId, userId);
+        return viewRepository.findByDMMessageIdAndUserId(dmMessageId, userId).isPresent();
     }
     
     // ----- Share methods -----
