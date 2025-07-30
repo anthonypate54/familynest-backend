@@ -121,6 +121,32 @@ public class SearchController {
             
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, params);
             
+            // Post-process results to add participant data for group chats
+            for (Map<String, Object> result : results) {
+                Boolean isGroup = (Boolean) result.get("is_group");
+                if (isGroup != null && isGroup) {
+                    Long conversationId = ((Number) result.get("conversation_id")).longValue();
+                    
+                    // Get participants for this group chat
+                    String participantSql = """
+                        SELECT u.id, u.username, u.first_name, u.last_name, u.photo
+                        FROM app_user u
+                        JOIN dm_conversation_participant dcp ON u.id = dcp.user_id
+                        WHERE dcp.conversation_id = ?
+                        ORDER BY dcp.joined_at
+                        LIMIT 4
+                        """;
+                    
+                    try {
+                        List<Map<String, Object>> participants = jdbcTemplate.queryForList(participantSql, conversationId);
+                        result.put("participants", participants);
+                    } catch (Exception e) {
+                        logger.debug("Error fetching participants for conversation {}: {}", conversationId, e.getMessage());
+                        result.put("participants", List.of());
+                    }
+                }
+            }
+            
             logger.debug("Search returned {} results", results.size());
             return ResponseEntity.ok(results);
             
@@ -216,11 +242,14 @@ public class SearchController {
                 SELECT * FROM family_messages
                 """;
         } else {
-            // Search only DM messages - simplified query
+            // Search DM messages including both 1:1 and group chats
             return "WITH user_conversations AS (" +
-                   "  SELECT DISTINCT id as conversation_id " +
-                   "  FROM dm_conversation " +
-                   "  WHERE user1_id = ? OR user2_id = ? " +
+                   "  SELECT DISTINCT c.id as conversation_id " +
+                   "  FROM dm_conversation c " +
+                   "  LEFT JOIN dm_conversation_participant dcp ON c.id = dcp.conversation_id " +
+                   "  WHERE " +
+                   "    (c.is_group = FALSE AND (c.user1_id = ? OR c.user2_id = ?)) OR " +
+                   "    (c.is_group = TRUE AND dcp.user_id = ?) " +
                    "), " +
                    "dm_messages AS (" +
                    "  SELECT " +
@@ -233,14 +262,20 @@ public class SearchController {
                    "    dm.media_type, " +
                    "    dm.media_url, " +
                    "    dm.media_thumbnail as thumbnail_url, " +
-                   "    'Direct Message' as family_name, " +
+                   "    CASE " +
+                   "      WHEN c.is_group = TRUE THEN c.name " +
+                   "      ELSE 'Direct Message' " +
+                   "    END as family_name, " +
                    "    u.first_name as sender_first_name, " +
                    "    u.last_name as sender_last_name, " +
                    "    u.photo as sender_photo, " +
                    "    'dm' as message_type, " +
-                   "    dm.conversation_id " +
+                   "    dm.conversation_id, " +
+                   "    c.is_group, " +
+                   "    c.name as conversation_name " +
                    "  FROM dm_message dm " +
                    "  JOIN user_conversations uc ON dm.conversation_id = uc.conversation_id " +
+                   "  JOIN dm_conversation c ON dm.conversation_id = c.id " +
                    "  LEFT JOIN app_user u ON dm.sender_id = u.id " +
                    "  WHERE LOWER(dm.content) LIKE LOWER(?) " +
                    ") " +
@@ -258,7 +293,7 @@ public class SearchController {
             return new Object[]{userId, "%" + query + "%", familyId, size, offset};
         } else {
             // Search only in DM messages (simplified)
-            return new Object[]{userId, userId, "%" + query + "%", size, offset};
+            return new Object[]{userId, userId, userId, "%" + query + "%", size, offset};
         }
     }
 } 

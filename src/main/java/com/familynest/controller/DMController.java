@@ -27,8 +27,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.lang.Math;
+import java.util.ArrayList;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 
 @RestController
 @RequestMapping("/api/dm")
@@ -53,6 +55,23 @@ public class DMController {
 
     @Autowired
     private PushNotificationService pushNotificationService;
+
+    // Group Chat Configuration
+    @Value("${app.groupchat.max-participants:5}")
+    private int maxGroupChatParticipants;
+
+    /**
+     * Get group chat configuration
+     * GET /api/dm/config
+     */
+    @GetMapping("/config")
+    public ResponseEntity<Map<String, Object>> getGroupChatConfig() {
+        Map<String, Object> config = new HashMap<>();
+        config.put("maxParticipants", maxGroupChatParticipants);
+        config.put("minParticipants", 1); // Minimum participants to create a group (excluding creator)
+        
+        return ResponseEntity.ok(config);
+    }
 
     /**
      * Get or create a conversation with another user
@@ -96,6 +115,18 @@ public class DMController {
                 String insertSql = "INSERT INTO dm_conversation (user1_id, user2_id, created_at) VALUES (?, ?, ?) RETURNING id, created_at";
                 conversation = jdbcTemplate.queryForMap(insertSql, user1Id, user2Id, Timestamp.valueOf(LocalDateTime.now()));
                 logger.debug("Created new conversation: {}", conversation.get("id"));
+                
+                // Broadcast new conversation to both participants so their conversation lists refresh
+                Long conversationId = ((Number) conversation.get("id")).longValue();
+                Map<String, Object> notificationData = new HashMap<>();
+                notificationData.put("type", "new_conversation");
+                notificationData.put("conversationId", conversationId);
+                notificationData.put("isGroup", false);
+                
+                // Notify both participants
+                webSocketBroadcastService.broadcastDMMessage(notificationData, currentUserId);
+                webSocketBroadcastService.broadcastDMMessage(notificationData, otherUserId);
+                logger.debug("Broadcasted new 1:1 conversation notification to users: {} and {}", currentUserId, otherUserId);
             }
 
             // Get other user info
@@ -139,10 +170,13 @@ public class DMController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
             }
 
-            // Get all conversations with last message info (fixed SQL query)
+            // Get all conversations (1:1 and groups) with last message info
             String sql = """
                 SELECT 
                     c.id as conversation_id,
+                    c.name as group_name,
+                    c.is_group,
+                    c.created_by_user_id as created_by,
                     c.created_at as created_at,
                     u.id as other_user_id,
                     u.username as other_username,
@@ -150,11 +184,24 @@ public class DMController {
                     u.last_name as other_last_name,
                     u.photo as other_user_photo,
                     m.content as last_message_content,
-                    m.created_at as last_message_created_at
+                    m.created_at as last_message_created_at,
+                    CASE 
+                        WHEN c.is_group = TRUE THEN (
+                            SELECT COUNT(*) 
+                            FROM dm_conversation_participant dcp 
+                            WHERE dcp.conversation_id = c.id
+                        )
+                        ELSE 2
+                    END as participant_count
                 FROM dm_conversation c
-                JOIN app_user u ON (
-                    (c.user1_id = ? AND u.id = c.user2_id) OR 
-                    (c.user2_id = ? AND u.id = c.user1_id)
+                -- Left join with participants to include conversations user belongs to (both group and 1:1)
+                LEFT JOIN dm_conversation_participant my_participation ON c.id = my_participation.conversation_id AND my_participation.user_id = ?
+                -- For 1:1 chats, get the other user info
+                LEFT JOIN app_user u ON (
+                    c.is_group = FALSE AND (
+                        (c.user1_id = ? AND u.id = c.user2_id) OR 
+                        (c.user2_id = ? AND u.id = c.user1_id)
+                    )
                 )
                 LEFT JOIN (
                     SELECT DISTINCT ON (conversation_id) 
@@ -162,32 +209,104 @@ public class DMController {
                     FROM dm_message
                     ORDER BY conversation_id, created_at DESC
                 ) m ON m.conversation_id = c.id
-                WHERE c.user1_id = ? OR c.user2_id = ?
+                WHERE (
+                    -- Include group conversations where user is a participant
+                    (c.is_group = TRUE AND my_participation.user_id IS NOT NULL) OR
+                    -- Include 1:1 conversations where user is user1 or user2
+                    (c.is_group = FALSE AND (c.user1_id = ? OR c.user2_id = ?))
+                )
                 ORDER BY COALESCE(m.created_at, c.created_at) DESC                
             """;
 
-            List<Map<String, Object>> conversations = jdbcTemplate.queryForList(sql, 
-                currentUserId, currentUserId, currentUserId, currentUserId);
+            List<Map<String, Object>> rawConversations = jdbcTemplate.queryForList(sql, 
+                currentUserId, currentUserId, currentUserId, currentUserId, currentUserId);
 
-            // Transform the data to match getOrCreateConversation format
-            List<Map<String, Object>> formattedConversations = conversations.stream()
-                .map(conv -> {
-                    Map<String, Object> otherUser = new HashMap<>();
-                    otherUser.put("id", conv.get("other_user_id"));
-                    otherUser.put("username", conv.get("other_username"));
-                    otherUser.put("first_name", conv.get("other_first_name"));
-                    otherUser.put("last_name", conv.get("other_last_name"));
-                    otherUser.put("photo", conv.get("other_user_photo"));
-                    otherUser.put("last_message_content", conv.get("last_message_content"));
-                    otherUser.put("last_message_created_at", conv.get("last_message_created_at"));
-
-                    Map<String, Object> formattedConv = new HashMap<>();
-                    formattedConv.put("conversation_id", conv.get("conversation_id"));
-                    formattedConv.put("created_at", conv.get("created_at"));
-                    formattedConv.put("other_user", otherUser);
-                    return formattedConv;
-                })
-                .collect(Collectors.toList());
+            // Process and format conversations
+            List<Map<String, Object>> formattedConversations = new ArrayList<>();
+            
+            for (Map<String, Object> conv : rawConversations) {
+                Map<String, Object> formatted = new HashMap<>();
+                
+                // Common fields
+                formatted.put("id", conv.get("conversation_id"));
+                formatted.put("created_at", ((Timestamp) conv.get("created_at")).getTime());
+                formatted.put("last_message_content", conv.get("last_message_content"));
+                formatted.put("last_message_time", 
+                    conv.get("last_message_created_at") != null ? 
+                    ((Timestamp) conv.get("last_message_created_at")).getTime() : null);
+                    
+                Boolean isGroup = (Boolean) conv.get("is_group");
+                formatted.put("is_group", isGroup != null ? isGroup : false);
+                
+                if (isGroup != null && isGroup) {
+                    // Group chat formatting
+                    formatted.put("name", conv.get("group_name"));
+                    formatted.put("participant_count", conv.get("participant_count"));
+                    formatted.put("created_by", conv.get("created_by"));
+                    
+                    // Get participant data for group chats
+                    Long conversationId = ((Number) conv.get("conversation_id")).longValue();
+                    String participantSql = """
+                        SELECT u.id, u.username, u.first_name, u.last_name, u.photo
+                        FROM app_user u
+                        JOIN dm_conversation_participant dcp ON u.id = dcp.user_id
+                        WHERE dcp.conversation_id = ?
+                        ORDER BY dcp.joined_at
+                        LIMIT 4
+                        """;
+                    
+                    List<Map<String, Object>> participants = jdbcTemplate.queryForList(participantSql, conversationId);
+                    formatted.put("participants", participants);
+                    
+                    // For group compatibility with existing UI
+                    formatted.put("user1_id", 0); // Not applicable for groups
+                    formatted.put("user2_id", 0); // Not applicable for groups
+                    formatted.put("other_user_id", null);
+                    formatted.put("other_user_name", conv.get("group_name"));
+                    formatted.put("other_user_photo", null);
+                    formatted.put("other_first_name", null);
+                    formatted.put("other_last_name", null);
+                } else {
+                    // 1:1 chat formatting (existing logic)
+                    formatted.put("name", null);
+                    formatted.put("participant_count", conv.get("participant_count"));
+                    formatted.put("created_by", null);
+                    formatted.put("participants", null);
+                    
+                    // User info
+                    formatted.put("user1_id", conv.get("user1_id"));
+                    formatted.put("user2_id", conv.get("user2_id"));
+                    formatted.put("other_user_id", conv.get("other_user_id"));
+                    formatted.put("other_user_name", 
+                        (conv.get("other_first_name") != null ? conv.get("other_first_name") + " " : "") +
+                        (conv.get("other_last_name") != null ? conv.get("other_last_name") : ""));
+                    formatted.put("other_user_photo", conv.get("other_user_photo"));
+                    formatted.put("other_first_name", conv.get("other_first_name"));
+                    formatted.put("other_last_name", conv.get("other_last_name"));
+                }
+                
+                // Calculate unread count for this conversation
+                String unreadCountSql = """
+                    SELECT COUNT(*) FROM dm_message dm
+                    WHERE dm.conversation_id = ? 
+                    AND dm.sender_id != ?
+                    AND NOT EXISTS (
+                        SELECT 1 FROM message_view mv 
+                        WHERE mv.dm_message_id = dm.id 
+                        AND mv.user_id = ? 
+                        AND mv.message_type = 'dm'
+                    )
+                    """;
+                
+                Long conversationId = ((Number) conv.get("conversation_id")).longValue();
+                Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class, 
+                    conversationId, currentUserId, currentUserId);
+                
+                formatted.put("unread_count", unreadCount != null ? unreadCount : 0);
+                formatted.put("has_unread_messages", unreadCount != null && unreadCount > 0);
+                
+                formattedConversations.add(formatted);
+            }
 
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
@@ -244,17 +363,40 @@ public class DMController {
             Long senderId = userId;
 
             // Validate conversation exists and user is part of it
-            String validateSql = "SELECT user1_id, user2_id FROM dm_conversation WHERE id = ?";
-            List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, conversationId);
+            String validateSql = """
+                SELECT c.id, c.is_group, c.user1_id, c.user2_id, c.name,
+                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp 
+                              WHERE dcp.conversation_id = c.id AND dcp.user_id = ?) as is_participant
+                FROM dm_conversation c 
+                WHERE c.id = ?
+                """;
+            
+            List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, senderId, conversationId);
             if (convData.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Conversation not found"));
             }
 
             Map<String, Object> conv = convData.get(0);
-            Long user1Id = ((Number) conv.get("user1_id")).longValue();
-            Long user2Id = ((Number) conv.get("user2_id")).longValue();
-
-            if (!senderId.equals(user1Id) && !senderId.equals(user2Id)) {
+            Boolean isGroup = (Boolean) conv.get("is_group");
+            Boolean isParticipant = (Boolean) conv.get("is_participant");
+            
+            // Check authorization based on conversation type
+            boolean authorized = false;
+            if (isGroup != null && isGroup) {
+                // For group chats, check participant table
+                authorized = isParticipant != null && isParticipant;
+            } else {
+                // For 1:1 chats, check user1_id/user2_id (handle nulls safely)
+                Object user1IdObj = conv.get("user1_id");
+                Object user2IdObj = conv.get("user2_id");
+                if (user1IdObj != null && user2IdObj != null) {
+                    Long user1Id = ((Number) user1IdObj).longValue();
+                    Long user2Id = ((Number) user2IdObj).longValue();
+                    authorized = senderId.equals(user1Id) || senderId.equals(user2Id);
+                }
+            }
+            
+            if (!authorized) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
     
@@ -309,10 +451,34 @@ public class DMController {
                 Timestamp.valueOf(LocalDateTime.now())
             );
     
-            // Determine recipient ID (the other user in the conversation) 
-            Long recipientId = senderId.equals(user1Id) ? user2Id : user1Id;
-    
-            // Fetch the full DM message with sender info and read status for recipient
+            // Determine recipients for broadcasting
+            List<Long> recipientIds = new ArrayList<>();
+            
+            if (isGroup != null && isGroup) {
+                // For group chats, get all participants except sender
+                String getParticipantsSql = """
+                    SELECT user_id 
+                    FROM dm_conversation_participant 
+                    WHERE conversation_id = ? AND user_id != ?
+                    """;
+                List<Map<String, Object>> participants = jdbcTemplate.queryForList(getParticipantsSql, conversationId, senderId);
+                recipientIds = participants.stream()
+                    .map(p -> ((Number) p.get("user_id")).longValue())
+                    .collect(Collectors.toList());
+            } else {
+                // For 1:1 chats, send only to the other participant
+                Long user1Id = conv.get("user1_id") != null ? ((Number) conv.get("user1_id")).longValue() : null;
+                Long user2Id = conv.get("user2_id") != null ? ((Number) conv.get("user2_id")).longValue() : null;
+                
+                if (user1Id != null && user2Id != null) {
+                    Long recipientId = senderId.equals(user1Id) ? user2Id : user1Id;
+                    recipientIds.add(recipientId);
+                }
+            }
+
+            // Fetch the full DM message with sender info (for first recipient or all participants)
+            Long primaryRecipientId = recipientIds.isEmpty() ? null : recipientIds.get(0);
+            
             String fetchSql = """
                 SELECT 
                     dm.id, dm.conversation_id, dm.sender_id, dm.content, 
@@ -328,8 +494,8 @@ public class DMController {
                     AND mv.message_type = 'dm'
                 WHERE dm.id = ?
                 """;
-            
-            Map<String, Object> messageData = jdbcTemplate.queryForMap(fetchSql, recipientId, newMessageId);
+
+            Map<String, Object> messageData = jdbcTemplate.queryForMap(fetchSql, primaryRecipientId, newMessageId);
              // Transform to response format
             Map<String, Object> response = new HashMap<>();
             response.put("id", messageData.get("id"));
@@ -349,14 +515,48 @@ public class DMController {
             response.put("sender_photo", messageData.get("sender_photo"));
             response.put("is_read", messageData.get("is_read"));
     
-            // Broadcast the raw database result directly
-            logger.debug("Broadcasting DM message: {}", messageData);
-            webSocketBroadcastService.broadcastDMMessage(messageData, recipientId);
+            // Broadcast the raw database result to all recipients
+            logger.debug("Broadcasting DM message to {} recipients: {}", recipientIds.size(), messageData);
+            for (Long recipientId : recipientIds) {
+                // Calculate unread count for this specific recipient
+                String unreadCountSql = """
+                    SELECT COUNT(*) FROM dm_message dm
+                    JOIN dm_conversation dc ON dm.conversation_id = dc.id
+                    WHERE dm.conversation_id = ? 
+                    AND dm.sender_id != ?
+                    AND (
+                        -- For group chats: check participant table
+                        (dc.is_group = TRUE AND EXISTS (
+                            SELECT 1 FROM dm_conversation_participant dcp 
+                            WHERE dcp.conversation_id = dc.id AND dcp.user_id = ?
+                        )) OR
+                        -- For 1:1 chats: check user1_id/user2_id
+                        (dc.is_group = FALSE AND (dc.user1_id = ? OR dc.user2_id = ?))
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM message_view mv 
+                        WHERE mv.dm_message_id = dm.id 
+                        AND mv.user_id = ? 
+                        AND mv.message_type = 'dm'
+                    )
+                    """;
+                
+                Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class, 
+                    conversationId, recipientId, recipientId, recipientId, recipientId, recipientId);
+                
+                // Add unread count to the message data for this recipient
+                Map<String, Object> recipientMessageData = new HashMap<>(messageData);
+                recipientMessageData.put("unread_count", unreadCount != null ? unreadCount : 0);
+                
+                webSocketBroadcastService.broadcastDMMessage(recipientMessageData, recipientId);
+            }
             
-            // Send push notification to recipient (background notification)
+            // Send push notification to all recipients (background notification)
             try {
                 String senderName = (String) userData.get("username");
-                pushNotificationService.sendDMNotification(newMessageId, recipientId, senderName, content);
+                for (Long recipientId : recipientIds) {
+                    pushNotificationService.sendDMNotification(newMessageId, recipientId, senderName, content);
+                }
             } catch (Exception pushError) {
                 logger.error("Error sending DM push notification for message {}: {}", newMessageId, pushError.getMessage());
                 // Don't let push notification errors break the DM posting flow
@@ -396,18 +596,40 @@ public class DMController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
             }
 
-            // Validate user is part of this conversation
-            String validateSql = "SELECT user1_id, user2_id FROM dm_conversation WHERE id = ?";
-            List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, conversationId);
+            // Validate user is part of this conversation (both 1:1 and group chats)
+            String validateSql = """
+                SELECT c.id, c.is_group, c.user1_id, c.user2_id,
+                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp 
+                              WHERE dcp.conversation_id = c.id AND dcp.user_id = ?) as is_participant
+                FROM dm_conversation c 
+                WHERE c.id = ?
+                """;
+            List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, currentUserId, conversationId);
             if (convData.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Conversation not found"));
             }
 
             Map<String, Object> conv = convData.get(0);
-            Long user1Id = ((Number) conv.get("user1_id")).longValue();
-            Long user2Id = ((Number) conv.get("user2_id")).longValue();
+            Boolean isGroup = (Boolean) conv.get("is_group");
+            Boolean isParticipant = (Boolean) conv.get("is_participant");
             
-            if (!currentUserId.equals(user1Id) && !currentUserId.equals(user2Id)) {
+            // Check authorization based on conversation type
+            boolean authorized = false;
+            if (isGroup != null && isGroup) {
+                // For group chats, check participant table
+                authorized = isParticipant != null && isParticipant;
+            } else {
+                // For 1:1 chats, check user1_id/user2_id (handle nulls safely)
+                Object user1IdObj = conv.get("user1_id");
+                Object user2IdObj = conv.get("user2_id");
+                if (user1IdObj != null && user2IdObj != null) {
+                    Long user1Id = ((Number) user1IdObj).longValue();
+                    Long user2Id = ((Number) user2IdObj).longValue();
+                    authorized = currentUserId.equals(user1Id) || currentUserId.equals(user2Id);
+                }
+            }
+            
+            if (!authorized) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
 
@@ -487,18 +709,40 @@ public class DMController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
             }
 
-            // Validate user is part of this conversation
-            String validateSql = "SELECT user1_id, user2_id FROM dm_conversation WHERE id = ?";
-            List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, conversationId);
+            // Validate user is part of this conversation (both 1:1 and group chats)
+            String validateSql = """
+                SELECT c.id, c.is_group, c.user1_id, c.user2_id,
+                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp 
+                              WHERE dcp.conversation_id = c.id AND dcp.user_id = ?) as is_participant
+                FROM dm_conversation c 
+                WHERE c.id = ?
+                """;
+            List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, currentUserId, conversationId);
             if (convData.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Conversation not found"));
             }
 
             Map<String, Object> conv = convData.get(0);
-            Long user1Id = ((Number) conv.get("user1_id")).longValue();
-            Long user2Id = ((Number) conv.get("user2_id")).longValue();
+            Boolean isGroup = (Boolean) conv.get("is_group");
+            Boolean isParticipant = (Boolean) conv.get("is_participant");
             
-            if (!currentUserId.equals(user1Id) && !currentUserId.equals(user2Id)) {
+            // Check authorization based on conversation type
+            boolean authorized = false;
+            if (isGroup != null && isGroup) {
+                // For group chats, check participant table
+                authorized = isParticipant != null && isParticipant;
+            } else {
+                // For 1:1 chats, check user1_id/user2_id (handle nulls safely)
+                Object user1IdObj = conv.get("user1_id");
+                Object user2IdObj = conv.get("user2_id");
+                if (user1IdObj != null && user2IdObj != null) {
+                    Long user1Id = ((Number) user1IdObj).longValue();
+                    Long user2Id = ((Number) user2IdObj).longValue();
+                    authorized = currentUserId.equals(user1Id) || currentUserId.equals(user2Id);
+                }
+            }
+            
+            if (!authorized) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
 
@@ -534,6 +778,483 @@ public class DMController {
             logger.error("Error marking messages as read: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Server error: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Create a new group chat
+     * POST /api/dm/groups
+     */
+    @PostMapping("/groups")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> createGroupChat(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, Object> requestBody) {
+        logger.debug("Creating new group chat");
+        
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long currentUserId = authUtil.extractUserId(token);
+            if (currentUserId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            // Extract request data
+            String groupName = (String) requestBody.get("name");
+            @SuppressWarnings("unchecked")
+            List<Integer> participantIds = (List<Integer>) requestBody.get("participantIds");
+            
+            // Validate participants
+            if (participantIds == null || participantIds.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "At least one participant is required"));
+            }
+            
+            // Enforce configurable participant limit (including creator)
+            if (participantIds.size() >= maxGroupChatParticipants) {
+                return ResponseEntity.badRequest().body(Map.of("error", 
+                    "Maximum " + (maxGroupChatParticipants - 1) + " participants allowed (" + maxGroupChatParticipants + " total including you)"));
+            }
+            
+            // Convert to Long and add creator
+            List<Long> allParticipantIds = new ArrayList<>();
+            allParticipantIds.add(currentUserId); // Add creator first
+            for (Integer id : participantIds) {
+                Long participantId = id.longValue();
+                if (!participantId.equals(currentUserId)) { // Don't add creator twice
+                    allParticipantIds.add(participantId);
+                }
+            }
+            
+            // Validate all participants exist
+            String placeholders = allParticipantIds.stream()
+                .map(id -> "?")
+                .collect(Collectors.joining(","));
+            String validateSql = "SELECT COUNT(*) FROM app_user WHERE id IN (" + placeholders + ")";
+            
+            Long validUserCount = jdbcTemplate.queryForObject(validateSql, Long.class, 
+                allParticipantIds.toArray());
+            
+            if (validUserCount != allParticipantIds.size()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "One or more participants not found"));
+            }
+            
+            // Create group conversation
+            String insertGroupSql = """
+                INSERT INTO dm_conversation (name, is_group, created_by_user_id, created_at) 
+                VALUES (?, TRUE, ?, ?) RETURNING id, created_at
+                """;
+            
+            Map<String, Object> groupConversation = jdbcTemplate.queryForMap(insertGroupSql, 
+                groupName, currentUserId, Timestamp.valueOf(LocalDateTime.now()));
+            
+            Long conversationId = ((Number) groupConversation.get("id")).longValue();
+            logger.debug("Created group conversation: {}", conversationId);
+            
+            // Add all participants
+            String insertParticipantSql = """
+                INSERT INTO dm_conversation_participant (conversation_id, user_id, joined_at) 
+                VALUES (?, ?, ?)
+                """;
+            
+            for (Long participantId : allParticipantIds) {
+                jdbcTemplate.update(insertParticipantSql, conversationId, participantId, 
+                    Timestamp.valueOf(LocalDateTime.now()));
+            }
+            
+            // Get participant info for response
+            String participantInfoSql = """
+                SELECT u.id, u.username, u.first_name, u.last_name, u.photo
+                FROM app_user u
+                JOIN dm_conversation_participant dcp ON u.id = dcp.user_id
+                WHERE dcp.conversation_id = ?
+                ORDER BY dcp.joined_at
+                """;
+            
+            List<Map<String, Object>> participants = jdbcTemplate.queryForList(participantInfoSql, conversationId);
+            
+            // Build response
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", conversationId);
+            response.put("name", groupName);
+            response.put("isGroup", true);
+            response.put("participants", participants);
+            response.put("createdBy", currentUserId);
+            response.put("createdAt", groupConversation.get("created_at"));
+            
+            logger.debug("Successfully created group chat with {} participants", participants.size());
+            
+            // Broadcast the new conversation to all participants so their conversation lists refresh
+            for (Long participantId : allParticipantIds) {
+                Map<String, Object> notificationData = new HashMap<>();
+                notificationData.put("type", "new_conversation");
+                notificationData.put("conversationId", conversationId);
+                notificationData.put("conversationName", groupName);
+                notificationData.put("isGroup", true);
+                notificationData.put("participantCount", allParticipantIds.size());
+                
+                // Send to the conversation list topic for each participant
+                String destination = "/topic/dm-list/" + participantId;
+                webSocketBroadcastService.broadcastDMMessage(notificationData, participantId);
+                logger.debug("Broadcasted new group conversation notification to user: {}", participantId);
+            }
+            
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+            
+        } catch (Exception e) {
+            logger.error("Error creating group chat: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Failed to create group chat: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Add participants to a group chat
+     * POST /api/dm/groups/{conversationId}/participants
+     */
+    @PostMapping("/groups/{conversationId}/participants")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> addGroupParticipants(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable Long conversationId,
+            @RequestBody Map<String, Object> requestBody) {
+        logger.debug("Adding participants to group {}", conversationId);
+        
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long currentUserId = authUtil.extractUserId(token);
+            if (currentUserId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            // Verify user is in the group
+            String checkMemberSql = "SELECT COUNT(*) FROM dm_conversation_participant WHERE conversation_id = ? AND user_id = ?";
+            Long memberCount = jdbcTemplate.queryForObject(checkMemberSql, Long.class, conversationId, currentUserId);
+            if (memberCount == null || memberCount == 0) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not a member of this group"));
+            }
+
+            // Extract participant IDs
+            @SuppressWarnings("unchecked")
+            List<Integer> participantIds = (List<Integer>) requestBody.get("participantIds");
+            
+            if (participantIds == null || participantIds.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "No participants specified"));
+            }
+
+            // Check configurable group size limit
+            String currentSizeSql = "SELECT COUNT(*) FROM dm_conversation_participant WHERE conversation_id = ?";
+            Long currentSize = jdbcTemplate.queryForObject(currentSizeSql, Long.class, conversationId);
+            if (currentSize + participantIds.size() > maxGroupChatParticipants) {
+                return ResponseEntity.badRequest().body(Map.of("error", 
+                    "Group size limit exceeded (max " + maxGroupChatParticipants + " members)"));
+            }
+
+            // Add new participants
+            String insertParticipantSql = "INSERT INTO dm_conversation_participant (conversation_id, user_id, joined_at) VALUES (?, ?, ?) ON CONFLICT (conversation_id, user_id) DO NOTHING";
+            
+            List<Map<String, Object>> addedParticipants = new ArrayList<>();
+            for (Integer participantId : participantIds) {
+                Long longParticipantId = participantId.longValue();
+                
+                jdbcTemplate.update(insertParticipantSql, conversationId, longParticipantId, 
+                    Timestamp.valueOf(LocalDateTime.now()));
+                
+                // Get participant info
+                String userInfoSql = "SELECT id, username, first_name, last_name, photo FROM app_user WHERE id = ?";
+                try {
+                    Map<String, Object> participantInfo = jdbcTemplate.queryForMap(userInfoSql, longParticipantId);
+                    addedParticipants.add(participantInfo);
+                } catch (Exception e) {
+                    logger.warn("Could not fetch info for participant {}: {}", longParticipantId, e.getMessage());
+                }
+            }
+
+            logger.debug("Successfully added {} participants to group {}", addedParticipants.size(), conversationId);
+            
+            return ResponseEntity.ok(Map.of(
+                "message", "Participants added successfully",
+                "addedParticipants", addedParticipants
+            ));
+            
+        } catch (Exception e) {
+            logger.error("Error adding group participants: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Failed to add participants: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Remove a participant from a group chat
+     * DELETE /api/dm/groups/{conversationId}/participants/{participantId}
+     */
+    @DeleteMapping("/groups/{conversationId}/participants/{participantId}")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> removeGroupParticipant(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable Long conversationId,
+            @PathVariable Long participantId) {
+        logger.debug("Removing participant {} from group {}", participantId, conversationId);
+        
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long currentUserId = authUtil.extractUserId(token);
+            if (currentUserId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            // Verify user is in the group
+            String checkMemberSql = "SELECT COUNT(*) FROM dm_conversation_participant WHERE conversation_id = ? AND user_id = ?";
+            Long memberCount = jdbcTemplate.queryForObject(checkMemberSql, Long.class, conversationId, currentUserId);
+            if (memberCount == null || memberCount == 0) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not a member of this group"));
+            }
+
+            // Users can remove themselves, or the group creator can remove others
+            String groupInfoSql = "SELECT created_by_user_id FROM dm_conversation WHERE id = ? AND is_group = true";
+            Map<String, Object> groupInfo = jdbcTemplate.queryForMap(groupInfoSql, conversationId);
+            Long createdBy = ((Number) groupInfo.get("created_by_user_id")).longValue();
+            
+            if (!currentUserId.equals(participantId) && !currentUserId.equals(createdBy)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Only group creator can remove other members"));
+            }
+
+            // Don't allow removing the group creator (they must leave voluntarily)
+            if (participantId.equals(createdBy) && !currentUserId.equals(createdBy)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Cannot remove group creator"));
+            }
+
+            // Remove the participant
+            String removeParticipantSql = "DELETE FROM dm_conversation_participant WHERE conversation_id = ? AND user_id = ?";
+            int rowsAffected = jdbcTemplate.update(removeParticipantSql, conversationId, participantId);
+            
+            if (rowsAffected == 0) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Participant not found in group"));
+            }
+
+            // If this was the last member, delete the conversation
+            String remainingMembersSql = "SELECT COUNT(*) FROM dm_conversation_participant WHERE conversation_id = ?";
+            Long remainingMembers = jdbcTemplate.queryForObject(remainingMembersSql, Long.class, conversationId);
+            
+            if (remainingMembers <= 1) {
+                // Delete the conversation if only 1 or 0 members remain
+                String deleteConversationSql = "DELETE FROM dm_conversation WHERE id = ?";
+                jdbcTemplate.update(deleteConversationSql, conversationId);
+                logger.debug("Deleted empty group conversation {}", conversationId);
+            }
+
+            logger.debug("Successfully removed participant {} from group {}", participantId, conversationId);
+            
+            return ResponseEntity.ok(Map.of(
+                "message", "Participant removed successfully",
+                "removedParticipantId", participantId,
+                "remainingMembers", Math.max(0, remainingMembers - 1)
+            ));
+            
+        } catch (Exception e) {
+            logger.error("Error removing group participant: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Failed to remove participant: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Search DM conversations and messages
+     * GET /api/dm/search?q={query}
+     */
+    @GetMapping("/search")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> searchDMConversations(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam("q") String query,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        logger.debug("Searching DM conversations with query: {}", query);
+        
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long currentUserId = authUtil.extractUserId(token);
+            if (currentUserId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            if (query == null || query.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Search query is required"));
+            }
+
+            String searchTerm = "%" + query.toLowerCase() + "%";
+            
+            // Search across conversations, group names, participant names, and message content
+            String searchSql = """
+                SELECT DISTINCT 
+                    c.id as conversation_id,
+                    c.is_group,
+                    c.name as group_name,
+                    c.created_by_user_id,
+                    c.user1_id,
+                    c.user2_id,
+                    c.created_at,
+                    u.id as other_user_id,
+                    u.username as other_username,
+                    u.first_name as other_first_name,
+                    u.last_name as other_last_name,
+                    u.photo as other_user_photo,
+                    m.content as last_message_content,
+                    m.created_at as last_message_created_at,
+                    CASE 
+                        WHEN c.is_group = TRUE THEN (
+                            SELECT COUNT(*) 
+                            FROM dm_conversation_participant dcp 
+                            WHERE dcp.conversation_id = c.id
+                        )
+                        ELSE 2
+                    END as participant_count,
+                    COALESCE(m.created_at, c.created_at) as sort_date
+                FROM dm_conversation c
+                -- Left join with participants to include conversations user belongs to
+                LEFT JOIN dm_conversation_participant my_participation ON c.id = my_participation.conversation_id AND my_participation.user_id = ?
+                -- For 1:1 chats, get the other user info
+                LEFT JOIN app_user u ON (
+                    c.is_group = FALSE AND (
+                        (c.user1_id = ? AND u.id = c.user2_id) OR 
+                        (c.user2_id = ? AND u.id = c.user1_id)
+                    )
+                )
+                -- Get latest message for preview
+                LEFT JOIN (
+                    SELECT DISTINCT ON (conversation_id) 
+                        conversation_id, content, created_at
+                    FROM dm_message
+                    ORDER BY conversation_id, created_at DESC
+                ) m ON m.conversation_id = c.id
+                WHERE (
+                    -- Include group conversations where user is a participant
+                    (c.is_group = TRUE AND my_participation.user_id IS NOT NULL) OR
+                    -- Include 1:1 conversations where user is user1 or user2
+                    (c.is_group = FALSE AND (c.user1_id = ? OR c.user2_id = ?))
+                ) AND (
+                    -- Search group names
+                    LOWER(c.name) LIKE ? OR
+                    -- Search 1:1 user names (only for 1:1 chats where u is not null)
+                    (c.is_group = FALSE AND (
+                        LOWER(u.first_name) LIKE ? OR
+                        LOWER(u.last_name) LIKE ? OR
+                        LOWER(u.username) LIKE ? OR
+                        LOWER(CONCAT(u.first_name, ' ', u.last_name)) LIKE ?
+                    )) OR
+                    -- Search message content
+                    EXISTS (
+                        SELECT 1 FROM dm_message dm 
+                        WHERE dm.conversation_id = c.id 
+                        AND LOWER(dm.content) LIKE ?
+                    ) OR
+                    -- Search group participant names
+                    (c.is_group = TRUE AND EXISTS (
+                        SELECT 1 FROM dm_conversation_participant dcp2
+                        JOIN app_user u2 ON dcp2.user_id = u2.id
+                        WHERE dcp2.conversation_id = c.id
+                        AND (
+                            LOWER(u2.first_name) LIKE ? OR
+                            LOWER(u2.last_name) LIKE ? OR
+                            LOWER(u2.username) LIKE ? OR
+                            LOWER(CONCAT(u2.first_name, ' ', u2.last_name)) LIKE ?
+                        )
+                    ))
+                )
+                ORDER BY sort_date DESC
+                LIMIT ? OFFSET ?
+                """;
+
+            int offset = page * size;
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(searchSql, 
+                currentUserId, currentUserId, currentUserId, currentUserId, currentUserId,
+                searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm,
+                searchTerm, searchTerm, searchTerm, searchTerm,
+                size, offset);
+
+            // Format results like the regular conversation list
+            List<Map<String, Object>> formattedResults = new ArrayList<>();
+            for (Map<String, Object> conv : results) {
+                Map<String, Object> formatted = new HashMap<>();
+                formatted.put("id", conv.get("conversation_id")); // Fix: use "id" not "conversation_id"
+                formatted.put("is_group", conv.get("is_group"));
+                formatted.put("created_at", conv.get("created_at"));
+                formatted.put("updated_at", conv.get("created_at")); // Add missing updated_at field
+                formatted.put("last_message_content", conv.get("last_message_content"));
+                formatted.put("last_message_time", conv.get("last_message_created_at"));
+
+                Boolean isGroup = (Boolean) conv.get("is_group");
+                if (isGroup != null && isGroup) {
+                    // Group chat formatting
+                    formatted.put("name", conv.get("group_name"));
+                    formatted.put("participant_count", conv.get("participant_count"));
+                    formatted.put("created_by", conv.get("created_by_user_id"));
+                    
+                    // Get participant data for group chats
+                    Long conversationId = ((Number) conv.get("conversation_id")).longValue();
+                    String participantSql = """
+                        SELECT u.id, u.username, u.first_name, u.last_name, u.photo
+                        FROM app_user u
+                        JOIN dm_conversation_participant dcp ON u.id = dcp.user_id
+                        WHERE dcp.conversation_id = ?
+                        ORDER BY dcp.joined_at
+                        LIMIT 4
+                        """;
+                    
+                    List<Map<String, Object>> participants = jdbcTemplate.queryForList(participantSql, conversationId);
+                    formatted.put("participants", participants);
+                    
+                    // For group compatibility
+                    formatted.put("user1_id", 0);
+                    formatted.put("user2_id", 0);
+                    formatted.put("other_user_id", null);
+                    formatted.put("other_user_name", conv.get("group_name"));
+                    formatted.put("other_user_photo", null);
+                    formatted.put("other_first_name", null);
+                    formatted.put("other_last_name", null);
+                } else {
+                    // 1:1 chat formatting
+                    formatted.put("name", null);
+                    formatted.put("participant_count", 2);
+                    formatted.put("created_by", null);
+                    formatted.put("participants", null);
+                    
+                    // User info
+                    formatted.put("user1_id", conv.get("user1_id"));
+                    formatted.put("user2_id", conv.get("user2_id"));
+                    formatted.put("other_user_id", conv.get("other_user_id"));
+                    formatted.put("other_user_name", 
+                        (conv.get("other_first_name") != null ? conv.get("other_first_name") + " " : "") +
+                        (conv.get("other_last_name") != null ? conv.get("other_last_name") : ""));
+                    formatted.put("other_user_photo", conv.get("other_user_photo"));
+                    formatted.put("other_first_name", conv.get("other_first_name"));
+                    formatted.put("other_last_name", conv.get("other_last_name"));
+                }
+                
+                // Calculate unread count (simplified for search results)
+                formatted.put("unread_count", 0);
+                formatted.put("has_unread_messages", false);
+                
+                formattedResults.add(formatted);
+            }
+
+            // Build response
+            Map<String, Object> response = new HashMap<>();
+            response.put("conversations", formattedResults);
+            response.put("total_results", formattedResults.size());
+            response.put("page", page);
+            response.put("size", size);
+            response.put("query", query);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error searching DM conversations: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Failed to search conversations: " + e.getMessage()));
         }
     }
 } 

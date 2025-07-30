@@ -39,9 +39,15 @@ public class WebSocketBroadcastService {
             
             logger.debug("Broadcasting DM MESSAGE to recipient {}", recipientId);
             
-            String destination = "/topic/dm/" + recipientId;
-            messagingTemplate.convertAndSend(destination, messageData);
-            logger.debug("Successfully broadcast DM MESSAGE to {}", destination);
+            // Send to conversation list topic (for MessagesHomeScreen)
+            String listDestination = "/topic/dm-list/" + recipientId;
+            messagingTemplate.convertAndSend(listDestination, messageData);
+            logger.debug("Successfully broadcast DM MESSAGE to conversation list {}", listDestination);
+            
+            // Send to thread topic (for DMThreadScreen) 
+            String threadDestination = "/topic/dm-thread/" + recipientId;
+            messagingTemplate.convertAndSend(threadDestination, messageData);
+            logger.debug("Successfully broadcast DM MESSAGE to thread {}", threadDestination);
             
         } catch (Exception e) {
             logger.error("Failed to broadcast DM message to recipient {}: {}", recipientId, e.getMessage(), e);

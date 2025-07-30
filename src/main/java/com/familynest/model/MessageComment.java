@@ -56,10 +56,10 @@ public class MessageComment {
     @Column(name = "parent_comment_id")
     private Long parentCommentId;
 
-    @Column(name = "FAMILY_ID", nullable = false)
+    @Column(name = "family_id", nullable = false)
     private Long familyId;
 
-    @Column(name = "timestamp")
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
