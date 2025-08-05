@@ -25,7 +25,7 @@ public class AuthFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String path = request.getRequestURI();
-        logger.error("⚠️ AUTH FILTER - PROCESSING REQUEST FOR URI: {}", path);
+        logger.debug("⚠️ AUTH FILTER - PROCESSING REQUEST FOR URI: {}", path);
 
            // BYPASS AUTH FOR WEBSOCKET HANDSHAKE
         if (path.equals("/ws") || path.startsWith("/ws/")) {
@@ -53,12 +53,12 @@ public class AuthFilter extends OncePerRequestFilter {
         }
         
         // Print request details for debugging
-        logger.error("⚠️ Request method: {}", request.getMethod());
-        logger.error("⚠️ Request headers:");
+        logger.debug("⚠️ Request method: {}", request.getMethod());
+        logger.debug("⚠️ Request headers:");
         Enumeration<String> headerNames = request.getHeaderNames();
         while (headerNames.hasMoreElements()) {
             String headerName = headerNames.nextElement();
-            logger.error("  {}: {}", headerName, request.getHeader(headerName));
+            logger.debug("  {}: {}", headerName, request.getHeader(headerName));
         }
         
         // Check if a test filter has already set authentication attributes
@@ -101,7 +101,7 @@ public class AuthFilter extends OncePerRequestFilter {
      //   logger.error("❌❌❌ ENDPOINT NOT IN PUBLIC WHITELIST: {}", path);
 
         String authHeader = request.getHeader("Authorization");
-        logger.error("🔑 Auth header: {}", authHeader);
+        logger.debug("🔑 Auth header: {}", authHeader);
         
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             logger.error("❌ No valid Authorization header found: {}", authHeader);
@@ -110,7 +110,7 @@ public class AuthFilter extends OncePerRequestFilter {
         }
 
         String token = authHeader.substring(7);
-        logger.error("🔑 Token: {}", token);
+        logger.debug("🔑 Token: {}", token);
         
         if (!authUtil.validateToken(token)) {
             logger.error("❌ Token validation failed for token: {}", token);
@@ -120,7 +120,7 @@ public class AuthFilter extends OncePerRequestFilter {
 
         Long userId = authUtil.extractUserId(token);
         String role = authUtil.getUserRole(token);
-        logger.error("✅ Token valid! Extracted userId: {}, role: {}", userId, role);
+        logger.debug("✅ Token valid! Extracted userId: {}, role: {}", userId, role);
 
         // Set user attributes for the request
         request.setAttribute("userId", userId);

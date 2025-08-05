@@ -234,7 +234,7 @@ public class ReactionController {
                     CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
                 FROM message m
                 LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
-                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
                 WHERE m.id = ?
                 """;
             
@@ -302,7 +302,7 @@ public class ReactionController {
                     CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
                 FROM message m
                 LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
-                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
                 WHERE m.id = ?
                 """;
             
@@ -469,7 +469,7 @@ public class ReactionController {
                     CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
                 FROM message_comment mc
                 LEFT JOIN message_reaction mr ON mc.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT'
-                LEFT JOIN message_reaction mr2 ON mc.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
+                LEFT JOIN message_reaction mr2 ON mc.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
                 WHERE mc.id = ?
                 """;
             

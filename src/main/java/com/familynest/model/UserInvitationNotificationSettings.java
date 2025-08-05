@@ -3,8 +3,9 @@ package com.familynest.model;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "user_invitation_notification_settings")
+// Temporarily commented out - table will be dropped in V32
+// @Entity
+// @Table(name = "user_invitation_notification_settings")
 public class UserInvitationNotificationSettings {
 
     @Id

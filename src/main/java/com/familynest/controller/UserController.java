@@ -1,17 +1,18 @@
 package com.familynest.controller;
 
-import com.familynest.model.Message;
 import com.familynest.model.User;
 import com.familynest.model.Family;
-import com.familynest.repository.MessageRepository;
+
 import com.familynest.repository.UserRepository;
 import com.familynest.repository.FamilyRepository;
 import com.familynest.auth.AuthUtil; // Add this import
-import com.familynest.service.ThumbnailService; // Add ThumbnailService import
+import com.familynest.auth.TokenPair;
+
 import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
+import com.familynest.service.RefreshTokenService;
 import com.familynest.util.ErrorCodes; // Add ErrorCodes import
 import com.familynest.service.EmailService;
 
@@ -23,13 +24,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
+
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,11 +40,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.familynest.dto.UserDataDTO;
 import org.springframework.web.bind.annotation.RequestHeader;
 import com.familynest.auth.JwtUtil;
-import com.familynest.model.Invitation;
-import com.familynest.repository.InvitationRepository;
+
+
 import com.familynest.model.UserFamilyMembership;
 import com.familynest.repository.UserFamilyMembershipRepository;
 import com.familynest.repository.UserFamilyMessageSettingsRepository;
+import com.familynest.repository.UserPreferencesRepository;
+import com.familynest.model.UserPreferences;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -55,7 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import java.io.IOException;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -78,9 +81,6 @@ public class UserController {
     private UserRepository userRepository;
 
     @Autowired
-    private MessageRepository messageRepository;
-
-    @Autowired
     private FamilyRepository familyRepository;
 
     @Autowired
@@ -90,16 +90,16 @@ public class UserController {
     private JwtUtil jwtUtil; // Ensure JwtUtil is injected
 
     @Autowired
-    private InvitationRepository invitationRepository;
-
-    @Autowired
     private UserFamilyMembershipRepository userFamilyMembershipRepository;
 
     @Autowired
     private UserFamilyMessageSettingsRepository userFamilyMessageSettingsRepository;
 
     @Autowired
-    private VideoController videoController;
+    private UserPreferencesRepository userPreferencesRepository;
+
+    @Autowired
+    private RefreshTokenService refreshTokenService;
 
     @Value("${file.upload-dir:/tmp/familynest-uploads}")
     private String uploadDir;
@@ -128,8 +128,7 @@ public class UserController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private ThumbnailService thumbnailService;
+
 
     @Autowired
     private MediaService mediaService;
@@ -209,12 +208,16 @@ public class UserController {
         
         try {
             // Use a single optimized SQL query to get user data with all related information
-            // Get the user's primary/active family (first active membership)
+            // Include user preferences to respect demographics visibility settings
             String sql = "WITH user_data AS (" +
                         "  SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.role, " +
                         "         u.photo, u.phone_number, u.address, u.city, " +
-                        "         u.state, u.zip_code, u.country, u.birth_date, u.bio, u.show_demographics, u.onboarding_state " +
+                        "         u.state, u.zip_code, u.country, u.birth_date, u.bio, u.onboarding_state " +
                         "  FROM app_user u WHERE u.id = ? " +
+                        "), " +
+                        "user_preferences AS (" +
+                        "  SELECT up.show_address, up.show_phone_number, up.show_birthday " +
+                        "  FROM user_preferences up WHERE up.user_id = ? " +
                         "), " +
                         "primary_family AS (" +
                         "  SELECT ufm.family_id, ufm.role as membership_role, ufm.is_active " +
@@ -231,15 +234,19 @@ public class UserController {
                         ") " +
                         "SELECT ud.*, fd.id as family_id, fd.name as family_name, " +
                         "       fd.created_by as family_created_by, fd.member_count, " +
-                        "       pf.membership_role, pf.is_active " +
+                        "       pf.membership_role, pf.is_active, " +
+                        "       COALESCE(uprefs.show_address, true) as show_address, " +
+                        "       COALESCE(uprefs.show_phone_number, true) as show_phone_number, " +
+                        "       COALESCE(uprefs.show_birthday, true) as show_birthday " +
                         "FROM user_data ud " +
+                        "LEFT JOIN user_preferences uprefs ON 1=1 " +
                         "LEFT JOIN family_data fd ON 1=1 " +
                         "LEFT JOIN primary_family pf ON 1=1";
                         
             logger.debug("Executing optimized query for user ID: {}", id);
             
-            // Execute the optimized query
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id);
+            // Execute the optimized query (now with 3 parameters: id, id, id)
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id);
             
             if (results.isEmpty()) {
                 logger.debug("User not found for ID: {}", id);
@@ -249,7 +256,7 @@ public class UserController {
             // Process the first row for user data
             Map<String, Object> userData = results.get(0);
             
-            // Create a sanitized response without sensitive data
+            // Create a sanitized response respecting user demographics preferences
             Map<String, Object> sanitizedUser = new HashMap<>();
             sanitizedUser.put("id", userData.get("id"));
             sanitizedUser.put("username", userData.get("username"));
@@ -259,16 +266,30 @@ public class UserController {
             sanitizedUser.put("role", userData.get("role"));
             sanitizedUser.put("photo", userData.get("photo"));
             sanitizedUser.put("familyId", userData.get("family_id"));
-            sanitizedUser.put("phoneNumber", userData.get("phone_number"));
-            sanitizedUser.put("address", userData.get("address"));
-            sanitizedUser.put("city", userData.get("city"));
-            sanitizedUser.put("state", userData.get("state"));
-            sanitizedUser.put("zipCode", userData.get("zip_code"));
-            sanitizedUser.put("country", userData.get("country"));
-            sanitizedUser.put("birthDate", userData.get("birth_date"));
             sanitizedUser.put("bio", userData.get("bio"));
-            sanitizedUser.put("showDemographics", userData.get("show_demographics"));
             sanitizedUser.put("onboardingState", userData.get("onboarding_state"));
+            
+            // Get user preferences for demographics visibility
+            Boolean showPhoneNumber = (Boolean) userData.get("show_phone_number");
+            Boolean showAddress = (Boolean) userData.get("show_address");
+            Boolean showBirthday = (Boolean) userData.get("show_birthday");
+            
+            // Only include sensitive information if user preferences allow it
+            if (showPhoneNumber != null && showPhoneNumber) {
+                sanitizedUser.put("phoneNumber", userData.get("phone_number"));
+            }
+            
+            if (showAddress != null && showAddress) {
+                sanitizedUser.put("address", userData.get("address"));
+                sanitizedUser.put("city", userData.get("city"));
+                sanitizedUser.put("state", userData.get("state"));
+                sanitizedUser.put("zipCode", userData.get("zip_code"));
+                sanitizedUser.put("country", userData.get("country"));
+            }
+            
+            if (showBirthday != null && showBirthday) {
+                sanitizedUser.put("birthDate", userData.get("birth_date"));
+            }
             
             // Add family data if present
             if (userData.get("family_id") != null) {
@@ -414,13 +435,23 @@ public class UserController {
                     .body(Map.of("error", "Invalid username or password"));
             }
             
-            // Password is verified - generate token and return login data
+            // Password is verified - generate token pair and return login data
             logger.debug("Login successful for username: {}", username);
-            String token = authUtil.generateToken(userId, role);
+            
+            // Generate both access and refresh tokens
+            TokenPair tokenPair = jwtUtil.generateTokenPair(userId, role);
+            
+            // Store refresh token in database
+            refreshTokenService.createRefreshToken(userId, tokenPair.getRefreshToken());
             
             Map<String, Object> response = new HashMap<>();
             response.put("userId", userId);
-            response.put("token", token);
+            response.put("token", tokenPair.getAccessToken()); // Legacy field name for backward compatibility
+            response.put("accessToken", tokenPair.getAccessToken());
+            response.put("refreshToken", tokenPair.getRefreshToken());
+            response.put("accessTokenExpiresIn", tokenPair.getAccessTokenExpiresIn());
+            response.put("refreshTokenExpiresIn", tokenPair.getRefreshTokenExpiresIn());
+            response.put("tokenType", "Bearer");
             response.put("role", role != null ? role : "USER");
             
             return ResponseEntity.ok(response);
@@ -1019,6 +1050,124 @@ public class UserController {
             return ResponseEntity.badRequest().build();
         }
     }
+    /**
+     * Get current user's preferences and settings
+     * GET /api/users/current/settings
+     */
+    @GetMapping("/current/settings")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Map<String, Object>> getCurrentUserSettings() {
+        logger.debug("Received request to get current user settings");
+        try {
+            HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+            Long userId = (Long) request.getAttribute("userId");
+            if (userId == null) {
+                logger.debug("No userId found in request");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+            }
+            
+            logger.debug("Getting user preferences for user ID: {}", userId);
+            
+            // Get or create user preferences
+            UserPreferences preferences = userPreferencesRepository.findByUserId(userId)
+                .orElseGet(() -> {
+                    logger.debug("Creating default preferences for user {}", userId);
+                    UserPreferences newPrefs = new UserPreferences(userId);
+                    return userPreferencesRepository.save(newPrefs);
+                });
+            
+            // Build response with all user preferences
+            Map<String, Object> response = new HashMap<>();
+            response.put("userId", userId);
+            
+            // Demographics/Privacy Settings
+            response.put("showAddress", preferences.getShowAddress());
+            response.put("showPhoneNumber", preferences.getShowPhoneNumber());
+            response.put("showBirthday", preferences.getShowBirthday());
+            
+            // Notification Preferences
+            response.put("familyMessagesNotifications", preferences.getFamilyMessagesNotifications());
+            response.put("newMemberNotifications", preferences.getNewMemberNotifications());
+            response.put("invitationNotifications", preferences.getInvitationNotifications());
+            
+            logger.debug("Returning user preferences: {}", response);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error retrieving user preferences: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Error retrieving user preferences: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Update current user's preferences
+     * PUT /api/users/current/preferences
+     */
+    @PutMapping("/current/preferences")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> updateUserPreferences(@RequestBody Map<String, Object> preferencesData) {
+        logger.debug("Received request to update user preferences");
+        try {
+            HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+            Long userId = (Long) request.getAttribute("userId");
+            if (userId == null) {
+                logger.debug("No userId found in request");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+            }
+            
+            logger.debug("Updating preferences for user ID: {} with data: {}", userId, preferencesData);
+            
+            // Get or create user preferences
+            UserPreferences preferences = userPreferencesRepository.findByUserId(userId)
+                .orElseGet(() -> {
+                    logger.debug("Creating new preferences for user {}", userId);
+                    return new UserPreferences(userId);
+                });
+            
+            // Update demographics/privacy settings
+            if (preferencesData.containsKey("showAddress")) {
+                preferences.setShowAddress((Boolean) preferencesData.get("showAddress"));
+            }
+            if (preferencesData.containsKey("showPhoneNumber")) {
+                preferences.setShowPhoneNumber((Boolean) preferencesData.get("showPhoneNumber"));
+            }
+            if (preferencesData.containsKey("showBirthday")) {
+                preferences.setShowBirthday((Boolean) preferencesData.get("showBirthday"));
+            }
+            
+            // Update notification preferences
+            if (preferencesData.containsKey("familyMessagesNotifications")) {
+                preferences.setFamilyMessagesNotifications((Boolean) preferencesData.get("familyMessagesNotifications"));
+            }
+            if (preferencesData.containsKey("newMemberNotifications")) {
+                preferences.setNewMemberNotifications((Boolean) preferencesData.get("newMemberNotifications"));
+            }
+            if (preferencesData.containsKey("invitationNotifications")) {
+                preferences.setInvitationNotifications((Boolean) preferencesData.get("invitationNotifications"));
+            }
+            
+            // Save preferences
+            preferences = userPreferencesRepository.save(preferences);
+            logger.debug("User preferences updated successfully for user ID: {}", userId);
+            
+            // Build response with updated preferences
+            Map<String, Object> response = new HashMap<>();
+            response.put("userId", userId);
+            response.put("showAddress", preferences.getShowAddress());
+            response.put("showPhoneNumber", preferences.getShowPhoneNumber());
+            response.put("showBirthday", preferences.getShowBirthday());
+            response.put("familyMessagesNotifications", preferences.getFamilyMessagesNotifications());
+            response.put("newMemberNotifications", preferences.getNewMemberNotifications());
+            response.put("invitationNotifications", preferences.getInvitationNotifications());
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error updating user preferences: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Error updating user preferences: " + e.getMessage()));
+        }
+    }
+
     @GetMapping("/current")
     @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getCurrentUser() {
@@ -1237,9 +1386,7 @@ public class UserController {
             if (profileData.containsKey("bio")) {
                 user.setBio((String) profileData.get("bio"));
             }
-            if (profileData.containsKey("showDemographics")) {
-                user.setShowDemographics((Boolean) profileData.get("showDemographics"));
-            }
+            // showDemographics field removed - now handled by user_preferences table
             if (profileData.containsKey("birthDate") && profileData.get("birthDate") != null) {
                 String birthDateStr = (String) profileData.get("birthDate");
                 if (birthDateStr != null && !birthDateStr.isEmpty()) {
@@ -1280,7 +1427,7 @@ public class UserController {
             response.put("country", user.getCountry());
             response.put("birthDate", user.getBirthDate() != null ? user.getBirthDate().toString() : null);
             response.put("bio", user.getBio());
-            response.put("showDemographics", user.getShowDemographics());
+            // showDemographics field removed - now handled by user_preferences table
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {

@@ -4,8 +4,9 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 
-@Entity
-@Table(name = "user_global_notification_settings")
+// Temporarily commented out - table will be dropped in V32
+// @Entity
+// @Table(name = "user_global_notification_settings")
 public class UserGlobalNotificationSettings {
 
     @Id

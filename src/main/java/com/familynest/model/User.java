@@ -77,7 +77,7 @@ public class User {
     @Column(columnDefinition = "TEXT")
     private String bio;
     
-    private Boolean showDemographics = false;
+    // showDemographics field removed - now handled by user_preferences table
 
     // Subscription and trial fields
     private String subscriptionStatus = "trial";
@@ -294,13 +294,7 @@ public class User {
         this.bio = bio;
     }
 
-    public Boolean getShowDemographics() {
-        return showDemographics;
-    }
-
-    public void setShowDemographics(Boolean showDemographics) {
-        this.showDemographics = showDemographics;
-    }
+    // showDemographics getter/setter removed - now handled by user_preferences table
 
     // Subscription and trial getters and setters
     public String getSubscriptionStatus() {
