@@ -116,8 +116,35 @@ public class NotificationPreferencesController {
                         .body(Map.of("error", "Both pushNotificationsEnabled and emailNotificationsEnabled are required"));
             }
 
-            // Update or insert notification settings
+            // Update the unified notification matrix table (global settings row)
             String sql = """
+                UPDATE user_notification_matrix 
+                SET push_enabled = ?, 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? 
+                AND family_id = 0 
+                AND member_id = 0
+                """;
+            
+            int rowsUpdated = jdbcTemplate.update(sql, pushEnabled, userId);
+            
+            // If no global row exists, create one with default settings
+            if (rowsUpdated == 0) {
+                String insertSql = """
+                    INSERT INTO user_notification_matrix (
+                        user_id, family_id, member_id, push_enabled, device_permission_granted,
+                        family_messages_push, dm_messages_push, invitations_push, 
+                        reactions_push, comments_push, new_member_push,
+                        family_messages_websocket, dm_messages_websocket, invitations_websocket,
+                        reactions_websocket, comments_websocket, new_member_websocket
+                    ) VALUES (?, 0, 0, ?, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
+                    """;
+                jdbcTemplate.update(insertSql, userId, pushEnabled);
+                logger.debug("Created new matrix row for user {}", userId);
+            }
+            
+            // Also update the legacy table for backward compatibility (temporary)
+            String legacySql = """
                 INSERT INTO user_notification_settings (user_id, push_notifications_enabled, email_notifications_enabled)
                 VALUES (?, ?, ?)
                 ON CONFLICT (user_id) DO UPDATE SET
@@ -126,7 +153,7 @@ public class NotificationPreferencesController {
                     updated_at = CURRENT_TIMESTAMP
                 """;
             
-            jdbcTemplate.update(sql, userId, pushEnabled, emailEnabled);
+            jdbcTemplate.update(legacySql, userId, pushEnabled, emailEnabled);
             
             Map<String, Object> response = new HashMap<>();
             response.put("message", "Notification preferences updated successfully");

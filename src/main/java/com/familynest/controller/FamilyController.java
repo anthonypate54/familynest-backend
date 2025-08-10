@@ -11,6 +11,7 @@ import com.familynest.repository.InvitationRepository;
 import com.familynest.model.Invitation;
 import com.familynest.auth.AuthUtil;
 import com.familynest.auth.JwtUtil;
+import com.familynest.service.PushNotificationService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +57,9 @@ public class FamilyController {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PushNotificationService pushNotificationService;
 
     /**
      * Create a new family
@@ -379,6 +383,27 @@ public class FamilyController {
             } catch (Exception e) {
                 logger.error("Error creating message settings: {}", e.getMessage());
                 // Continue anyway, don't fail the whole operation
+            }
+            
+            // Send new member notification to existing family members
+            try {
+                // Get user details for notification
+                Map<String, Object> userData = jdbcTemplate.queryForMap(
+                    "SELECT first_name, last_name FROM app_user WHERE id = ?", userId
+                );
+                String newMemberName = userData.get("first_name") + " " + userData.get("last_name");
+                
+                // Get family name for notification
+                Map<String, Object> familyData = jdbcTemplate.queryForMap(
+                    "SELECT name FROM family WHERE id = ?", familyId
+                );
+                String familyName = (String) familyData.get("name");
+                
+                pushNotificationService.sendNewMemberNotification(familyId, newMemberName, familyName);
+                logger.debug("Sent new member notification for {} joining {}", newMemberName, familyName);
+            } catch (Exception e) {
+                logger.error("Error sending new member notification: {}", e.getMessage());
+                // Don't fail the join operation if notification fails
             }
             
             logger.debug("User ID: {} joined family ID: {}", userId, familyId);

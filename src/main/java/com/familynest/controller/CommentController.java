@@ -28,6 +28,8 @@ import com.familynest.auth.AuthUtil; // Add this import
 
 import org.springframework.web.bind.annotation.*;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.dao.DataAccessException;
 
 import java.time.LocalDateTime;
@@ -445,22 +447,34 @@ public class CommentController {
             
             logger.debug("Created comment {} visible in {} families", newCommentId, parentMessageFamilies.size());
     
-            // Fetch the full comment with all joins using the service
-            Map<String, Object> commentData = messageService.getCommentById(newCommentId);
-    
-            // Broadcast the comment via WebSocket using thread-specific approach
-            // This separates concerns from main message broadcasts
-            try {
-                logger.debug("Broadcasting comment via thread-specific WebSocket: {}", commentData);
-                // Broadcast to each family the parent message is visible in
-                for (Map<String, Object> family : parentMessageFamilies) {
-                    Long targetFamilyId = ((Number) family.get("family_id")).longValue();
-                    webSocketBroadcastService.broadcastComment(commentData, parentMessageId, targetFamilyId);
+            // Schedule WebSocket broadcast to happen AFTER transaction commits
+            final Long finalCommentId = newCommentId;
+            final Long finalParentMessageId = parentMessageId;
+            final List<Map<String, Object>> finalParentMessageFamilies = new ArrayList<>(parentMessageFamilies);
+            
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    try {
+                        // Fetch the full comment with all joins using the service
+                        Map<String, Object> commentData = messageService.getCommentById(finalCommentId);
+                        
+                        // Broadcast the comment via WebSocket using thread-specific approach
+                        logger.debug("Broadcasting comment via thread-specific WebSocket (AFTER COMMIT): {}", commentData);
+                        // Broadcast to each family the parent message is visible in
+                        for (Map<String, Object> family : finalParentMessageFamilies) {
+                            Long targetFamilyId = ((Number) family.get("family_id")).longValue();
+                            webSocketBroadcastService.broadcastComment(commentData, finalParentMessageId, targetFamilyId);
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error broadcasting WebSocket comment for commentId {} (AFTER COMMIT): {}", finalCommentId, e.getMessage());
+                        // Continue processing - don't let WebSocket errors break comment posting
+                    }
                 }
-            } catch (Exception e) {
-                logger.error("Error broadcasting WebSocket comment for commentId {}: {}", newCommentId, e.getMessage());
-                // Continue processing - don't let WebSocket errors break comment posting
-            }
+            });
+
+            // Fetch the full comment with all joins for the response
+            Map<String, Object> commentData = messageService.getCommentById(newCommentId);
 
             // Send push notification for comment (background notification)
             try {

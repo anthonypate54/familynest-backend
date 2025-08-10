@@ -15,6 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -245,13 +247,25 @@ public class ReactionController {
             List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, messageId);
 
             // Broadcast reaction update to all families
-            for (Map<String, Object> family : families) {
-                Long familyId = ((Number) family.get("family_id")).longValue();
-                reactionData.put("target_type", "MESSAGE");
-                reactionData.put("action", action);
-                reactionData.put("reaction_type", "LIKE");
-                webSocketBroadcastService.broadcastReaction(reactionData, messageId, familyId);
-            }
+            // Schedule WebSocket broadcast to happen AFTER transaction commits
+            final Map<String, Object> finalReactionData = new HashMap<>(reactionData);
+            final Long finalMessageId = messageId;
+            final String finalAction = action;
+            final List<Map<String, Object>> finalFamilies = new ArrayList<>(families);
+            
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (Map<String, Object> family : finalFamilies) {
+                        Long familyId = ((Number) family.get("family_id")).longValue();
+                        finalReactionData.put("target_type", "MESSAGE");
+                        finalReactionData.put("action", finalAction);
+                        finalReactionData.put("reaction_type", "LIKE");
+                        webSocketBroadcastService.broadcastReaction(finalReactionData, finalMessageId, familyId);
+                        logger.debug("Broadcasted message reaction to family {} (AFTER COMMIT)", familyId);
+                    }
+                }
+            });
 
             return ResponseEntity.ok(Map.of("action", action, "type", "like", "like_count", reactionData.get("like_count")));
         } catch (Exception e) {
@@ -312,14 +326,25 @@ public class ReactionController {
             String familiesSql = "SELECT family_id FROM message_family_link WHERE message_id = ?";
             List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, messageId);
 
-            // Broadcast reaction update to all families
-            for (Map<String, Object> family : families) {
-                Long familyId = ((Number) family.get("family_id")).longValue();
-                reactionData.put("target_type", "MESSAGE");
-                reactionData.put("action", action);
-                reactionData.put("reaction_type", "LOVE");
-                webSocketBroadcastService.broadcastReaction(reactionData, messageId, familyId);
-            }
+            // Schedule WebSocket broadcast to happen AFTER transaction commits
+            final Map<String, Object> finalReactionData = new HashMap<>(reactionData);
+            final Long finalMessageId = messageId;
+            final String finalAction = action;
+            final List<Map<String, Object>> finalFamilies = new ArrayList<>(families);
+            
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (Map<String, Object> family : finalFamilies) {
+                        Long familyId = ((Number) family.get("family_id")).longValue();
+                        finalReactionData.put("target_type", "MESSAGE");
+                        finalReactionData.put("action", finalAction);
+                        finalReactionData.put("reaction_type", "LOVE");
+                        webSocketBroadcastService.broadcastReaction(finalReactionData, finalMessageId, familyId);
+                        logger.debug("Broadcasted message love reaction to family {} (AFTER COMMIT)", familyId);
+                    }
+                }
+            });
 
             return ResponseEntity.ok(Map.of("action", action, "type", "love", "love_count", reactionData.get("love_count")));
         } catch (Exception e) {
@@ -398,13 +423,25 @@ public class ReactionController {
             List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, parentMessageId);
 
             // Broadcast reaction update to all families
-            for (Map<String, Object> family : families) {
-                Long familyId = ((Number) family.get("family_id")).longValue();
-                reactionData.put("target_type", "COMMENT");
-                reactionData.put("action", action);
-                reactionData.put("reaction_type", "LIKE");
-                webSocketBroadcastService.broadcastReaction(reactionData, commentId, familyId);
-            }
+            // Schedule WebSocket broadcast to happen AFTER transaction commits
+            final Map<String, Object> finalReactionData = new HashMap<>(reactionData);
+            final Long finalCommentId = commentId;
+            final String finalAction = action;
+            final List<Map<String, Object>> finalFamilies = new ArrayList<>(families);
+            
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (Map<String, Object> family : finalFamilies) {
+                        Long familyId = ((Number) family.get("family_id")).longValue();
+                        finalReactionData.put("target_type", "COMMENT");
+                        finalReactionData.put("action", finalAction);
+                        finalReactionData.put("reaction_type", "LIKE");
+                        webSocketBroadcastService.broadcastReaction(finalReactionData, finalCommentId, familyId);
+                        logger.debug("Broadcasted comment like reaction to family {} (AFTER COMMIT)", familyId);
+                    }
+                }
+            });
 
             logger.info("Updated like count for comment {} to {}", commentId, reactionData.get("like_count"));
             return ResponseEntity.ok(Map.of("action", action, "type", "like", "like_count", reactionData.get("like_count")));
@@ -479,14 +516,25 @@ public class ReactionController {
             String familiesSql = "SELECT family_id FROM message_family_link WHERE message_id = ?";
             List<Map<String, Object>> families = jdbcTemplate.queryForList(familiesSql, parentMessageId);
 
-            // Broadcast reaction update to all families
-            for (Map<String, Object> family : families) {
-                Long familyId = ((Number) family.get("family_id")).longValue();
-                reactionData.put("target_type", "COMMENT");
-                reactionData.put("action", action);
-                reactionData.put("reaction_type", "LOVE");
-                webSocketBroadcastService.broadcastReaction(reactionData, commentId, familyId);
-            }
+            // Schedule WebSocket broadcast to happen AFTER transaction commits
+            final Map<String, Object> finalReactionData = new HashMap<>(reactionData);
+            final Long finalCommentId = commentId;
+            final String finalAction = action;
+            final List<Map<String, Object>> finalFamilies = new ArrayList<>(families);
+            
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (Map<String, Object> family : finalFamilies) {
+                        Long familyId = ((Number) family.get("family_id")).longValue();
+                        finalReactionData.put("target_type", "COMMENT");
+                        finalReactionData.put("action", finalAction);
+                        finalReactionData.put("reaction_type", "LOVE");
+                        webSocketBroadcastService.broadcastReaction(finalReactionData, finalCommentId, familyId);
+                        logger.debug("Broadcasted comment love reaction to family {} (AFTER COMMIT)", familyId);
+                    }
+                }
+            });
 
             return ResponseEntity.ok(Map.of("action", action, "type", "love", "love_count", reactionData.get("love_count")));
         } catch (Exception e) {

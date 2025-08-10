@@ -8,9 +8,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
 
 @Service
 public class PushNotificationService {
@@ -137,35 +137,156 @@ public class PushNotificationService {
     }
     
     /**
+     * Send push notification for a new family member
+     */
+    public void sendNewMemberNotification(Long familyId, String newMemberName, String familyName) {
+        try {
+            logger.debug("Sending new member notification for {} joining family {}", newMemberName, familyName);
+            
+            // Get all family members who have new member notifications enabled
+            List<Map<String, Object>> recipients = getNewMemberNotificationRecipients(familyId);
+            logger.debug("Found {} recipients for new member notification", recipients.size());
+            
+            if (recipients.isEmpty()) {
+                logger.debug("No recipients found for new member notification in family {}", familyId);
+                return;
+            }
+            
+            String title = "New Family Member";
+            String body = String.format("%s joined %s", newMemberName, familyName);
+            
+            Map<String, String> data = new HashMap<>();
+            data.put("type", "NEW_MEMBER");
+            data.put("familyId", familyId.toString());
+            data.put("newMemberName", newMemberName);
+            
+            // Send notification to all recipients
+            sendToMultipleDevices(recipients, title, body, data);
+            
+        } catch (Exception e) {
+            logger.error("Error sending new member notification: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Send push notification for a family invitation
+     */
+    public void sendInvitationNotification(String inviteeEmail, String familyName, String inviterName) {
+        try {
+            logger.debug("Sending invitation notification to {} for family {} from {}", inviteeEmail, familyName, inviterName);
+            
+            // Get user by email who should receive the invitation notification (using matrix)
+            String userSql = "SELECT u.id, u.fcm_token FROM app_user u " +
+                           "JOIN user_notification_matrix unm ON u.id = unm.user_id " +
+                           "WHERE u.email = ? " +
+                           "AND unm.family_id = 0 AND unm.member_id = 0 " +
+                           "AND unm.device_permission_granted = TRUE " +
+                           "AND unm.push_enabled = TRUE " +
+                           "AND unm.invitations_push = TRUE " +
+                           "AND u.fcm_token IS NOT NULL";
+            
+            List<Map<String, Object>> recipients = jdbcTemplate.queryForList(userSql, inviteeEmail);
+            logger.debug("Found {} invitation notification recipients for email {}", recipients.size(), inviteeEmail);
+            
+            if (recipients.isEmpty()) {
+                logger.debug("No recipients found for invitation notification to {}", inviteeEmail);
+                return;
+            }
+            
+            String title = "Family Invitation";
+            String body = String.format("%s invited you to join %s", inviterName, familyName);
+            
+            Map<String, String> data = new HashMap<>();
+            data.put("type", "INVITATION");
+            data.put("familyName", familyName);
+            data.put("inviterName", inviterName);
+            data.put("inviteeEmail", inviteeEmail);
+            
+            // Send notification to the invitee
+            sendToMultipleDevices(recipients, title, body, data);
+            
+        } catch (Exception e) {
+            logger.error("Error sending invitation notification: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Get family members who should receive new member notifications (using matrix)
+     */
+    private List<Map<String, Object>> getNewMemberNotificationRecipients(Long familyId) {
+        String sql = """
+            SELECT DISTINCT u.id as user_id, u.fcm_token, u.username
+            FROM user_family_membership ufm
+            JOIN app_user u ON ufm.user_id = u.id
+            JOIN user_notification_matrix unm ON u.id = unm.user_id
+            WHERE ufm.family_id = ?
+            AND unm.family_id = 0 AND unm.member_id = 0
+            AND unm.device_permission_granted = TRUE
+            AND unm.push_enabled = TRUE
+            AND unm.new_member_push = TRUE
+            AND u.fcm_token IS NOT NULL
+        """;
+        
+        List<Map<String, Object>> recipients = jdbcTemplate.queryForList(sql, familyId);
+        logger.debug("Found {} new member notification recipients for family {} (using matrix)", recipients.size(), familyId);
+        
+        return recipients;
+    }
+    
+    /**
      * Get family members who should receive notifications (excluding sender)
+     * Uses the new unified notification matrix for fast lookup
      */
     private List<Map<String, Object>> getNotificationRecipients(Long familyId, Long messageId) {
         String sql = """
             SELECT DISTINCT u.id as user_id, u.fcm_token, u.username
             FROM user_family_membership ufm
             JOIN app_user u ON ufm.user_id = u.id
-            JOIN user_notification_settings uns ON u.id = uns.user_id
-            LEFT JOIN user_family_message_settings ufms ON (u.id = ufms.user_id AND ufms.family_id = ?)
+            JOIN user_notification_matrix unm ON u.id = unm.user_id
             WHERE ufm.family_id = ?
-            AND uns.device_permission_granted = TRUE
-            AND uns.push_notifications_enabled = TRUE
             AND u.id != (SELECT sender_id FROM message WHERE id = ?)
-            AND (ufms.receive_messages IS NULL OR ufms.receive_messages = TRUE)
             AND u.fcm_token IS NOT NULL
+            AND unm.push_enabled = TRUE
+            AND unm.device_permission_granted = TRUE
+            AND (
+                -- Check global settings (family_id=0) or family-specific override
+                (unm.family_id = 0 AND unm.member_id = 0 AND unm.family_messages_push = TRUE)
+                OR 
+                (unm.family_id = ? AND unm.member_id = 0 AND unm.family_messages_push = TRUE)
+            )
         """;
         
-        return jdbcTemplate.queryForList(sql, familyId, familyId, messageId);
+        // Debug: Log the sender ID for this message
+        String senderSql = "SELECT sender_id FROM message WHERE id = ?";
+        try {
+            Long senderId = jdbcTemplate.queryForObject(senderSql, Long.class, messageId);
+            logger.debug("Message {} sender_id: {}, family_id: {}", messageId, senderId, familyId);
+        } catch (Exception e) {
+            logger.error("Could not find sender for message {}: {}", messageId, e.getMessage());
+        }
+        
+        List<Map<String, Object>> recipients = jdbcTemplate.queryForList(sql, familyId, messageId, familyId);
+        logger.debug("Found {} notification recipients for message {} in family {} (using matrix)", recipients.size(), messageId, familyId);
+        for (Map<String, Object> recipient : recipients) {
+            String fcmToken = (String) recipient.get("fcm_token");
+            String tokenPrefix = fcmToken != null && fcmToken.length() > 30 ? fcmToken.substring(0, 30) + "..." : fcmToken;
+            logger.debug("Recipient: userId={}, username={}, fcmToken={}", recipient.get("user_id"), recipient.get("username"), tokenPrefix);
+        }
+        
+        return recipients;
     }
     
     /**
-     * Check if user has push notifications enabled
+     * Check if user has push notifications enabled (using matrix table)
      */
     private boolean hasNotificationsEnabled(Long userId) {
         String sql = """
-            SELECT COUNT(*) FROM user_notification_settings 
+            SELECT COUNT(*) FROM user_notification_matrix 
             WHERE user_id = ? 
+            AND family_id = 0 
+            AND member_id = 0
             AND device_permission_granted = TRUE 
-            AND push_notifications_enabled = TRUE
+            AND push_enabled = TRUE
         """;
         
         Integer count = jdbcTemplate.queryForObject(sql, Integer.class, userId);
@@ -239,34 +360,19 @@ public class PushNotificationService {
                 return;
             }
             
-            // Build the notification
-            Notification notification = Notification.builder()
-                    .setTitle(title)
-                    .setBody(body)
-                    .build();
+            // Send data-only message to let the Flutter app decide whether to show notification
+            // This prevents system-level notifications when app is in foreground
+            data.put("title", title);  // Include title in data for app to use
+            data.put("body", body);    // Include body in data for app to use
             
-            // Build the message
+            // Build the message with NO notification payload - data only
             Message message = Message.builder()
                     .setToken(fcmToken)
-                    .setNotification(notification)
                     .putAllData(data)
+                    // Only set content-available for iOS to wake the app
                     .setApnsConfig(ApnsConfig.builder()
                             .setAps(Aps.builder()
-                                    .setAlert(ApsAlert.builder()
-                                            .setTitle(title)
-                                            .setBody(body)
-                                            .build())
-                                    .setSound("default")
-                                    .setBadge(1)  // Add badge count for iOS
-                                    .setContentAvailable(false)  // Ensure it's not a silent notification
-                                    .build())
-                            .build())
-                    .setAndroidConfig(AndroidConfig.builder()
-                            .setNotification(AndroidNotification.builder()
-                                    .setTitle(title)
-                                    .setBody(body)
-                                    .setSound("default")
-                                    .setChannelId("familynest_channel")
+                                    .setContentAvailable(true)  // Wake the app but don't show notification
                                     .build())
                             .build())
                     .build();
@@ -277,8 +383,9 @@ public class PushNotificationService {
             
         } catch (FirebaseMessagingException e) {
             if (e.getMessagingErrorCode() == MessagingErrorCode.UNREGISTERED) {
-                logger.warn("FCM token is invalid, should remove from database: {}", fcmToken);
-                // TODO: Remove invalid token from database
+                logger.warn("FCM token is invalid, removing from database: {}", fcmToken);
+                String cleanupSql = "UPDATE app_user SET fcm_token = NULL WHERE fcm_token = ?";
+                jdbcTemplate.update(cleanupSql, fcmToken);
             } else {
                 logger.error("Error sending push notification: {}", e.getMessage(), e);
             }

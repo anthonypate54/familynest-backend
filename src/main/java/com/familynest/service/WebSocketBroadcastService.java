@@ -5,8 +5,8 @@ import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.familynest.repository.UserFamilyMembershipRepository;
-import com.familynest.repository.UserFamilyMessageSettingsRepository;
 
 import java.util.Map;
 import java.util.List;
@@ -18,15 +18,15 @@ public class WebSocketBroadcastService {
     
     private final SimpMessagingTemplate messagingTemplate;
     private final UserFamilyMembershipRepository userFamilyMembershipRepository;
-    private final UserFamilyMessageSettingsRepository userFamilyMessageSettingsRepository;
+    private final JdbcTemplate jdbcTemplate;
 
     public WebSocketBroadcastService(
             SimpMessagingTemplate messagingTemplate,
             UserFamilyMembershipRepository userFamilyMembershipRepository,
-            UserFamilyMessageSettingsRepository userFamilyMessageSettingsRepository) {
+            JdbcTemplate jdbcTemplate) {
         this.messagingTemplate = messagingTemplate;
         this.userFamilyMembershipRepository = userFamilyMembershipRepository;
-        this.userFamilyMessageSettingsRepository = userFamilyMessageSettingsRepository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /**
@@ -75,20 +75,9 @@ public class WebSocketBroadcastService {
             
             logger.debug("Found {} members in family {}", familyMemberIds.size(), familyId);
             
-            // Broadcast to each family member's individual topic (excluding muted users)
+            // Broadcast to each family member's individual topic
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {
-                // Check if this user has muted this family
-                boolean userHasMutedFamily = userFamilyMessageSettingsRepository
-                    .findByUserIdAndFamilyId(userId, familyId)
-                    .map(settings -> !settings.getReceiveMessages())
-                    .orElse(false); // Default to receiving messages if no setting exists
-                
-                if (userHasMutedFamily) {
-                    logger.debug("Skipping muted user {} for family {}", userId, familyId);
-                    continue;
-                }
-                
                 try {
                     String userDestination = "/user/" + userId + "/family";
                     messagingTemplate.convertAndSend(userDestination, messageData);
@@ -157,13 +146,20 @@ public class WebSocketBroadcastService {
             
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {
-                boolean userHasMutedFamily = userFamilyMessageSettingsRepository
-                    .findByUserIdAndFamilyId(userId, familyId)
-                    .map(settings -> !settings.getReceiveMessages())
-                    .orElse(false);
+                // Check if this user has muted the message sender (using matrix table)
+                Long senderId = ((Number) messageData.get("sender_id")).longValue();
+                String muteSql = """
+                    SELECT COUNT(*) FROM user_notification_matrix 
+                    WHERE user_id = ? 
+                    AND family_id = 0 
+                    AND member_id = ? 
+                    AND dm_messages_websocket = FALSE
+                """;
+                Integer muteCount = jdbcTemplate.queryForObject(muteSql, Integer.class, userId, senderId);
+                boolean userHasMutedSender = muteCount != null && muteCount > 0;
                 
-                if (userHasMutedFamily) {
-                    logger.debug("Skipping muted user {} for new message", userId);
+                if (userHasMutedSender) {
+                    logger.debug("Skipping user {} - has muted sender {}", userId, senderId);
                     continue;
                 }
                 
@@ -203,16 +199,6 @@ public class WebSocketBroadcastService {
             
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {
-                boolean userHasMutedFamily = userFamilyMessageSettingsRepository
-                    .findByUserIdAndFamilyId(userId, familyId)
-                    .map(settings -> !settings.getReceiveMessages())
-                    .orElse(false);
-                
-                if (userHasMutedFamily) {
-                    logger.debug("Skipping muted user {} for comment", userId);
-                    continue;
-                }
-                
                 try {
                     String destination = "/user/" + userId + "/comments/" + parentMessageId;
                     messagingTemplate.convertAndSend(destination, commentData);
@@ -249,10 +235,16 @@ public class WebSocketBroadcastService {
             
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {
-                boolean userHasMutedFamily = userFamilyMessageSettingsRepository
-                    .findByUserIdAndFamilyId(userId, familyId)
-                    .map(settings -> !settings.getReceiveMessages())
-                    .orElse(false);
+                // Check if user has muted this family using matrix table
+                String familyMuteSql = """
+                    SELECT COUNT(*) FROM user_notification_matrix 
+                    WHERE user_id = ? 
+                    AND family_id = ? 
+                    AND member_id = 0 
+                    AND reactions_websocket = FALSE
+                """;
+                Integer muteCount = jdbcTemplate.queryForObject(familyMuteSql, Integer.class, userId, familyId);
+                boolean userHasMutedFamily = muteCount != null && muteCount > 0;
                 
                 if (userHasMutedFamily) {
                     logger.debug("Skipping muted user {} for reaction", userId);
@@ -300,10 +292,16 @@ public class WebSocketBroadcastService {
             
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {
-                boolean userHasMutedFamily = userFamilyMessageSettingsRepository
-                    .findByUserIdAndFamilyId(userId, familyId)
-                    .map(settings -> !settings.getReceiveMessages())
-                    .orElse(false);
+                // Check if user has muted this family using matrix table
+                String familyMuteSql = """
+                    SELECT COUNT(*) FROM user_notification_matrix 
+                    WHERE user_id = ? 
+                    AND family_id = ? 
+                    AND member_id = 0 
+                    AND comments_websocket = FALSE
+                """;
+                Integer muteCount = jdbcTemplate.queryForObject(familyMuteSql, Integer.class, userId, familyId);
+                boolean userHasMutedFamily = muteCount != null && muteCount > 0;
                 
                 if (userHasMutedFamily) {
                     logger.debug("Skipping muted user {} for comment count", userId);
@@ -354,10 +352,16 @@ public class WebSocketBroadcastService {
             
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {
-                boolean userHasMutedFamily = userFamilyMessageSettingsRepository
-                    .findByUserIdAndFamilyId(userId, familyId)
-                    .map(settings -> !settings.getReceiveMessages())
-                    .orElse(false);
+                // Check if user has muted this family using matrix table
+                String familyMuteSql = """
+                    SELECT COUNT(*) FROM user_notification_matrix 
+                    WHERE user_id = ? 
+                    AND family_id = ? 
+                    AND member_id = 0 
+                    AND comments_websocket = FALSE
+                """;
+                Integer muteCount = jdbcTemplate.queryForObject(familyMuteSql, Integer.class, userId, familyId);
+                boolean userHasMutedFamily = muteCount != null && muteCount > 0;
                 
                 if (userHasMutedFamily) {
                     logger.debug("Skipping muted user {} for comment count", userId);
@@ -387,14 +391,17 @@ public class WebSocketBroadcastService {
      */
     public void broadcastInvitation(Map<String, Object> invitationData, Long userId) {
         try {
-            logger.debug("Broadcasting INVITATION to user {}", userId);
+            logger.info("*** BROADCAST_INVITATION: Starting broadcast to user {} ***", userId);
+            logger.info("*** BROADCAST_INVITATION: Data: {} ***", invitationData);
             
             String destination = "/user/" + userId + "/invitations";
+            logger.info("*** BROADCAST_INVITATION: Destination: {} ***", destination);
+            
             messagingTemplate.convertAndSend(destination, invitationData);
-            logger.debug("Successfully broadcast INVITATION to user {}", userId);
+            logger.info("*** BROADCAST_INVITATION: Successfully sent to {} ***", destination);
             
         } catch (Exception e) {
-            logger.error("Failed to broadcast invitation to user {}: {}", userId, e.getMessage(), e);
+            logger.error("*** BROADCAST_INVITATION: FAILED to user {}: {} ***", userId, e.getMessage(), e);
             // Don't rethrow - we don't want WebSocket errors to break the main flow
         }
     }

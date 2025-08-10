@@ -18,6 +18,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -280,8 +282,17 @@ public class InvitationController {
                     }
                     invitationData.put("inviterName", inviter.getFirstName() + " " + inviter.getLastName());
                     
-                    webSocketBroadcastService.broadcastInvitation(invitationData, recipient.getId());
-                    logger.debug("Broadcasted new invitation to user: {}", recipient.getId());
+                    // Schedule WebSocket broadcast to happen AFTER transaction commits
+                    final Map<String, Object> finalInvitationData = invitationData;
+                    final Long finalRecipientId = recipient.getId();
+                    
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            webSocketBroadcastService.broadcastInvitation(finalInvitationData, finalRecipientId);
+                            logger.debug("Broadcasted new invitation to user: {} (AFTER COMMIT)", finalRecipientId);
+                        }
+                    });
                 } catch (Exception e) {
                     logger.error("Error broadcasting new invitation: {}", e.getMessage(), e);
                     // Don't fail the request if WebSocket broadcast fails

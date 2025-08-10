@@ -64,6 +64,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import java.util.UUID;
@@ -646,6 +648,27 @@ public class UserController {
                 // Continue anyway, don't fail the whole operation
             }
             
+            // Send new member notification to existing family members
+            try {
+                // Get user details for notification
+                Map<String, Object> userData = jdbcTemplate.queryForMap(
+                    "SELECT first_name, last_name FROM app_user WHERE id = ?", id
+                );
+                String newMemberName = userData.get("first_name") + " " + userData.get("last_name");
+                
+                // Get family name for notification
+                Map<String, Object> familyData = jdbcTemplate.queryForMap(
+                    "SELECT name FROM family WHERE id = ?", familyId
+                );
+                String familyName = (String) familyData.get("name");
+                
+                pushNotificationService.sendNewMemberNotification(familyId, newMemberName, familyName);
+                logger.debug("Sent new member notification for {} joining {}", newMemberName, familyName);
+            } catch (Exception e) {
+                logger.error("Error sending new member notification: {}", e.getMessage());
+                // Don't fail the join operation if notification fails
+            }
+            
             logger.debug("User ID: {} joined family ID: {}", id, familyId);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
@@ -756,27 +779,37 @@ public class UserController {
             }
             
             // Fetch the full message with all joins using the service and broadcast via WebSocket
-            try {
-                Map<String, Object> messageData = messageService.getMessageById(newMessageId);
-                
-                // Broadcast the NEW MESSAGE to all target families via WebSocket
-                for (Long targetFamilyId : targetFamilyIds) {
-                    logger.debug("Broadcasting new message to family {}: {}", targetFamilyId, messageData);
-                    webSocketBroadcastService.broadcastNewMessage(messageData, targetFamilyId);
-                    
-                    // Send push notifications to family members (background notifications)
+            // Schedule WebSocket broadcast and notifications to happen AFTER transaction commits
+            final Long finalMessageId = newMessageId;
+            final List<Long> finalTargetFamilyIds = new ArrayList<>(targetFamilyIds);
+            final String finalContent = content;
+            final String finalSenderName = (String) userData.get("username");
+            
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
                     try {
-                        String senderName = (String) userData.get("username");
-                        pushNotificationService.sendFamilyMessageNotification(newMessageId, targetFamilyId, senderName, content);
-                    } catch (Exception pushError) {
-                        logger.error("Error sending push notification for message {}: {}", newMessageId, pushError.getMessage());
-                        // Don't let push notification errors break the message posting flow
+                        Map<String, Object> messageData = messageService.getMessageById(finalMessageId);
+                        
+                        // Broadcast the NEW MESSAGE to all target families via WebSocket
+                        for (Long targetFamilyId : finalTargetFamilyIds) {
+                            logger.debug("Broadcasting new message to family {} (AFTER COMMIT): {}", targetFamilyId, messageData);
+                            webSocketBroadcastService.broadcastNewMessage(messageData, targetFamilyId);
+                            
+                            // Send push notifications to family members (background notifications)
+                            try {
+                                pushNotificationService.sendFamilyMessageNotification(finalMessageId, targetFamilyId, finalSenderName, finalContent);
+                            } catch (Exception pushError) {
+                                logger.error("Error sending push notification for message {} (AFTER COMMIT): {}", finalMessageId, pushError.getMessage());
+                                // Don't let push notification errors break the message posting flow
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error broadcasting WebSocket message for messageId {} (AFTER COMMIT): {}", finalMessageId, e.getMessage());
+                        // Continue processing - don't let WebSocket errors break message posting
                     }
                 }
-            } catch (Exception e) {
-                logger.error("Error broadcasting WebSocket message for messageId {}: {}", newMessageId, e.getMessage());
-                // Continue processing - don't let WebSocket errors break message posting
-            }
+            });
     
             // Return the message data
             Map<String, Object> messageData = messageService.getMessageById(newMessageId);
@@ -816,22 +849,19 @@ public class UserController {
                         "  FROM user_family_membership ufm " +
                         "  WHERE ufm.user_id = ? " +
                         "), " +
-                        "muted_families AS (" +
-                        "  SELECT ufms.family_id " +
-                        "  FROM user_family_message_settings ufms " +
-                        "  WHERE ufms.user_id = ? AND ufms.receive_messages = false" +
-                        "), " +
-                        "active_families AS (" +
-                        "  SELECT uf.family_id " +
-                        "  FROM user_families uf " +
-                        "  LEFT JOIN muted_families mf ON uf.family_id = mf.family_id " +
-                        "  WHERE mf.family_id IS NULL" +
+                        "muted_users AS (" +
+                        "  SELECT umms.member_user_id " +
+                        "  FROM user_member_message_settings umms " +
+                        "  JOIN user_families uf ON umms.family_id = uf.family_id " +
+                        "  WHERE umms.user_id = ? AND umms.receive_messages = false" +
                         "), " +
                         "message_subset AS (" +
                         "  SELECT DISTINCT m.id " +
                         "  FROM message m " +
                         "  JOIN message_family_link mfl ON m.id = mfl.message_id " +
-                        "  JOIN active_families af ON mfl.family_id = af.family_id " +
+                        "  JOIN user_families uf ON mfl.family_id = uf.family_id " +
+                        "  LEFT JOIN muted_users mu ON m.sender_id = mu.member_user_id " +
+                        "  WHERE mu.member_user_id IS NULL " +
                         "  ORDER BY m.id DESC " + 
                         "  LIMIT 100" +
                         ") " +
@@ -847,7 +877,7 @@ public class UserController {
                         "FROM message m " +
                         "JOIN message_subset ms ON m.id = ms.id " +
                         "JOIN message_family_link mfl ON m.id = mfl.message_id " +
-                        "JOIN active_families af ON mfl.family_id = af.family_id " +
+                        "JOIN user_families uf2 ON mfl.family_id = uf2.family_id " +
                         "LEFT JOIN app_user s ON m.sender_id = s.id " +
                         "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
                         "  ON m.id = vc.message_id " +
@@ -1589,6 +1619,13 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
                 logger.warn("⚠️ FCM_REGISTER: Unknown token format for user {} (length: {})", userId, fcmToken.length());
             }
 
+            // Clear this token from any other users first (prevent reuse)
+            String clearOldSql = "UPDATE app_user SET fcm_token = NULL WHERE fcm_token = ? AND id != ?";
+            int clearedRows = jdbcTemplate.update(clearOldSql, fcmToken, userId);
+            if (clearedRows > 0) {
+                logger.info("🔄 FCM_REGISTER: Cleared token from {} other users before registering to user {}", clearedRows, userId);
+            }
+            
             // Update user's FCM token
             String updateSql = "UPDATE app_user SET fcm_token = ? WHERE id = ?";
             int rowsUpdated = jdbcTemplate.update(updateSql, fcmToken, userId);

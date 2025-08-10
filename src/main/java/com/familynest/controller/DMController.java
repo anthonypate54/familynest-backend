@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -118,15 +120,26 @@ public class DMController {
                 
                 // Broadcast new conversation to both participants so their conversation lists refresh
                 Long conversationId = ((Number) conversation.get("id")).longValue();
-                Map<String, Object> notificationData = new HashMap<>();
-                notificationData.put("type", "new_conversation");
-                notificationData.put("conversationId", conversationId);
-                notificationData.put("isGroup", false);
                 
-                // Notify both participants
-                webSocketBroadcastService.broadcastDMMessage(notificationData, currentUserId);
-                webSocketBroadcastService.broadcastDMMessage(notificationData, otherUserId);
-                logger.debug("Broadcasted new 1:1 conversation notification to users: {} and {}", currentUserId, otherUserId);
+                // Schedule WebSocket broadcast to happen AFTER transaction commits
+                final Long finalCurrentUserId = currentUserId;
+                final Long finalOtherUserId = otherUserId;
+                final Long finalConversationId = conversationId;
+                
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        Map<String, Object> notificationData = new HashMap<>();
+                        notificationData.put("type", "new_conversation");
+                        notificationData.put("conversationId", finalConversationId);
+                        notificationData.put("isGroup", false);
+                        
+                        // Notify both participants
+                        webSocketBroadcastService.broadcastDMMessage(notificationData, finalCurrentUserId);
+                        webSocketBroadcastService.broadcastDMMessage(notificationData, finalOtherUserId);
+                        logger.debug("Broadcasted new 1:1 conversation notification to users: {} and {} (AFTER COMMIT)", finalCurrentUserId, finalOtherUserId);
+                    }
+                });
             }
 
             // Get other user info
@@ -548,7 +561,17 @@ public class DMController {
                 Map<String, Object> recipientMessageData = new HashMap<>(messageData);
                 recipientMessageData.put("unread_count", unreadCount != null ? unreadCount : 0);
                 
-                webSocketBroadcastService.broadcastDMMessage(recipientMessageData, recipientId);
+                // Schedule WebSocket broadcast to happen AFTER transaction commits
+                final Map<String, Object> finalRecipientMessageData = recipientMessageData;
+                final Long finalRecipientId = recipientId;
+                
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        webSocketBroadcastService.broadcastDMMessage(finalRecipientMessageData, finalRecipientId);
+                        logger.debug("Broadcasted DM message to recipient {} (AFTER COMMIT)", finalRecipientId);
+                    }
+                });
             }
             
             // Send push notification to all recipients (background notification)

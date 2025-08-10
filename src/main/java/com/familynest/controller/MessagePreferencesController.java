@@ -229,8 +229,46 @@ public class MessagePreferencesController {
                 settings = new UserFamilyMessageSettings(userId, familyId, receiveMessages);
             }
             
-            // Save settings
+            // Save settings to legacy table
             messageSettingsRepository.save(settings);
+            
+            // CRITICAL: Also update the unified notification matrix table
+            // This ensures push notifications respect family-specific settings
+            if (!receiveMessages) {
+                // User wants to mute this family - create/update override row
+                String matrixSql = """
+                    INSERT INTO user_notification_matrix (
+                        user_id, family_id, member_id,
+                        family_messages_push, reactions_push, comments_push,
+                        family_messages_websocket, dm_messages_websocket, invitations_websocket,
+                        reactions_websocket, comments_websocket, new_member_websocket,
+                        dm_messages_push, invitations_push, new_member_push,
+                        push_enabled, device_permission_granted
+                    )
+                    SELECT ?, ?, 0,
+                        FALSE, FALSE, FALSE,  -- Mute push notifications for this family
+                        TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,  -- Keep websocket for UI updates
+                        TRUE, TRUE, TRUE,  -- DMs/invitations/new members not affected by family muting
+                        unm_global.push_enabled, unm_global.device_permission_granted
+                    FROM user_notification_matrix unm_global
+                    WHERE unm_global.user_id = ? AND unm_global.family_id = 0 AND unm_global.member_id = 0
+                    ON CONFLICT (user_id, family_id, member_id) DO UPDATE SET
+                        family_messages_push = FALSE,
+                        reactions_push = FALSE,
+                        comments_push = FALSE,
+                        updated_at = CURRENT_TIMESTAMP
+                    """;
+                jdbcTemplate.update(matrixSql, userId, familyId, userId);
+                logger.debug("Created/updated matrix override to mute family {} for user {}", familyId, userId);
+            } else {
+                // User wants to receive messages - remove family-specific override (fall back to global)
+                String deleteSql = """
+                    DELETE FROM user_notification_matrix
+                    WHERE user_id = ? AND family_id = ? AND member_id = 0
+                    """;
+                int deletedRows = jdbcTemplate.update(deleteSql, userId, familyId);
+                logger.debug("Removed {} family-specific override rows for family {} user {}", deletedRows, familyId, userId);
+            }
             
             // Get updated family name for response
             String familyName = familyRepository.findById(familyId)
