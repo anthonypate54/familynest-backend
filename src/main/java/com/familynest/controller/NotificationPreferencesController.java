@@ -59,20 +59,24 @@ public class NotificationPreferencesController {
                         .body(Map.of("error", "Not authorized to view preferences for this user"));
             }
 
-            // Get user notification settings
+            // Get user notification settings from unified matrix table (global row)
             String sql = """
-                SELECT device_permission_granted, push_notifications_enabled, email_notifications_enabled
-                FROM user_notification_settings 
-                WHERE user_id = ?
+                SELECT device_permission_granted, push_enabled as push_notifications_enabled
+                FROM user_notification_matrix 
+                WHERE user_id = ? AND family_id = 0 AND member_id = 0
                 """;
             
             Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId);
+            
+            // For email preferences, we still need to check the old table since matrix doesn't have email fields
+            String emailSql = "SELECT email_notifications_enabled FROM user_notification_settings WHERE user_id = ?";
+            Boolean emailEnabled = jdbcTemplate.queryForObject(emailSql, Boolean.class, userId);
             
             Map<String, Object> response = new HashMap<>();
             response.put("userId", userId);
             response.put("devicePermissionGranted", result.get("device_permission_granted"));
             response.put("pushNotificationsEnabled", result.get("push_notifications_enabled"));
-            response.put("emailNotificationsEnabled", result.get("email_notifications_enabled"));
+            response.put("emailNotificationsEnabled", emailEnabled);
             
             logger.debug("Successfully retrieved notification preferences for user {}", userId);
             return ResponseEntity.ok(response);
@@ -221,6 +225,80 @@ public class NotificationPreferencesController {
             logger.error("Error enabling all notification preferences for user {}: {}", userId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to enable notification preferences: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Sync device permission status without overriding user preferences
+     * Only sets device_permission_granted = TRUE, preserves existing push/email preferences
+     */
+    @PostMapping("/{userId}/sync-device-permission")
+    public ResponseEntity<Map<String, Object>> syncDevicePermissionStatus(
+            @PathVariable Long userId,
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            HttpServletRequest request) {
+        
+        logger.debug("Received request to sync device permission status for user ID: {}", userId);
+        try {
+            Long tokenUserId = validateUser(authHeader, request);
+            if (tokenUserId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Authentication required"));
+            }
+
+            if (!userId.equals(tokenUserId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Not authorized to update preferences for this user"));
+            }
+
+            // Only update device_permission_granted, preserve existing preferences
+            String sql = """
+                INSERT INTO user_notification_settings (user_id, device_permission_granted, push_notifications_enabled, email_notifications_enabled)
+                VALUES (?, TRUE, TRUE, TRUE)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    device_permission_granted = TRUE,
+                    updated_at = CURRENT_TIMESTAMP
+                """;
+            
+            jdbcTemplate.update(sql, userId);
+
+            // Also update the new unified matrix table - only touch device_permission_granted
+            String matrixSql = """
+                UPDATE user_notification_matrix 
+                SET device_permission_granted = TRUE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND family_id = 0 AND member_id = 0
+                """;
+            
+            int matrixRowsUpdated = jdbcTemplate.update(matrixSql, userId);
+            
+            // If no matrix row exists, create one with push_enabled = TRUE (new user setup)
+            if (matrixRowsUpdated == 0) {
+                String insertMatrixSql = """
+                    INSERT INTO user_notification_matrix (
+                        user_id, family_id, member_id, push_enabled, device_permission_granted,
+                        family_messages_push, dm_messages_push, invitations_push, 
+                        reactions_push, comments_push, new_member_push,
+                        family_messages_websocket, dm_messages_websocket, invitations_websocket,
+                        reactions_websocket, comments_websocket, new_member_websocket
+                    ) VALUES (?, 0, 0, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
+                    """;
+                jdbcTemplate.update(insertMatrixSql, userId);
+                logger.debug("Created new matrix row for user {} with device permission granted", userId);
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Device permission status synced successfully");
+            response.put("userId", userId);
+            response.put("devicePermissionGranted", true);
+            
+            logger.debug("Successfully synced device permission status for user {}", userId);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error syncing device permission status for user {}: {}", userId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to sync device permission status: " + e.getMessage()));
         }
     }
 

@@ -137,6 +137,78 @@ public class PushNotificationService {
     }
     
     /**
+     * Send push notification to all thread participants (message author + all commenters)
+     */
+    public void sendThreadParticipantNotifications(Long commentId, Long parentMessageId, Long familyId, String commenterName, String commentContent, Long commenterId) {
+        try {
+            logger.debug("Sending thread participant notifications - commentId: {}, parentMessageId: {}", commentId, parentMessageId);
+            
+            // Get all users who have participated in this thread
+            List<Map<String, Object>> participants = getThreadParticipants(parentMessageId, commenterId);
+            
+            if (participants.isEmpty()) {
+                logger.debug("No thread participants found for message {}", parentMessageId);
+                return;
+            }
+            
+            // Create notification payload
+            String title = commenterName + " commented on a thread you're in";
+            String body = truncateMessage(commentContent);
+            
+            Map<String, String> data = new HashMap<>();
+            data.put("type", "COMMENT");
+            data.put("commentId", commentId.toString());
+            data.put("parentMessageId", parentMessageId.toString());
+            data.put("familyId", familyId.toString());
+            data.put("senderId", commenterId.toString());
+            
+            // Send to all participants
+            sendToMultipleDevices(participants, title, body, data);
+            
+        } catch (Exception e) {
+            logger.error("Error sending thread participant notifications: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Get all users who have participated in a thread (message author + all commenters)
+     * Excludes the current commenter and respects notification preferences
+     */
+    private List<Map<String, Object>> getThreadParticipants(Long parentMessageId, Long currentCommenterId) {
+        String sql = """
+            SELECT DISTINCT u.id as user_id, u.fcm_token, u.username
+            FROM (
+                -- Original message author
+                SELECT sender_id as user_id FROM message WHERE id = ?
+                UNION
+                -- All commenters on this message
+                SELECT sender_id as user_id FROM message_comment WHERE parent_message_id = ?
+            ) thread_users
+            JOIN app_user u ON thread_users.user_id = u.id
+            JOIN user_notification_matrix unm ON u.id = unm.user_id
+            WHERE u.id != ?  -- Exclude current commenter
+            AND u.fcm_token IS NOT NULL
+            AND unm.push_enabled = TRUE
+            AND unm.device_permission_granted = TRUE
+            AND (
+                -- Check global settings (family_id=0) - comment notifications enabled
+                (unm.family_id = 0 AND unm.member_id = 0 AND unm.family_messages_push = TRUE)
+            )
+        """;
+        
+        List<Map<String, Object>> participants = jdbcTemplate.queryForList(sql, parentMessageId, parentMessageId, currentCommenterId);
+        logger.debug("Found {} thread participants for message {} (excluding commenter {})", participants.size(), parentMessageId, currentCommenterId);
+        
+        for (Map<String, Object> participant : participants) {
+            String fcmToken = (String) participant.get("fcm_token");
+            String tokenPrefix = fcmToken != null && fcmToken.length() > 30 ? fcmToken.substring(0, 30) + "..." : fcmToken;
+            logger.debug("Thread participant: userId={}, username={}, fcmToken={}", participant.get("user_id"), participant.get("username"), tokenPrefix);
+        }
+        
+        return participants;
+    }
+
+    /**
      * Send push notification for a new family member
      */
     public void sendNewMemberNotification(Long familyId, String newMemberName, String familyName) {
@@ -175,21 +247,17 @@ public class PushNotificationService {
         try {
             logger.debug("Sending invitation notification to {} for family {} from {}", inviteeEmail, familyName, inviterName);
             
-            // Get user by email who should receive the invitation notification (using matrix)
+            // Get user by email who should receive the invitation notification
+            // INVITATIONS ARE ALWAYS SENT - they are system notifications, not user preferences
             String userSql = "SELECT u.id, u.fcm_token FROM app_user u " +
-                           "JOIN user_notification_matrix unm ON u.id = unm.user_id " +
                            "WHERE u.email = ? " +
-                           "AND unm.family_id = 0 AND unm.member_id = 0 " +
-                           "AND unm.device_permission_granted = TRUE " +
-                           "AND unm.push_enabled = TRUE " +
-                           "AND unm.invitations_push = TRUE " +
                            "AND u.fcm_token IS NOT NULL";
             
             List<Map<String, Object>> recipients = jdbcTemplate.queryForList(userSql, inviteeEmail);
-            logger.debug("Found {} invitation notification recipients for email {}", recipients.size(), inviteeEmail);
+            logger.debug("Found {} invitation notification recipients for email {} (ALWAYS SEND - system notification)", recipients.size(), inviteeEmail);
             
             if (recipients.isEmpty()) {
-                logger.debug("No recipients found for invitation notification to {}", inviteeEmail);
+                logger.debug("No recipients found for invitation notification to {} - user may not exist or have FCM token", inviteeEmail);
                 return;
             }
             

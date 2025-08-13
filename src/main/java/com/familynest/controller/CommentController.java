@@ -477,11 +477,13 @@ public class CommentController {
             Map<String, Object> commentData = messageService.getCommentById(newCommentId);
 
             // Send push notification for comment (background notification)
+            // Note: Notify all thread participants (message author + all commenters), not just message author
             try {
-                for (Map<String, Object> family : parentMessageFamilies) {
-                    Long targetFamilyId = ((Number) family.get("family_id")).longValue();
-                    String commenterName = (String) userData.get("username");
-                    pushNotificationService.sendCommentNotification(newCommentId, parentMessageId, targetFamilyId, commenterName, content);
+                String commenterName = (String) userData.get("username");
+                Long firstFamilyId = !parentMessageFamilies.isEmpty() ? 
+                    ((Number) parentMessageFamilies.get(0).get("family_id")).longValue() : null;
+                if (firstFamilyId != null) {
+                    pushNotificationService.sendThreadParticipantNotifications(newCommentId, parentMessageId, firstFamilyId, commenterName, content, userId);
                 }
             } catch (Exception pushError) {
                 logger.error("Error sending comment push notification for comment {}: {}", newCommentId, pushError.getMessage());

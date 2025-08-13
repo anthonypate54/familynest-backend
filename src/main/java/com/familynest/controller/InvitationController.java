@@ -10,6 +10,7 @@ import com.familynest.repository.UserFamilyMembershipRepository;
 import com.familynest.repository.InvitationRepository;
 import com.familynest.auth.AuthUtil;
 import com.familynest.service.WebSocketBroadcastService;
+import com.familynest.service.PushNotificationService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +53,9 @@ public class InvitationController {
 
     @Autowired
     private WebSocketBroadcastService webSocketBroadcastService;
+
+    @Autowired
+    private PushNotificationService pushNotificationService;
 
     /**
      * Get invitations for the current user
@@ -291,6 +295,12 @@ public class InvitationController {
                         public void afterCommit() {
                             webSocketBroadcastService.broadcastInvitation(finalInvitationData, finalRecipientId);
                             logger.debug("Broadcasted new invitation to user: {} (AFTER COMMIT)", finalRecipientId);
+                            
+                            // Send push notification for the invitation
+                            String familyName = (String) finalInvitationData.get("familyName");
+                            String inviterName = (String) finalInvitationData.get("inviterName");
+                            pushNotificationService.sendInvitationNotification(inviteeEmail, familyName, inviterName);
+                            logger.debug("Sent push notification for invitation to user: {} (AFTER COMMIT)", finalRecipientId);
                         }
                     });
                 } catch (Exception e) {
@@ -388,6 +398,23 @@ public class InvitationController {
                     
                     logger.debug("User {} accepted invitation to family {} (multi-family: added to new family)", 
                                  userId, invitation.getFamilyId());
+                    
+                    // Send new member notification to existing family members
+                    try {
+                        String newMemberName = user.getFirstName() + " " + user.getLastName();
+                        Family family = familyRepository.findById(invitation.getFamilyId()).orElse(null);
+                        if (family != null) {
+                            pushNotificationService.sendNewMemberNotification(
+                                invitation.getFamilyId(), 
+                                newMemberName, 
+                                family.getName()
+                            );
+                            logger.debug("Sent new member notification for {} joining {}", newMemberName, family.getName());
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error sending new member notification: {}", e.getMessage());
+                        // Don't fail the invitation acceptance if notification fails
+                    }
                 } else {
                     // User is already a member - just ensure membership is active
                     UserFamilyMembership existingMember = existingMembership.get();

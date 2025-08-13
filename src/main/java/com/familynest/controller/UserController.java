@@ -1180,6 +1180,33 @@ public class UserController {
             preferences = userPreferencesRepository.save(preferences);
             logger.debug("User preferences updated successfully for user ID: {}", userId);
             
+            // Also update the user_notification_matrix table for consistency
+            if (preferencesData.containsKey("invitationNotifications")) {
+                Boolean invitationNotifications = (Boolean) preferencesData.get("invitationNotifications");
+                String updateMatrixSql = """
+                    UPDATE user_notification_matrix 
+                    SET invitations_push = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND family_id = 0 AND member_id = 0
+                """;
+                int rowsUpdated = jdbcTemplate.update(updateMatrixSql, invitationNotifications, userId);
+                logger.debug("Updated {} matrix rows for user {} invitation notifications: {}", rowsUpdated, userId, invitationNotifications);
+                
+                // If no global matrix row exists, create one
+                if (rowsUpdated == 0) {
+                    String insertMatrixSql = """
+                        INSERT INTO user_notification_matrix (
+                            user_id, family_id, member_id, push_enabled, device_permission_granted,
+                            family_messages_push, dm_messages_push, invitations_push, 
+                            reactions_push, comments_push, new_member_push,
+                            family_messages_websocket, dm_messages_websocket, invitations_websocket,
+                            reactions_websocket, comments_websocket, new_member_websocket
+                        ) VALUES (?, 0, 0, TRUE, TRUE, TRUE, TRUE, ?, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
+                    """;
+                    jdbcTemplate.update(insertMatrixSql, userId, invitationNotifications);
+                    logger.debug("Created new matrix row for user {} with invitation notifications: {}", userId, invitationNotifications);
+                }
+            }
+            
             // Build response with updated preferences
             Map<String, Object> response = new HashMap<>();
             response.put("userId", userId);
