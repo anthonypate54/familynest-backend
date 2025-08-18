@@ -15,7 +15,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     
     private static final Logger logger = LoggerFactory.getLogger(WebMvcConfig.class);
 
-    @Value("${file.upload-dir:uploads}")
+    @Value("${app.upload.dir:uploads}")
     private String uploadDir;
     
     @Value("${app.thumbnail.dir:uploads/thumbnails}")
