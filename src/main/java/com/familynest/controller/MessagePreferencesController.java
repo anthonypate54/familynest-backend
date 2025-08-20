@@ -91,9 +91,10 @@ public class MessagePreferencesController {
                         .body(List.of(Map.of("error", "Not authorized to view preferences for this user")));
             }
             
-            // Verify user exists
-            Optional<User> userOpt = userRepository.findById(userId);
-            if (userOpt.isEmpty()) {
+            // Verify user exists - use simple count query instead of fetching full user object
+            String userExistsQuery = "SELECT COUNT(*) FROM app_user WHERE id = ?";
+            Integer userCount = jdbcTemplate.queryForObject(userExistsQuery, Integer.class, userId);
+            if (userCount == null || userCount == 0) {
                 logger.debug("User not found for ID: {}", userId);
                 return ResponseEntity.badRequest().body(List.of(Map.of("error", "User not found")));
             }
@@ -202,10 +203,10 @@ public class MessagePreferencesController {
             Long familyId = Long.valueOf(preferences.get("familyId").toString());
             Boolean receiveMessages = Boolean.valueOf(preferences.get("receiveMessages").toString());
             
-            // Verify family exists and user is a member
-            List<UserFamilyMembership> memberships = userFamilyMembershipRepository.findByUserId(userId);
-            boolean isMember = memberships.stream()
-                    .anyMatch(m -> m.getFamilyId().equals(familyId));
+            // Verify family exists and user is a member - use simple query
+            String membershipQuery = "SELECT COUNT(*) FROM user_family_membership WHERE user_id = ? AND family_id = ?";
+            Integer membershipCount = jdbcTemplate.queryForObject(membershipQuery, Integer.class, userId, familyId);
+            boolean isMember = membershipCount != null && membershipCount > 0;
                     
             if (!isMember) {
                 logger.debug("User {} is not a member of family {}", userId, familyId);
@@ -270,10 +271,15 @@ public class MessagePreferencesController {
                 logger.debug("Removed {} family-specific override rows for family {} user {}", deletedRows, familyId, userId);
             }
             
-            // Get updated family name for response
-            String familyName = familyRepository.findById(familyId)
-                    .map(f -> f.getName())
-                    .orElse("Family #" + familyId);
+            // Get updated family name for response - use simple query
+            String familyNameQuery = "SELECT name FROM family WHERE id = ?";
+            String familyName;
+            try {
+                familyName = jdbcTemplate.queryForObject(familyNameQuery, String.class, familyId);
+                if (familyName == null) familyName = "Family #" + familyId;
+            } catch (Exception e) {
+                familyName = "Family #" + familyId;
+            }
             
             // Return updated settings
             Map<String, Object> response = new HashMap<>();

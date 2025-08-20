@@ -136,10 +136,9 @@ public class EmailService {
             FROM message m
             JOIN family f ON m.family_id = f.id
             JOIN user_family_membership ufm ON f.id = ufm.family_id
-            LEFT JOIN message_view mv ON (m.id = mv.message_id AND mv.user_id = ? AND mv.message_type = 'family')
+            -- Removed message_view table references
             WHERE ufm.user_id = ?
             AND m.sender_id != ?
-            AND mv.id IS NULL
             AND m.timestamp >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
             ORDER BY f.name, m.timestamp DESC
             LIMIT 20
@@ -165,10 +164,9 @@ public class EmailService {
             JOIN dm_conversation dc ON dm.conversation_id = dc.id
             JOIN app_user u1 ON dc.user1_id = u1.id
             JOIN app_user u2 ON dc.user2_id = u2.id
-            LEFT JOIN message_view mv ON (dm.id = mv.dm_message_id AND mv.user_id = ? AND mv.message_type = 'dm')
+            -- Removed message_view table references
             WHERE (dc.user1_id = ? OR dc.user2_id = ?)
             AND dm.sender_id != ?
-            AND mv.id IS NULL
             AND dm.created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
             ORDER BY dm.created_at DESC
             LIMIT 10

@@ -159,7 +159,7 @@ public class CommentController {
             "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
             "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
             "  m.parent_message_id as parent_message_id, " +
-            "  COALESCE(vc.count, 0) as view_count, " +
+
             "  m.like_count, m.love_count, " +
             "  COALESCE(cc.count, 0) as comment_count, " +
             "  CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
@@ -169,8 +169,6 @@ public class CommentController {
             "LEFT JOIN message_comment_family_link mcfl ON m.id = mcfl.message_comment_id " +
             "LEFT JOIN family f ON mcfl.family_id = f.id " +
             "LEFT JOIN app_user s ON m.sender_id = s.id " +
-            "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
-            "  ON m.id = vc.message_id " +
             "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
             "  ON m.id = cc.parent_message_id " +
             "LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT' " +
@@ -206,7 +204,7 @@ public class CommentController {
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
                 messageMap.put("thumbnailUrl", message.get("thumbnail_url"));
-                messageMap.put("viewCount", message.get("view_count"));
+
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
@@ -247,7 +245,7 @@ public class CommentController {
                         "LEFT JOIN (SELECT parent_comment_id, COUNT(*) as count FROM message_comment GROUP BY parent_comment_id) cc " +
                         "  ON mc.id = cc.parent_comment_id " +
                         "WHERE mc.parent_message_id = ? " +
-                        "ORDER BY mc.created_at ASC";
+                        "ORDER BY mc.timestamp ASC";
             
             List<Map<String, Object>> replies = jdbcTemplate.queryForList(sql, commentId);
             

@@ -31,8 +31,7 @@ public class EngagementService {
     @Autowired
     private MessageCommentRepository commentRepository;
     
-    @Autowired
-    private MessageViewRepository viewRepository;
+    // Removed MessageViewRepository (performance optimization)
     
     @Autowired
     private MessageShareRepository shareRepository;
@@ -199,90 +198,7 @@ public class EngagementService {
         commentRepository.deleteById(commentId);
     }
     
-    // ----- View methods -----
-    
-    @Transactional
-    public MessageView markMessageAsViewed(Long messageId, Long userId) {
-        logger.info("Marking family message: {} as viewed by user: {}", messageId, userId);
-        
-        // Check if message exists
-        if (!messageRepository.existsById(messageId)) {
-            throw new IllegalArgumentException("Message not found with id: " + messageId);
-        }
-        
-        // Check if user exists
-        if (!userRepository.existsById(userId)) {
-            throw new IllegalArgumentException("User not found with id: " + userId);
-        }
-        
-        // Check if already viewed
-        Optional<MessageView> existingView = viewRepository.findByFamilyMessageIdAndUserId(messageId, userId);
-        if (existingView.isPresent()) {
-            logger.info("Family message already viewed by user");
-            return existingView.get();
-        }
-        
-        // Create and save new view for family message
-        MessageView view = MessageView.forFamilyMessage(messageId, userId);
-        
-        return viewRepository.save(view);
-    }
-
-    @Transactional
-    public MessageView markDMMessageAsViewed(Long dmMessageId, Long userId) {
-        logger.info("Marking DM message: {} as viewed by user: {}", dmMessageId, userId);
-        
-        // Check if DM message exists (we'll need to inject DMMessageRepository)
-        // For now, we'll assume it exists - we can add validation later
-        
-        // Check if user exists
-        if (!userRepository.existsById(userId)) {
-            throw new IllegalArgumentException("User not found with id: " + userId);
-        }
-        
-        // Check if already viewed
-        Optional<MessageView> existingView = viewRepository.findByDMMessageIdAndUserId(dmMessageId, userId);
-        if (existingView.isPresent()) {
-            logger.info("DM message already viewed by user");
-            return existingView.get();
-        }
-        
-        // Create and save new view for DM message
-        MessageView view = MessageView.forDMMessage(dmMessageId, userId);
-        
-        return viewRepository.save(view);
-    }
-    
-    public List<MessageView> getMessageViews(Long messageId) {
-        logger.info("Getting views for family message: {}", messageId);
-        return viewRepository.findByFamilyMessageId(messageId);
-    }
-
-    public long getMessageViewCount(Long messageId) {
-        logger.info("Getting view count for family message: {}", messageId);
-        return viewRepository.countByFamilyMessageId(messageId);
-    }
-
-    public boolean isMessageViewedByUser(Long messageId, Long userId) {
-        logger.info("Checking if family message: {} is viewed by user: {}", messageId, userId);
-        return viewRepository.findByFamilyMessageIdAndUserId(messageId, userId).isPresent();
-    }
-
-    // DM message view methods
-    public List<MessageView> getDMMessageViews(Long dmMessageId) {
-        logger.info("Getting views for DM message: {}", dmMessageId);
-        return viewRepository.findByDMMessageId(dmMessageId);
-    }
-
-    public long getDMMessageViewCount(Long dmMessageId) {
-        logger.info("Getting view count for DM message: {}", dmMessageId);
-        return viewRepository.countByDMMessageId(dmMessageId);
-    }
-
-    public boolean isDMMessageViewedByUser(Long dmMessageId, Long userId) {
-        logger.info("Checking if DM message: {} is viewed by user: {}", dmMessageId, userId);
-        return viewRepository.findByDMMessageIdAndUserId(dmMessageId, userId).isPresent();
-    }
+    // ----- Removed View tracking methods (performance optimization) -----
     
     // ----- Share methods -----
     
@@ -362,8 +278,8 @@ public class EngagementService {
         // Add total comment count
         data.put("commentCount", commentRepository.countByMessageId(messageId));
         
-        // Add view count
-        data.put("viewCount", viewRepository.countByMessageId(messageId));
+        // View count removed (performance optimization)
+        data.put("viewCount", 0);
         
         // Add share count
         data.put("shareCount", shareRepository.countByOriginalMessageId(messageId));
@@ -399,13 +315,7 @@ public class EngagementService {
                    "  SELECT UNNEST(" + idArray.toString() + ") AS id" +
                    "), " +
                    "engagement_data AS (" +
-                   "  -- Views" +
-                   "  SELECT 'view' AS type, message_id, COUNT(*) AS count " +
-                   "  FROM message_view " +
-                   "  WHERE message_id IN (SELECT id FROM message_ids) " +
-                   "  GROUP BY message_id " +
-                   "  " +
-                   "  UNION ALL " +
+                   "  -- Removed view tracking" +
                    "  " +
                    "  -- Reactions " +
                    "  SELECT 'reaction' AS type, message_id, COUNT(*) AS count " +
@@ -432,7 +342,7 @@ public class EngagementService {
                    "engagement_summary AS (" +
                    "  SELECT " +
                    "    message_id, " +
-                   "    SUM(CASE WHEN type = 'view' THEN count ELSE 0 END) AS view_count, " +
+                   "    0 AS view_count, " +
                    "    SUM(CASE WHEN type = 'reaction' THEN count ELSE 0 END) AS reaction_count, " +
                    "    SUM(CASE WHEN type = 'comment' THEN count ELSE 0 END) AS comment_count, " +
                    "    SUM(CASE WHEN type = 'share' THEN count ELSE 0 END) AS share_count " +
@@ -447,7 +357,7 @@ public class EngagementService {
                    ")" +
                    "SELECT " +
                    "  mi.id AS message_id, " +
-                   "  COALESCE(es.view_count, 0) AS view_count, " +
+
                    "  COALESCE(es.comment_count, 0) AS comment_count, " +
                    "  COALESCE(es.share_count, 0) AS share_count, " +
                    "  COALESCE(es.reaction_count, 0) AS total_reaction_count, " +
@@ -470,7 +380,7 @@ public class EngagementService {
             // Initialize data structures for this message if not exist
             if (!messageEngagementMap.containsKey(messageId)) {
                 Map<String, Object> messageData = new HashMap<>();
-                messageData.put("viewCount", row.get("view_count"));
+
                 messageData.put("commentCount", row.get("comment_count"));
                 messageData.put("shareCount", row.get("share_count"));
                 messageData.put("reactions", new HashMap<String, Integer>());

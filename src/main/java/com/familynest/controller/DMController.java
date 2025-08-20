@@ -42,6 +42,26 @@ public class DMController {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    
+    /**
+     * Check if a recipient has muted the sender
+     */
+    private boolean isRecipientMutedBySender(Long recipientId, Long senderId) {
+        try {
+            String muteSql = """
+                SELECT COUNT(*) > 0 
+                FROM user_member_message_settings umms 
+                WHERE umms.user_id = ? 
+                AND umms.member_user_id = ? 
+                AND umms.receive_messages = false
+                """;
+            Boolean isMuted = jdbcTemplate.queryForObject(muteSql, Boolean.class, recipientId, senderId);
+            return isMuted != null && isMuted;
+        } catch (Exception e) {
+            logger.error("Error checking mute status for recipient {} and sender {}: {}", recipientId, senderId, e.getMessage());
+            return false; // Default to not muted on error
+        }
+    }
 
     @Autowired
     private JwtUtil jwtUtil;
@@ -299,24 +319,11 @@ public class DMController {
                 }
                 
                 // Calculate unread count for this conversation
-                String unreadCountSql = """
-                    SELECT COUNT(*) FROM dm_message dm
-                    WHERE dm.conversation_id = ? 
-                    AND dm.sender_id != ?
-                    AND NOT EXISTS (
-                        SELECT 1 FROM message_view mv 
-                        WHERE mv.dm_message_id = dm.id 
-                        AND mv.user_id = ? 
-                        AND mv.message_type = 'dm'
-                    )
-                    """;
-                
+                // Removed view tracking - set unread count to 0 for now
                 Long conversationId = ((Number) conv.get("conversation_id")).longValue();
-                Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class, 
-                    conversationId, currentUserId, currentUserId);
                 
-                formatted.put("unread_count", unreadCount != null ? unreadCount : 0);
-                formatted.put("has_unread_messages", unreadCount != null && unreadCount > 0);
+                formatted.put("unread_count", 0);
+                formatted.put("has_unread_messages", false);
                 
                 formattedConversations.add(formatted);
             }
@@ -499,12 +506,10 @@ public class DMController {
                     dm.media_filename, dm.media_size, dm.media_duration, dm.created_at,
                     u.username as sender_username, u.first_name as sender_first_name, 
                     u.last_name as sender_last_name, u.photo as sender_photo,
-                    CASE WHEN mv.id IS NOT NULL THEN true ELSE false END as is_read
+                    false as is_read
                 FROM dm_message dm
                 JOIN app_user u ON dm.sender_id = u.id
-                LEFT JOIN message_view mv ON mv.dm_message_id = dm.id 
-                    AND mv.user_id = ? 
-                    AND mv.message_type = 'dm'
+                -- Removed message_view table references
                 WHERE dm.id = ?
                 """;
 
@@ -546,12 +551,7 @@ public class DMController {
                         -- For 1:1 chats: check user1_id/user2_id
                         (dc.is_group = FALSE AND (dc.user1_id = ? OR dc.user2_id = ?))
                     )
-                    AND NOT EXISTS (
-                        SELECT 1 FROM message_view mv 
-                        WHERE mv.dm_message_id = dm.id 
-                        AND mv.user_id = ? 
-                        AND mv.message_type = 'dm'
-                    )
+                    -- Removed message_view tracking
                     """;
                 
                 Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class, 
@@ -568,8 +568,14 @@ public class DMController {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        webSocketBroadcastService.broadcastDMMessage(finalRecipientMessageData, finalRecipientId);
-                        logger.debug("Broadcasted DM message to recipient {} (AFTER COMMIT)", finalRecipientId);
+                        // Check if recipient has muted the sender
+                        boolean isMuted = isRecipientMutedBySender(finalRecipientId, senderId);
+                        if (!isMuted) {
+                            webSocketBroadcastService.broadcastDMMessage(finalRecipientMessageData, finalRecipientId);
+                            logger.debug("Broadcasted DM message to recipient {} (AFTER COMMIT)", finalRecipientId);
+                        } else {
+                            logger.debug("Skipped broadcasting DM message to muted recipient {} (AFTER COMMIT)", finalRecipientId);
+                        }
                     }
                 });
             }
@@ -578,7 +584,14 @@ public class DMController {
             try {
                 String senderName = (String) userData.get("username");
                 for (Long recipientId : recipientIds) {
-                    pushNotificationService.sendDMNotification(newMessageId, recipientId, senderName, content);
+                    // Check if recipient has muted the sender
+                    boolean isMuted = isRecipientMutedBySender(recipientId, senderId);
+                    if (!isMuted) {
+                        pushNotificationService.sendDMNotification(newMessageId, recipientId, senderName, content);
+                        logger.debug("Sent push notification to recipient {}", recipientId);
+                    } else {
+                        logger.debug("Skipped push notification to muted recipient {}", recipientId);
+                    }
                 }
             } catch (Exception pushError) {
                 logger.error("Error sending DM push notification for message {}: {}", newMessageId, pushError.getMessage());
@@ -658,25 +671,30 @@ public class DMController {
 
             // Get messages with pagination
             int offset = page * size;
+            logger.debug("Getting DM messages for conversation {} for user {} (checking for muted users)", conversationId, currentUserId);
             String messagesSql = """
                 SELECT 
                     m.id, m.conversation_id, m.sender_id, m.content, m.media_url, m.media_type, 
                     m.media_thumbnail, m.media_filename, m.media_size, m.media_duration,
-                    CASE WHEN mv.id IS NOT NULL THEN true ELSE false END as is_read,
+                    false as is_read,
                     m.created_at,
                     u.username as sender_username, u.first_name as sender_first_name, u.last_name as sender_last_name,
                     u.photo as sender_photo
                 FROM dm_message m
                 JOIN app_user u ON m.sender_id = u.id
-                LEFT JOIN message_view mv ON mv.dm_message_id = m.id 
-                    AND mv.user_id = ? 
-                    AND mv.message_type = 'dm'
+                -- Removed message_view table references
                 WHERE m.conversation_id = ?
+                AND m.sender_id NOT IN (
+                    SELECT umms.member_user_id 
+                    FROM user_member_message_settings umms 
+                    WHERE umms.user_id = ? 
+                    AND umms.receive_messages = false
+                )
                 ORDER BY m.created_at DESC
                 LIMIT ? OFFSET ?
                 """;
 
-            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, currentUserId, conversationId, size, offset);
+            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, currentUserId, conversationId, currentUserId, size, offset);
             
             // Debug log each message
             for (Map<String, Object> message : messages) {
@@ -769,29 +787,9 @@ public class DMController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
 
-            // Mark all unread messages from the other user as read using message_view table
-            String insertViewsSql = """
-                INSERT INTO message_view (dm_message_id, user_id, message_type, viewed_at)
-                SELECT 
-                    dm.id, 
-                    ?, 
-                    'dm',
-                    CURRENT_TIMESTAMP
-                FROM dm_message dm
-                WHERE dm.conversation_id = ? 
-                AND dm.sender_id != ?
-                AND NOT EXISTS (
-                    SELECT 1 FROM message_view mv 
-                    WHERE mv.dm_message_id = dm.id 
-                    AND mv.user_id = ? 
-                    AND mv.message_type = 'dm'
-                )
-                """;
-            
-            int updatedCount = jdbcTemplate.update(insertViewsSql, currentUserId, conversationId, currentUserId, currentUserId);
-
-            logger.debug("Marked {} messages as read", updatedCount);
-            return ResponseEntity.ok(Map.of("markedAsRead", updatedCount));
+            // Removed message_view tracking - no longer mark messages as read
+            logger.debug("View tracking removed - no longer marking messages as read");
+            return ResponseEntity.ok(Map.of("markedAsRead", 0));
 
         } catch (DataAccessException e) {
             logger.error("Database error marking messages as read: {}", e.getMessage());

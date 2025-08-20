@@ -129,6 +129,26 @@ public class UserController {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    
+    /**
+     * Check if a recipient has muted the sender for family messages
+     */
+    private boolean isRecipientMutedBySender(Long recipientId, Long senderId) {
+        try {
+            String muteSql = """
+                SELECT COUNT(*) > 0 
+                FROM user_member_message_settings umms 
+                WHERE umms.user_id = ? 
+                AND umms.member_user_id = ? 
+                AND umms.receive_messages = false
+                """;
+            Boolean isMuted = jdbcTemplate.queryForObject(muteSql, Boolean.class, recipientId, senderId);
+            return isMuted != null && isMuted;
+        } catch (Exception e) {
+            logger.error("Error checking mute status for recipient {} and sender {}: {}", recipientId, senderId, e.getMessage());
+            return false; // Default to not muted on error
+        }
+    }
 
 
 
@@ -636,7 +656,8 @@ public class UserController {
             userFamilyMembershipRepository.save(membership);
             logger.debug("Created and activated new membership for user ID: {} in family ID: {}", id, familyId);
             
-            // Create message settings (default: receive messages = true)
+            // Create message settings (default
+            essages = true)
             logger.debug("Creating message settings for user ID: {} and family ID: {}", id, familyId);
             try {
                 com.familynest.model.UserFamilyMessageSettings settings = 
@@ -869,9 +890,10 @@ public class UserController {
                         "  m.id, m.content, m.sender_username, m.sender_id, " +
                         "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
                         "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
-                        "  COALESCE(vc.count, 0) as view_count, " +
                         "  m.like_count, m.love_count, " +
                         "  COALESCE(cc.count, 0) as comment_count, " +
+                        "  cc.latest_comment_time, " +
+                        "  m.read_flag, " +
                         "  CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
                         "  CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
                         "FROM message m " +
@@ -879,9 +901,7 @@ public class UserController {
                         "JOIN message_family_link mfl ON m.id = mfl.message_id " +
                         "JOIN user_families uf2 ON mfl.family_id = uf2.family_id " +
                         "LEFT JOIN app_user s ON m.sender_id = s.id " +
-                        "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
-                        "  ON m.id = vc.message_id " +
-                        "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
+                        "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count, MAX(timestamp) as latest_comment_time FROM message_comment GROUP BY parent_message_id) cc " +
                         "  ON m.id = cc.parent_message_id " +
                         "LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE' " +
                         "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE' " +
@@ -923,10 +943,11 @@ public class UserController {
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
-                messageMap.put("viewCount", message.get("view_count"));
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
+                messageMap.put("latestCommentTime", message.get("latest_comment_time"));
+                messageMap.put("readFlag", message.get("read_flag"));
                 messageMap.put("isLiked", message.get("is_liked"));
                 messageMap.put("isLoved", message.get("is_loved"));
  
@@ -1901,6 +1922,55 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
             logger.error("💥 FRONTEND_DEBUG: Error logging message: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to log message: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Mark a message thread as read by updating the read_flag timestamp
+     */
+    @PostMapping("/messages/{messageId}/mark-read")
+    @Transactional
+     public ResponseEntity<Map<String, Object>> markMessageAsRead(
+            @PathVariable Long messageId,
+            @RequestHeader("Authorization") String authHeader,
+            HttpServletRequest request) {
+        
+        logger.debug("Marking message {} as read", messageId);
+        
+        try {
+            // Get the user ID either from test attributes or from JWT
+            Long userId;
+            Object userIdAttr = request.getAttribute("userId");
+            if (userIdAttr != null) {
+                userId = (Long) userIdAttr;
+                logger.debug("Using test userId: {}", userId);
+            } else {
+                String token = authHeader.replace("Bearer ", "");
+                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
+                userId = Long.parseLong(claims.get("userId").toString());
+            }
+
+            // Simple update query - just set read_flag to current timestamp
+            String sql = "UPDATE message SET read_flag = NOW() WHERE id = ?";
+            int rowsUpdated = jdbcTemplate.update(sql, messageId);
+            
+            if (rowsUpdated == 0) {
+                logger.warn("No message found with ID: {}", messageId);
+                return ResponseEntity.notFound().build();
+            }
+            
+            logger.debug("Successfully marked message {} as read for user {}", messageId, userId);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "messageId", messageId,
+                "readAt", java.time.LocalDateTime.now().toString()
+            ));
+            
+        } catch (Exception e) {
+            logger.error("Error marking message as read: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to mark message as read: " + e.getMessage()));
         }
     }
 }

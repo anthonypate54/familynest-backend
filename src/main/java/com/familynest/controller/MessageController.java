@@ -110,17 +110,13 @@ public class MessageController {
                          "  m.thumbnail_url, " +
                          "  m.thumbnail_url AS \"thumbnailUrl\", " +
                          "  u.username, u.first_name, u.last_name, u.photo, " +
-                         "  COALESCE(view_count, 0) as view_count, " +
+
                          "  COALESCE(reaction_count, 0) as reaction_count, " +
                          "  COALESCE(comment_count, 0) as comment_count " +
                          "FROM message m " +
                          "JOIN user_family_membership ufm ON m.family_id = ufm.family_id " +
                          "LEFT JOIN app_user u ON m.sender_id = u.id " +
-                         "LEFT JOIN ( " +
-                         "  SELECT message_id, COUNT(*) as view_count " +
-                         "  FROM message_view " +
-                         "  GROUP BY message_id " +
-                         ") v ON m.id = v.message_id " +
+                         "-- Removed message_view table references " +
                          "LEFT JOIN ( " +
                          "  SELECT message_id, COUNT(*) as reaction_count " +
                          "  FROM message_reaction " +

@@ -322,6 +322,13 @@ public class PushNotificationService {
                 OR 
                 (unm.family_id = ? AND unm.member_id = 0 AND unm.family_messages_push = TRUE)
             )
+            AND u.id NOT IN (
+                -- Exclude users who have muted the sender
+                SELECT umms.user_id 
+                FROM user_member_message_settings umms 
+                WHERE umms.member_user_id = (SELECT sender_id FROM message WHERE id = ?)
+                AND umms.receive_messages = false
+            )
         """;
         
         // Debug: Log the sender ID for this message
@@ -333,7 +340,7 @@ public class PushNotificationService {
             logger.error("Could not find sender for message {}: {}", messageId, e.getMessage());
         }
         
-        List<Map<String, Object>> recipients = jdbcTemplate.queryForList(sql, familyId, messageId, familyId);
+        List<Map<String, Object>> recipients = jdbcTemplate.queryForList(sql, familyId, messageId, familyId, messageId);
         logger.debug("Found {} notification recipients for message {} in family {} (using matrix)", recipients.size(), messageId, familyId);
         for (Map<String, Object> recipient : recipients) {
             String fcmToken = (String) recipient.get("fcm_token");

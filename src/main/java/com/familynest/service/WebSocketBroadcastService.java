@@ -28,6 +28,45 @@ public class WebSocketBroadcastService {
         this.userFamilyMembershipRepository = userFamilyMembershipRepository;
         this.jdbcTemplate = jdbcTemplate;
     }
+    
+    /**
+     * Check if a recipient has muted the sender
+     */
+    private boolean isRecipientMutedBySender(Long recipientId, Long senderId) {
+        if (senderId == null || recipientId == null) {
+            return false; // Can't be muted if we don't have IDs
+        }
+        try {
+            String muteSql = """
+                SELECT COUNT(*) > 0 
+                FROM user_member_message_settings umms 
+                WHERE umms.user_id = ? 
+                AND umms.member_user_id = ? 
+                AND umms.receive_messages = false
+                """;
+            Boolean isMuted = jdbcTemplate.queryForObject(muteSql, Boolean.class, recipientId, senderId);
+            return isMuted != null && isMuted;
+        } catch (Exception e) {
+            logger.error("Error checking mute status for recipient {} and sender {}: {}", recipientId, senderId, e.getMessage());
+            return false; // Default to not muted on error
+        }
+    }
+    
+    /**
+     * Extract sender ID from message data
+     */
+    private Long getSenderIdFromMessage(Map<String, Object> messageData) {
+        try {
+            Object senderIdObj = messageData.get("sender_id");
+            if (senderIdObj instanceof Number) {
+                return ((Number) senderIdObj).longValue();
+            }
+            return null;
+        } catch (Exception e) {
+            logger.error("Error extracting sender_id from message data: {}", e.getMessage());
+            return null;
+        }
+    }
 
     /**
      * Broadcast DM MESSAGE to a specific recipient
@@ -75,14 +114,25 @@ public class WebSocketBroadcastService {
             
             logger.debug("Found {} members in family {}", familyMemberIds.size(), familyId);
             
-            // Broadcast to each family member's individual topic
+            // Broadcast to each family member's individual topic (excluding muted recipients)
             int broadcastCount = 0;
+            Long senderId = getSenderIdFromMessage(messageData);
+            logger.debug("🔇 WebSocket: Extracted senderId={} from message data for family {}", senderId, familyId);
+            
             for (Long userId : familyMemberIds) {
                 try {
-                    String userDestination = "/user/" + userId + "/family";
-                    messagingTemplate.convertAndSend(userDestination, messageData);
-                    broadcastCount++;
-                    logger.debug("Broadcast family message to user {}", userId);
+                    // Check if this user has muted the sender
+                    boolean isMuted = isRecipientMutedBySender(userId, senderId);
+                    logger.debug("🔇 WebSocket: User {} mute check for sender {}: isMuted={}", userId, senderId, isMuted);
+                    
+                    if (!isMuted) {
+                        String userDestination = "/user/" + userId + "/family";
+                        messagingTemplate.convertAndSend(userDestination, messageData);
+                        broadcastCount++;
+                        logger.debug("✅ Broadcast family message to user {}", userId);
+                    } else {
+                        logger.debug("🔇 Skipped broadcasting family message to muted user {}", userId);
+                    }
                 } catch (Exception e) {
                     logger.error("Failed to broadcast to user {}: {}", userId, e.getMessage());
                     // Continue to other users even if one fails
@@ -146,20 +196,13 @@ public class WebSocketBroadcastService {
             
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {
-                // Check if this user has muted the message sender (using matrix table)
+                // Check if this user has muted the message sender (using member message settings)
                 Long senderId = ((Number) messageData.get("sender_id")).longValue();
-                String muteSql = """
-                    SELECT COUNT(*) FROM user_notification_matrix 
-                    WHERE user_id = ? 
-                    AND family_id = 0 
-                    AND member_id = ? 
-                    AND dm_messages_websocket = FALSE
-                """;
-                Integer muteCount = jdbcTemplate.queryForObject(muteSql, Integer.class, userId, senderId);
-                boolean userHasMutedSender = muteCount != null && muteCount > 0;
+                boolean userHasMutedSender = isRecipientMutedBySender(userId, senderId);
+                logger.debug("🔇 NEW_MESSAGE: User {} mute check for sender {}: isMuted={}", userId, senderId, userHasMutedSender);
                 
                 if (userHasMutedSender) {
-                    logger.debug("Skipping user {} - has muted sender {}", userId, senderId);
+                    logger.debug("🔇 Skipping user {} - has muted sender {}", userId, senderId);
                     continue;
                 }
                 

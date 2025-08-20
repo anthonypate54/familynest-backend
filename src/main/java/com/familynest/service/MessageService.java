@@ -43,15 +43,14 @@ public class MessageService {
                      "m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
                      "s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                      "f.name as family_name, " +
-                     "COALESCE(vc.count, 0) as view_count, " +
+
                      "m.like_count, m.love_count, " +
                      "(SELECT COUNT(*) FROM message_comment WHERE parent_message_id = m.id) as comment_count " +
                      "FROM message m " +
                      "LEFT JOIN message_family_link mfl ON m.id = mfl.message_id " +
                      "LEFT JOIN family f ON mfl.family_id = f.id " +
                      "LEFT JOIN app_user s ON m.sender_id = s.id " +
-                     "LEFT JOIN (SELECT message_id, COUNT(*) as count FROM message_view GROUP BY message_id) vc " +
-                     "  ON m.id = vc.message_id " +
+                     "-- Removed message_view table references " +
                      "WHERE m.id = ? " +
                      "LIMIT 1";
         

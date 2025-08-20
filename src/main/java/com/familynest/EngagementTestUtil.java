@@ -4,14 +4,14 @@ import com.familynest.model.Family;
 import com.familynest.model.Message;
 import com.familynest.model.User;
 import com.familynest.model.MessageReaction;
-import com.familynest.model.MessageView;
+// Removed MessageView import (performance optimization)
 import com.familynest.model.MessageComment;
 import com.familynest.model.MessageShare;
 import com.familynest.repository.FamilyRepository;
 import com.familynest.repository.MessageRepository;
 import com.familynest.repository.UserRepository;
 import com.familynest.repository.MessageReactionRepository;
-import com.familynest.repository.MessageViewRepository;
+// Removed MessageViewRepository import (performance optimization)
 import com.familynest.repository.MessageCommentRepository;
 import com.familynest.repository.MessageShareRepository;
 import com.familynest.repository.UserEngagementSettingsRepository;
@@ -48,8 +48,7 @@ public class EngagementTestUtil {
     @Autowired
     private MessageReactionRepository reactionRepository;
 
-    @Autowired
-    private MessageViewRepository viewRepository;
+    // Removed MessageViewRepository injection (performance optimization)
 
     @Autowired
     private MessageCommentRepository commentRepository;
@@ -65,7 +64,7 @@ public class EngagementTestUtil {
     private Map<Integer, Family> testFamilies = new HashMap<>();
     private Map<Integer, Message> testMessages = new HashMap<>();
     private Map<Integer, MessageReaction> testReactions = new HashMap<>();
-    private Map<Integer, MessageView> testViews = new HashMap<>();
+    // Removed MessageView test map (performance optimization)
     private Map<Integer, MessageComment> testComments = new HashMap<>();
     private Map<Integer, MessageShare> testShares = new HashMap<>();
 
@@ -219,7 +218,7 @@ public class EngagementTestUtil {
             // Delete engagement records
             jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id IN (SELECT id FROM message WHERE content LIKE 'Test engagement message%')");
             jdbcTemplate.update("DELETE FROM message_comment WHERE message_id IN (SELECT id FROM message WHERE content LIKE 'Test engagement message%')");
-            jdbcTemplate.update("DELETE FROM message_view WHERE message_id IN (SELECT id FROM message WHERE content LIKE 'Test engagement message%')");
+            // Removed message_view table - no longer need to clean up view tracking data
             jdbcTemplate.update("DELETE FROM message_share WHERE original_message_id IN (SELECT id FROM message WHERE content LIKE 'Test engagement message%')");
 
             // Delete test messages
@@ -228,7 +227,7 @@ public class EngagementTestUtil {
             // Clear the maps
             testMessages.clear();
             testReactions.clear();
-            testViews.clear();
+            // Removed testViews.clear() (performance optimization)
             testComments.clear();
             testShares.clear();
 
@@ -468,24 +467,7 @@ public class EngagementTestUtil {
      * Create test views
      */
     private void createTestViews() {
-        // Message 1: Viewed by Users 1, 2, 3
-        addView(1, 1);
-        addView(1, 2);
-        addView(1, 3);
-
-        // Message 2: Viewed by Users 1, 3, 4, 5
-        addView(2, 1);
-        addView(2, 3);
-        addView(2, 4);
-        addView(2, 5);
-
-        // Message 3: Viewed by User 2 only
-        addView(3, 2);
-
-        // Message 4: Viewed by Users 2, 3, 4
-        addView(4, 2);
-        addView(4, 3);
-        addView(4, 4);
+        // Removed view tracking test data (performance optimization)
 
         // Message 5: No views
     }
@@ -548,20 +530,7 @@ public class EngagementTestUtil {
     /**
      * Add a view to a message
      */
-    private int addView(int messageIdx, int userIdx) {
-        Message message = getTestMessage(messageIdx);
-        User user = getTestUser(userIdx);
-
-        MessageView view = new MessageView();
-        view.setMessageId(message.getId());
-        view.setUserId(user.getId());
-        view.setViewedAt(LocalDateTime.now().minusDays(messageIdx).minusHours(userIdx));
-
-        view = viewRepository.save(view);
-        int idx = testViews.size() + 1;
-        testViews.put(idx, view);
-        return idx;
-    }
+    // Removed addView method (performance optimization)
 
     /**
      * Add a comment to a message
@@ -624,9 +593,7 @@ public class EngagementTestUtil {
         return testReactions.get(idx);
     }
 
-    public MessageView getTestView(int idx) {
-        return testViews.get(idx);
-    }
+    // Removed getTestView method (performance optimization)
 
     public MessageComment getTestComment(int idx) {
         return testComments.get(idx);
