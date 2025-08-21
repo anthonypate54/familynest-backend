@@ -444,6 +444,28 @@ public class CommentController {
             }
             
             logger.debug("Created comment {} visible in {} families", newCommentId, parentMessageFamilies.size());
+
+            // Update user_message_read table to mark as unread for all family members except comment author
+            try {
+                String updateReadStatusSql = 
+                    "INSERT INTO user_message_read (user_id, message_id, has_unread_comments, created_at, updated_at) " +
+                    "SELECT DISTINCT ufm.user_id, ?, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP " +
+                    "FROM user_family_membership ufm " +
+                    "JOIN message_family_link mfl ON ufm.family_id = mfl.family_id " +
+                    "WHERE mfl.message_id = ? " +
+                    "  AND ufm.user_id != ? " + // Exclude comment author
+                    "ON CONFLICT (user_id, message_id) " +
+                    "DO UPDATE SET " +
+                    "  has_unread_comments = true, " +
+                    "  updated_at = CURRENT_TIMESTAMP";
+
+                int rowsAffected = jdbcTemplate.update(updateReadStatusSql, parentMessageId, parentMessageId, userId);
+                logger.debug("Updated user_message_read for {} users on message {} (comment author {} excluded)", 
+                           rowsAffected, parentMessageId, userId);
+            } catch (Exception e) {
+                logger.error("Error updating user_message_read after comment post: {}", e.getMessage());
+                // Don't fail the whole operation, just log the error
+            }
     
             // Schedule WebSocket broadcast to happen AFTER transaction commits
             final Long finalCommentId = newCommentId;

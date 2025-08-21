@@ -374,13 +374,6 @@ public class WebSocketBroadcastService {
      */
     public void broadcastCommentCountExcludingUser(Long messageId, int commentCount, Long familyId, Long excludeUserId) {
         try {
-            Map<String, Object> commentCountData = Map.of(
-                "type", "COMMENT_COUNT",
-                "messageId", messageId,
-                "commentCount", commentCount,
-                "family_id", familyId
-            );
-            
             logger.debug("Broadcasting COMMENT COUNT for message {} to family {} members excluding user {}", 
                 messageId, familyId, excludeUserId);
             
@@ -413,9 +406,30 @@ public class WebSocketBroadcastService {
                 
                 try {
                     String destination = "/user/" + userId + "/comment-counts";
-                    messagingTemplate.convertAndSend(destination, commentCountData);
+                    // Query user's read status for this message
+                    String readStatusSql = "SELECT has_unread_comments FROM user_message_read " +
+                                         "WHERE user_id = ? AND message_id = ?";
+                    Boolean hasUnreadComments;
+                    try {
+                        hasUnreadComments = jdbcTemplate.queryForObject(readStatusSql, Boolean.class, userId, messageId);
+                    } catch (Exception e) {
+                        // If no record exists, default to true (unread) since there are comments
+                        hasUnreadComments = true;
+                    }
+                    
+                    // Create personalized payload for this user
+                    Map<String, Object> personalizedData = Map.of(
+                        "type", "COMMENT_COUNT",
+                        "messageId", messageId,
+                        "commentCount", commentCount,
+                        "family_id", familyId,
+                        "has_unread_comments", hasUnreadComments
+                    );
+                    
+                    messagingTemplate.convertAndSend(destination, personalizedData);
                     broadcastCount++;
-                    logger.debug("Broadcast COMMENT COUNT to user {} at destination {}", userId, destination);
+                    logger.debug("Broadcast COMMENT COUNT to user {} at destination {} (has_unread_comments: {})", 
+                               userId, destination, hasUnreadComments);
                 } catch (Exception e) {
                     logger.error("Failed to broadcast comment count to user {}: {}", userId, e.getMessage());
                 }

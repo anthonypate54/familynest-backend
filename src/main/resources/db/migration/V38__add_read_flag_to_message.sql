@@ -1,11 +1,11 @@
--- Add read flag to track when user last viewed a message thread
--- This is a simple approach to show comment indicators without complex view tracking
+-- Add simple boolean flag to track unread comments
+-- Much simpler than timestamp comparisons
 
 ALTER TABLE message 
-ADD COLUMN read_flag TIMESTAMP DEFAULT NULL;
+ADD COLUMN has_unread_comments BOOLEAN DEFAULT FALSE;
 
 -- Add index for performance when querying by read status
-CREATE INDEX IF NOT EXISTS idx_message_read_flag ON message(read_flag);
+CREATE INDEX IF NOT EXISTS idx_message_has_unread_comments ON message(has_unread_comments);
 
 -- Add comment explaining the purpose
-COMMENT ON COLUMN message.read_flag IS 'Timestamp when user last viewed this message thread - used for comment indicators';
+COMMENT ON COLUMN message.has_unread_comments IS 'True when there are unread comments on this message thread';

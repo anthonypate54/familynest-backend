@@ -656,8 +656,7 @@ public class UserController {
             userFamilyMembershipRepository.save(membership);
             logger.debug("Created and activated new membership for user ID: {} in family ID: {}", id, familyId);
             
-            // Create message settings (default
-            essages = true)
+            // Create message settings (default receive_messages = true)
             logger.debug("Creating message settings for user ID: {} and family ID: {}", id, familyId);
             try {
                 com.familynest.model.UserFamilyMessageSettings settings = 
@@ -892,8 +891,9 @@ public class UserController {
                         "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                         "  m.like_count, m.love_count, " +
                         "  COALESCE(cc.count, 0) as comment_count, " +
-                        "  cc.latest_comment_time, " +
                         "  m.read_flag, " +
+                        "  COALESCE(umr.has_unread_comments, " +
+                        "    CASE WHEN cc.count > 0 THEN true ELSE false END) as has_unread_comments, " +
                         "  CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
                         "  CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved " +
                         "FROM message m " +
@@ -901,8 +901,9 @@ public class UserController {
                         "JOIN message_family_link mfl ON m.id = mfl.message_id " +
                         "JOIN user_families uf2 ON mfl.family_id = uf2.family_id " +
                         "LEFT JOIN app_user s ON m.sender_id = s.id " +
-                        "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count, MAX(timestamp) as latest_comment_time FROM message_comment GROUP BY parent_message_id) cc " +
+                        "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
                         "  ON m.id = cc.parent_message_id " +
+                        "LEFT JOIN user_message_read umr ON m.id = umr.message_id AND umr.user_id = ? " +
                         "LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE' " +
                         "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE' " +
                         "ORDER BY m.id DESC";
@@ -913,7 +914,7 @@ public class UserController {
                 return ResponseEntity.badRequest().body(null);
             }
                      
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id, currentUserId, currentUserId);
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id, currentUserId, currentUserId, currentUserId);
             
             // Debug output only for development - just log count, not each individual message
             if (logger.isDebugEnabled() && !results.isEmpty()) {
@@ -946,8 +947,12 @@ public class UserController {
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
-                messageMap.put("latestCommentTime", message.get("latest_comment_time"));
                 messageMap.put("readFlag", message.get("read_flag"));
+                messageMap.put("has_unread_comments", message.get("has_unread_comments"));
+                
+                // Debug logging for read flag feature
+                logger.debug("### Message {}: commentCount={}, readFlag={}, hasUnreadComments={}", 
+                    message.get("id"), message.get("comment_count"), message.get("read_flag"), message.get("has_unread_comments"));
                 messageMap.put("isLiked", message.get("is_liked"));
                 messageMap.put("isLoved", message.get("is_loved"));
  
@@ -967,6 +972,48 @@ public class UserController {
         } catch (Exception e) {
             logger.error("Error retrieving messages: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(null);
+        }
+    }
+
+    @PostMapping("/{id}/messages/{messageId}/mark-read")
+    public ResponseEntity<Map<String, Object>> markMessageAsRead(
+            @PathVariable Long id,
+            @PathVariable Long messageId,
+            @RequestHeader("Authorization") String authHeader) {
+        
+        logger.debug("Received request to mark message {} as read for user {}", messageId, id);
+        
+        try {
+            // Extract userId from token and validate authorization
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long currentUserId = authUtil.extractUserId(token);
+            if (currentUserId == null || !currentUserId.equals(id)) {
+                logger.debug("Authorization failed for user {}", id);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            // Use UPSERT (INSERT ... ON CONFLICT) to handle both insert and update cases
+            String upsertSql = "INSERT INTO user_message_read (user_id, message_id, has_unread_comments, created_at, updated_at) " +
+                              "VALUES (?, ?, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) " +
+                              "ON CONFLICT (user_id, message_id) " +
+                              "DO UPDATE SET " +
+                              "  has_unread_comments = false, " +
+                              "  updated_at = CURRENT_TIMESTAMP";
+
+            int rowsAffected = jdbcTemplate.update(upsertSql, id, messageId);
+            
+            logger.debug("Marked message {} as read for user {} (rows affected: {})", messageId, id, rowsAffected);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Message marked as read",
+                "messageId", messageId,
+                "userId", id
+            ));
+            
+        } catch (Exception e) {
+            logger.error("Error marking message as read: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to mark message as read"));
         }
     }
 
@@ -1926,7 +1973,7 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
     }
 
     /**
-     * Mark a message thread as read by updating the read_flag timestamp
+     * Mark a message thread as read by setting the read_flag to true
      */
     @PostMapping("/messages/{messageId}/mark-read")
     @Transactional
@@ -1950,8 +1997,8 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
                 userId = Long.parseLong(claims.get("userId").toString());
             }
 
-            // Simple update query - just set read_flag to current timestamp
-            String sql = "UPDATE message SET read_flag = NOW() WHERE id = ?";
+            // Simple update query - just set read_flag to true (mark as read)
+            String sql = "UPDATE message SET read_flag = true WHERE id = ?";
             int rowsUpdated = jdbcTemplate.update(sql, messageId);
             
             if (rowsUpdated == 0) {
