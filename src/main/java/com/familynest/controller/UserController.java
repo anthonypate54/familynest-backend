@@ -891,7 +891,6 @@ public class UserController {
                         "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                         "  m.like_count, m.love_count, " +
                         "  COALESCE(cc.count, 0) as comment_count, " +
-                        "  m.read_flag, " +
                         "  COALESCE(umr.has_unread_comments, " +
                         "    CASE WHEN cc.count > 0 THEN true ELSE false END) as has_unread_comments, " +
                         "  CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked, " +
@@ -947,12 +946,8 @@ public class UserController {
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
-                messageMap.put("readFlag", message.get("read_flag"));
                 messageMap.put("has_unread_comments", message.get("has_unread_comments"));
                 
-                // Debug logging for read flag feature
-                logger.debug("### Message {}: commentCount={}, readFlag={}, hasUnreadComments={}", 
-                    message.get("id"), message.get("comment_count"), message.get("read_flag"), message.get("has_unread_comments"));
                 messageMap.put("isLiked", message.get("is_liked"));
                 messageMap.put("isLoved", message.get("is_loved"));
  
@@ -1972,52 +1967,5 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
         }
     }
 
-    /**
-     * Mark a message thread as read by setting the read_flag to true
-     */
-    @PostMapping("/messages/{messageId}/mark-read")
-    @Transactional
-     public ResponseEntity<Map<String, Object>> markMessageAsRead(
-            @PathVariable Long messageId,
-            @RequestHeader("Authorization") String authHeader,
-            HttpServletRequest request) {
-        
-        logger.debug("Marking message {} as read", messageId);
-        
-        try {
-            // Get the user ID either from test attributes or from JWT
-            Long userId;
-            Object userIdAttr = request.getAttribute("userId");
-            if (userIdAttr != null) {
-                userId = (Long) userIdAttr;
-                logger.debug("Using test userId: {}", userId);
-            } else {
-                String token = authHeader.replace("Bearer ", "");
-                Map<String, Object> claims = jwtUtil.validateTokenAndGetClaims(token);
-                userId = Long.parseLong(claims.get("userId").toString());
-            }
 
-            // Simple update query - just set read_flag to true (mark as read)
-            String sql = "UPDATE message SET read_flag = true WHERE id = ?";
-            int rowsUpdated = jdbcTemplate.update(sql, messageId);
-            
-            if (rowsUpdated == 0) {
-                logger.warn("No message found with ID: {}", messageId);
-                return ResponseEntity.notFound().build();
-            }
-            
-            logger.debug("Successfully marked message {} as read for user {}", messageId, userId);
-            
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "messageId", messageId,
-                "readAt", java.time.LocalDateTime.now().toString()
-            ));
-            
-        } catch (Exception e) {
-            logger.error("Error marking message as read: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to mark message as read: " + e.getMessage()));
-        }
-    }
 }
