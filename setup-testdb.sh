@@ -198,16 +198,8 @@ BEGIN
         888
       );
       
-      -- Add some engagement (views, reactions, comments)
-      -- Views
-      IF i % 3 = 0 THEN
-        INSERT INTO message_view (message_id, user_id, viewed_at)
-        VALUES (current_message_id, 101, NOW());
-      END IF;
-      IF i % 4 = 0 THEN
-        INSERT INTO message_view (message_id, user_id, viewed_at)
-        VALUES (current_message_id, 999, NOW());
-      END IF;
+      -- Add some engagement (reactions, comments)
+      -- Removed message_view table - no longer tracking views
       
       -- Reactions
       IF i % 5 = 0 THEN
@@ -288,7 +280,7 @@ echo ""
 echo "======================= STRESS TEST USER INFO ===================="
 PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Total Messages: ' || COUNT(*) FROM message WHERE sender_id = 888;"
 PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Thread Count: ' || COUNT(*) FROM (SELECT DISTINCT family_id FROM message WHERE sender_id = 888 AND content LIKE 'Stress test thread%') as t;"
-PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Views: ' || COUNT(*) FROM message_view mv JOIN message m ON mv.message_id = m.id WHERE m.sender_id = 888;"
+PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Views: Removed (no longer tracking)';"
 PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Reactions: ' || COUNT(*) FROM message_reaction mr JOIN message m ON mr.message_id = m.id WHERE m.sender_id = 888;"
 PGPASSWORD=postgres PAGER="" psql -X -t -U postgres -d familynest_test -c "SELECT '  Engagement - Comments: ' || COUNT(*) FROM message_comment mc JOIN message m ON mc.parent_message_id = m.id WHERE m.sender_id = 888;"
 echo "=================================================================="
@@ -324,7 +316,7 @@ echo "curl -H \"Authorization: Bearer eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiIxMDEiLCJyb
 echo "  http://localhost:8080/api/messages/102/engagement"
 echo ""
 echo "Or query directly from the database:"
-echo "psql -X -U postgres -d familynest_test -c \"SELECT COUNT(*) FROM message_view WHERE message_id = 102;\""
+echo "psql -X -U postgres -d familynest_test -c \"SELECT COUNT(*) FROM user_message_read WHERE message_id = 102;\""
 echo ""
 echo "To test with the heavy user (5000 messages):"
 echo "psql -X -U postgres -d familynest_test -c \"SELECT COUNT(*) FROM message WHERE sender_id = 888;\"" 

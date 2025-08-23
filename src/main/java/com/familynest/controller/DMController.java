@@ -513,7 +513,7 @@ public class DMController {
                 WHERE dm.id = ?
                 """;
 
-            Map<String, Object> messageData = jdbcTemplate.queryForMap(fetchSql, primaryRecipientId, newMessageId);
+            Map<String, Object> messageData = jdbcTemplate.queryForMap(fetchSql, newMessageId);
              // Transform to response format
             Map<String, Object> response = new HashMap<>();
             response.put("id", messageData.get("id"));
@@ -555,7 +555,7 @@ public class DMController {
                     """;
                 
                 Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class, 
-                    conversationId, recipientId, recipientId, recipientId, recipientId, recipientId);
+                    conversationId, recipientId, recipientId, recipientId, recipientId);
                 
                 // Add unread count to the message data for this recipient
                 Map<String, Object> recipientMessageData = new HashMap<>(messageData);
@@ -694,7 +694,7 @@ public class DMController {
                 LIMIT ? OFFSET ?
                 """;
 
-            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, currentUserId, conversationId, currentUserId, size, offset);
+            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, conversationId, currentUserId, size, offset);
             
             // Debug log each message
             for (Map<String, Object> message : messages) {

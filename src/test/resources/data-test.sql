@@ -7,7 +7,7 @@ ALTER TABLE family ALTER COLUMN id RESTART WITH 1;
 ALTER TABLE message ALTER COLUMN id RESTART WITH 1;
 ALTER TABLE comment ALTER COLUMN id RESTART WITH 1;
 ALTER TABLE reaction ALTER COLUMN id RESTART WITH 1;
-ALTER TABLE message_view ALTER COLUMN id RESTART WITH 1;
+-- Removed message_view table - no longer exists
 
 -- Add test admin user
 INSERT INTO app_user (id, username, email, password, first_name, last_name, role, enabled) 

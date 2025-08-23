@@ -96,8 +96,7 @@ public class EngagementTestUtil {
             // Delete other engagement records
             jdbcTemplate.update(
                 "DELETE FROM message_reaction WHERE message_id IN (SELECT id FROM message WHERE content LIKE 'Test engagement message%')");
-            jdbcTemplate.update(
-                "DELETE FROM message_view WHERE message_id IN (SELECT id FROM message WHERE content LIKE 'Test engagement message%')");
+            // Removed message_view table - no longer need to clean up view tracking data
             jdbcTemplate.update(
                 "DELETE FROM message_share WHERE original_message_id IN (SELECT id FROM message WHERE content LIKE 'Test engagement message%')");
 
