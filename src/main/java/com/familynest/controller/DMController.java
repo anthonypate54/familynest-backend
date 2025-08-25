@@ -580,23 +580,32 @@ public class DMController {
                 });
             }
             
-            // Send push notification to all recipients (background notification)
-            try {
-                String senderName = (String) userData.get("username");
-                for (Long recipientId : recipientIds) {
-                    // Check if recipient has muted the sender
-                    boolean isMuted = isRecipientMutedBySender(recipientId, senderId);
-                    if (!isMuted) {
-                        pushNotificationService.sendDMNotification(newMessageId, recipientId, senderName, content);
-                        logger.debug("Sent push notification to recipient {}", recipientId);
-                    } else {
-                        logger.debug("Skipped push notification to muted recipient {}", recipientId);
+            // Send push notification to all recipients (background notification) - AFTER COMMIT
+            final Long finalNewMessageId = newMessageId;
+            final String finalSenderName = (String) userData.get("username");
+            final String finalContent = content;
+            final List<Long> finalRecipientIds = new ArrayList<>(recipientIds);
+            
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    try {
+                        for (Long recipientId : finalRecipientIds) {
+                            // Check if recipient has muted the sender
+                            boolean isMuted = isRecipientMutedBySender(recipientId, senderId);
+                            if (!isMuted) {
+                                pushNotificationService.sendDMNotification(finalNewMessageId, recipientId, finalSenderName, finalContent);
+                                logger.debug("Sent push notification to recipient {} (AFTER COMMIT)", recipientId);
+                            } else {
+                                logger.debug("Skipped push notification to muted recipient {} (AFTER COMMIT)", recipientId);
+                            }
+                        }
+                    } catch (Exception pushError) {
+                        logger.error("Error sending DM push notification for message {} (AFTER COMMIT): {}", finalNewMessageId, pushError.getMessage());
+                        // Don't let push notification errors break the DM posting flow
                     }
                 }
-            } catch (Exception pushError) {
-                logger.error("Error sending DM push notification for message {}: {}", newMessageId, pushError.getMessage());
-                // Don't let push notification errors break the DM posting flow
-            }
+            });
             
       // Return the fully-formed message as the response
             return ResponseEntity.status(HttpStatus.CREATED)

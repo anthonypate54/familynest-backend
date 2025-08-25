@@ -383,10 +383,10 @@ public class PushNotificationService {
     }
     
     /**
-     * Get sender ID from message
+     * Get sender ID from DM message
      */
     private Long getSenderId(Long messageId) {
-        String sql = "SELECT sender_id FROM message WHERE id = ?";
+        String sql = "SELECT sender_id FROM dm_message WHERE id = ?";
         return jdbcTemplate.queryForObject(sql, Long.class, messageId);
     }
     
