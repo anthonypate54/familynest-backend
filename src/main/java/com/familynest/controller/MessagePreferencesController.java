@@ -58,7 +58,7 @@ public class MessagePreferencesController {
      * Get message preferences for a user
      */
     @GetMapping("/{userId}")
-    @Cacheable(value = "messagePreferences", key = "#userId", unless = "#result.status != 200")
+    @Cacheable(value = "messagePreferences", key = "#userId", unless = "#result.statusCode.value() != 200")
     public ResponseEntity<List<Map<String, Object>>> getMessagePreferences(
             @PathVariable Long userId,
             @RequestHeader(value = "Authorization", required = false) String authHeader,
