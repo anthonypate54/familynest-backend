@@ -189,10 +189,9 @@ public class WebSocketBroadcastService {
             
             logger.debug("Broadcasting NEW MESSAGE to family {} members", familyId);
             
-            List<Long> familyMemberIds = userFamilyMembershipRepository.findByFamilyId(familyId)
-                .stream()
-                .map(membership -> membership.getUserId())
-                .toList();
+            // Use native SQL to avoid N+1 Hibernate queries
+            String sql = "SELECT user_id FROM user_family_membership WHERE family_id = ? AND is_active = true";
+            List<Long> familyMemberIds = jdbcTemplate.queryForList(sql, Long.class, familyId);
             
             int broadcastCount = 0;
             for (Long userId : familyMemberIds) {

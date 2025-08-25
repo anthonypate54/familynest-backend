@@ -43,7 +43,7 @@ public class PushNotificationService {
             data.put("type", "FAMILY_MESSAGE");
             data.put("messageId", messageId.toString());
             data.put("familyId", familyId.toString());
-            data.put("senderId", getSenderId(messageId).toString());
+            data.put("senderId", getFamilyMessageSenderId(messageId).toString());
             
             // Send to all recipients
             sendToMultipleDevices(recipients, title, body, data);
@@ -387,6 +387,14 @@ public class PushNotificationService {
      */
     private Long getSenderId(Long messageId) {
         String sql = "SELECT sender_id FROM dm_message WHERE id = ?";
+        return jdbcTemplate.queryForObject(sql, Long.class, messageId);
+    }
+    
+    /**
+     * Get sender ID from family message
+     */
+    private Long getFamilyMessageSenderId(Long messageId) {
+        String sql = "SELECT sender_id FROM message WHERE id = ?";
         return jdbcTemplate.queryForObject(sql, Long.class, messageId);
     }
     
