@@ -781,15 +781,25 @@ public class UserController {
                 "media_type, media_url, thumbnail_url, family_id, like_count, love_count) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0) RETURNING id";
     
-            Long newMessageId = jdbcTemplate.queryForObject(insertSql, Long.class,
-                content, 
-                userId, 
-                userId, 
-                userData.get("username"),
-                mediaType,
-                mediaUrl,
-                thumbnailUrl
-            );
+            logger.debug("🔨 About to INSERT message with params: content='{}', userId={}, username='{}'", 
+                content, userId, userData.get("username"));
+    
+            Long newMessageId;
+            try {
+                newMessageId = jdbcTemplate.queryForObject(insertSql, Long.class,
+                    content, 
+                    userId, 
+                    userId, 
+                    userData.get("username"),
+                    mediaType,
+                    mediaUrl,
+                    thumbnailUrl
+                );
+                logger.debug("🆔 INSERT succeeded, returned message ID: {}", newMessageId);
+            } catch (Exception insertError) {
+                logger.error("❌ INSERT FAILED: {}", insertError.getMessage(), insertError);
+                throw insertError;
+            }
             
             // Insert into message_family_link table for each target family
             String linkSql = "INSERT INTO message_family_link (message_id, family_id) VALUES (?, ?)";
@@ -798,23 +808,26 @@ public class UserController {
                 logger.debug("Linked message {} to family {}", newMessageId, targetFamilyId);
             }
             
-            // Fetch the full message with all joins using the service and broadcast via WebSocket
+            // Fetch the full message with all joins BEFORE committing (to avoid JDBC issues in afterCommit)
+            Map<String, Object> messageDataForBroadcast = messageService.getMessageById(newMessageId);
+            
             // Schedule WebSocket broadcast and notifications to happen AFTER transaction commits
             final Long finalMessageId = newMessageId;
             final List<Long> finalTargetFamilyIds = new ArrayList<>(targetFamilyIds);
             final String finalContent = content;
             final String finalSenderName = (String) userData.get("username");
+            final Map<String, Object> finalMessageData = new HashMap<>(messageDataForBroadcast);
             
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
                     try {
-                        Map<String, Object> messageData = messageService.getMessageById(finalMessageId);
+                        logger.debug("🚀 AFTER COMMIT: Broadcasting pre-fetched message data for WebSocket");
                         
                         // Broadcast the NEW MESSAGE to all target families via WebSocket
                         for (Long targetFamilyId : finalTargetFamilyIds) {
-                            logger.debug("Broadcasting new message to family {} (AFTER COMMIT): {}", targetFamilyId, messageData);
-                            webSocketBroadcastService.broadcastNewMessage(messageData, targetFamilyId);
+                            logger.debug("Broadcasting new message to family {} (AFTER COMMIT): {}", targetFamilyId, finalMessageData);
+                            webSocketBroadcastService.broadcastNewMessage(finalMessageData, targetFamilyId);
                             
                             // Send push notifications to family members (background notifications)
                             try {
@@ -831,8 +844,9 @@ public class UserController {
                 }
             });
     
-            // Return the message data
-            Map<String, Object> messageData = messageService.getMessageById(newMessageId);
+            // Return the message data (reuse the already-fetched data)
+            logger.debug("🔍 Returning pre-fetched message data for messageId: {}", newMessageId);
+            Map<String, Object> messageData = new HashMap<>(messageDataForBroadcast);
             
             logger.debug("Successfully posted message to {} families", targetFamilyIds.size());
             return ResponseEntity.status(HttpStatus.CREATED).body(messageData);
