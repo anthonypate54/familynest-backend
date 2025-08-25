@@ -5,29 +5,33 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
+
 
 /**
  * Configuration for application caching
- * Uses in-memory caching for development/testing
- * Should be replaced with Redis or similar in production
- * 
- * This configuration is not active when running with testdb profile
+ * Uses in-memory caching for all environments for consistency
+ * Redis can be added later as an additional layer
  */
 @Configuration
 @EnableCaching
-@Profile("!testdb") // Only activate when NOT using testdb profile
 public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
         ConcurrentMapCacheManager cacheManager = new ConcurrentMapCacheManager();
+        // Define all cache names used across the application
+        // Add new caches here as they're introduced to avoid deployment issues
         cacheManager.setCacheNames(java.util.Arrays.asList(
             "userMessages",
-            "familyMessages",
+            "familyMessages", 
             "messageEngagement",
             "userFamilies",
-            "userProfile"
+            "userProfile",
+            "messagePreferences",
+            "invitations",
+            "notifications",
+            "userSettings",
+            "familySettings"
         ));
         return cacheManager;
     }
