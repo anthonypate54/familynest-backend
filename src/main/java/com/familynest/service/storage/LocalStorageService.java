@@ -19,9 +19,8 @@ import java.nio.file.Paths;
 /**
  * Implementation of StorageService that stores files on the local filesystem
  */
-// Temporarily commented out to fix authentication issues
-// @Service
-// @Profile({"default", "test", "testdb"}) // Active by default and for test profiles
+@Service
+@Profile({"default", "test", "testdb"}) // Active by default and for test profiles
 public class LocalStorageService implements StorageService {
     
     private static final Logger logger = LoggerFactory.getLogger(LocalStorageService.class);

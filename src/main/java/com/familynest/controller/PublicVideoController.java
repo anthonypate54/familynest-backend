@@ -1,7 +1,6 @@
 package com.familynest.controller;
 
-import com.familynest.service.VideoService;
-import com.familynest.service.VideoService.VideoProcessingResult;
+
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,8 +24,7 @@ public class PublicVideoController {
 
     private static final Logger logger = LoggerFactory.getLogger(PublicVideoController.class);
 
-    @Autowired
-    private VideoService videoService;
+
 
     /**
      * Health check endpoint to verify if the public video service is available

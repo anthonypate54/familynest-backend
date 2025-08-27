@@ -13,8 +13,7 @@ import org.springframework.core.env.Environment;
  * Configuration class that selects the appropriate StorageService
  * based on the configuration or environment
  */
-// Temporarily commented out to fix authentication issues
-// @Configuration
+@Configuration
 public class StorageServiceConfig {
     
     private static final Logger logger = LoggerFactory.getLogger(StorageServiceConfig.class);
@@ -25,8 +24,8 @@ public class StorageServiceConfig {
     @Autowired
     private Environment environment;
     
-    // @Bean
-    // @Primary
+    @Bean
+    @Primary
     public StorageService storageService(
             LocalStorageService localStorageService,
             @Autowired(required = false) S3StorageService s3StorageService) {

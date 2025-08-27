@@ -15,6 +15,7 @@ import com.familynest.service.PushNotificationService;
 import com.familynest.service.RefreshTokenService;
 import com.familynest.util.ErrorCodes; // Add ErrorCodes import
 import com.familynest.service.EmailService;
+import com.familynest.service.storage.StorageService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -103,29 +104,8 @@ public class UserController {
     @Autowired
     private RefreshTokenService refreshTokenService;
 
-    @Value("${file.upload-dir:/tmp/familynest-uploads}")
-    private String uploadDir;
-
-    @Value("${app.videos.dir:${file.upload-dir}/videos}")
-    private String videosDir;
-    
-    @Value("${app.thumbnail.dir:${file.upload-dir}/thumbnails}")
-    private String thumbnailDir;
-    
-    @Value("${app.url.videos:/uploads/videos}")
-    private String videosUrlPath;
-    
-    @Value("${app.url.thumbnails:/uploads/thumbnails}")
-    private String thumbnailsUrlPath;
-    
-    @Value("${app.url.images:/uploads/images}")
-    private String imagesUrlPath;
-
-    @Value("${app.url.photos:/uploads/photos}")
-    private String photosUrlPath;
-    
-    @Value("${app.photos.dir:${file.upload-dir}/photos}")
-    private String photosDir;
+    @Autowired
+    private StorageService storageService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -397,18 +377,11 @@ public class UserController {
             if (photo != null && !photo.isEmpty()) {
                 String fileName = System.currentTimeMillis() + "_" + photo.getOriginalFilename();
                 
-                // Create photos directory if it doesn't exist
-                Path photosDirPath = Paths.get(photosDir);
-                if (!Files.exists(photosDirPath)) {
-                    Files.createDirectories(photosDirPath);
-                }
+                // Store the photo using StorageService
+                storageService.store(photo, "/photos", fileName);
                 
-                // Save file to photos directory
-                Path filePath = photosDirPath.resolve(fileName);
-                Files.write(filePath, photo.getBytes());
-                
-                // Store the photo URL path in the database (not the API endpoint)
-                user.setPhoto(photosUrlPath + "/" + fileName);
+                // Store the photo URL in the database
+                user.setPhoto(storageService.getUrl("/photos/" + fileName));
             }
 
             logger.debug("User created successfully with ID: {}", user.getId());
@@ -501,18 +474,11 @@ public class UserController {
             if (photo != null && !photo.isEmpty()) {
                 String fileName = System.currentTimeMillis() + "_" + photo.getOriginalFilename();
                 
-                // Create photos directory if it doesn't exist
-                Path photosDirPath = Paths.get(photosDir);
-                if (!Files.exists(photosDirPath)) {
-                    Files.createDirectories(photosDirPath);
-                }
-                
-                // Save file to photos directory
-                Path filePath = photosDirPath.resolve(fileName);
-                Files.write(filePath, photo.getBytes());
+                // Store the photo using StorageService
+                storageService.store(photo, "/photos", fileName);
                 
                 // Store the photo URL path in the database
-                String photoPath = photosUrlPath + "/" + fileName;
+                String photoPath = storageService.getUrl("/photos/" + fileName);
                 
                 // Get the user and update the photo field
                 User user = userRepository.findById(id).orElse(null);
@@ -728,6 +694,7 @@ public class UserController {
             
             // Handle regular media upload first (but not if we have external video URL)
             if (media != null && !media.isEmpty() && (videoUrl == null || !videoUrl.startsWith("http"))) {
+                logger.error("🎬 USER CONTROLLER: About to call mediaService.uploadMedia with mediaType: {}", mediaType);
                 Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
                 mediaUrl = mediaResult.get("mediaUrl");
                 if ("video".equals(mediaType)) {
@@ -851,7 +818,12 @@ public class UserController {
             logger.debug("Successfully posted message to {} families", targetFamilyIds.size());
             return ResponseEntity.status(HttpStatus.CREATED).body(messageData);
         } catch (Exception e) {
-            logger.error("Error posting message: {}", e.getMessage(), e);
+            logger.error("🚨 CRITICAL ERROR in postMessage: {}", e.getMessage(), e);
+            logger.error("🚨 Exception class: {}", e.getClass().getName());
+            if (e.getCause() != null) {
+                logger.error("🚨 Root cause: {}", e.getCause().getMessage());
+            }
+            logger.error("🚨 Full stack trace:", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Failed to post message: " + e.getMessage()));
         }

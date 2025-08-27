@@ -27,9 +27,8 @@ import java.nio.file.Paths;
 /**
  * Implementation of StorageService that stores files in AWS S3
  */
-// Temporarily commented out to fix authentication issues
-// @Service
-// @Profile({"staging", "production"}) // Active in staging and production environments
+@Service
+@Profile({"staging", "production"}) // Active in staging and production environments
 public class S3StorageService implements StorageService {
     
     private static final Logger logger = LoggerFactory.getLogger(S3StorageService.class);
