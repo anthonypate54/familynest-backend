@@ -5,8 +5,10 @@ import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.Java2DFrameConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import com.familynest.service.storage.StorageService;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -30,11 +32,14 @@ public class ThumbnailService {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final int THUMBNAIL_TIMEOUT_SECONDS = 10;
     
-    @Value("${app.thumbnail.dir:uploads/thumbnails}")
-    private String thumbnailDir;
+    @Autowired
+    private StorageService storageService;
        
     @Value("${app.use.ffmpeg:true}")
     private boolean useFFmpeg;
+    
+    // Default thumbnail directory for compatibility
+    private String thumbnailDir = "uploads/thumbnails";
     
     /**
      * Generates a thumbnail for a video file with a timeout mechanism
@@ -45,12 +50,7 @@ public class ThumbnailService {
     public String generateThumbnail(String videoPath, String thumbnailFilename) {
         try {
             logger.error("THUMBNAIL SERVICE: Starting thumbnail generation for: {}", videoPath);
-            // Create thumbnail directory if it doesn't exist
-            Path thumbnailDirPath = Paths.get(thumbnailDir);
-            if (!Files.exists(thumbnailDirPath)) {
-                Files.createDirectories(thumbnailDirPath);
-                logger.info("Created thumbnail directory: {}", thumbnailDir);
-            }
+            // Thumbnail directory creation is handled by StorageService
             
             // First try using FFmpeg to extract an actual frame from the video
             try {
@@ -239,11 +239,18 @@ public class ThumbnailService {
         g.setColor(java.awt.Color.DARK_GRAY);
         g.fillRect(0, 0, width, height);
         
-        // Add text
+        // Add play button icon instead of text
         g.setColor(java.awt.Color.WHITE);
-        g.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 20));
-        String videoName = new File(videoPath).getName();
-        g.drawString("Video: " + videoName, 30, height / 2);
+        int centerX = width / 2;
+        int centerY = height / 2;
+        
+        // Draw play button triangle
+        int[] xPoints = {centerX - 30, centerX + 30, centerX - 30};
+        int[] yPoints = {centerY - 25, centerY, centerY + 25};
+        g.fillPolygon(xPoints, yPoints, 3);
+        
+        // Draw circle around play button
+        g.drawOval(centerX - 50, centerY - 50, 100, 100);
         
         g.dispose();
         

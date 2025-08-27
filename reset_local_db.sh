@@ -50,3 +50,9 @@ echo "🔄 Now run the Spring Boot application to let Flyway recreate all tables
 echo "   ./mvnw spring-boot:run"
 echo ""
 echo "📱 After that, you can test the new member bug reproduction."
+
+
+
+
+
+

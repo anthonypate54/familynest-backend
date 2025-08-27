@@ -10,6 +10,7 @@ import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
+import com.familynest.service.storage.StorageService;
 import com.familynest.model.Message;
 import java.sql.Timestamp;
 
@@ -17,7 +18,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -41,9 +41,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.cache.annotation.Cacheable;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -86,23 +84,8 @@ public class CommentController {
     @Autowired
     private PushNotificationService pushNotificationService;
 
-    @Value("${file.upload-dir:/tmp/familynest-uploads}")
-    private String uploadDir;
-
-    @Value("${app.videos.dir:${file.upload-dir}/videos}")
-    private String videosDir;
-    
-    @Value("${app.thumbnail.dir:${file.upload-dir}/thumbnails}")
-    private String thumbnailDir;
-    
-    @Value("${app.url.videos:/uploads/videos}")
-    private String videosUrlPath;
-    
-    @Value("${app.url.thumbnails:/uploads/thumbnails}")
-    private String thumbnailsUrlPath;
-    
-    @Value("${app.url.images:/uploads/images}")
-    private String imagesUrlPath;
+    @Autowired
+    private StorageService storageService;
 
     /**
      * Get comments for a message with efficient pagination
@@ -300,26 +283,18 @@ public class CommentController {
         try {
             logger.debug("Processing media of type: {} for comment ID: {}", mediaType, commentId);
             
-            // Create directory structure if it doesn't exist
-            String subdir = "video".equals(mediaType) ? "videos" : "images";
-            Path uploadPath = Paths.get(uploadDir, subdir);
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
+            // Determine directory based on media type
+            String directory = "video".equals(mediaType) ? "videos" : "images";
             
-            // Create filename with timestamp - using simple naming pattern
+            // Create filename with timestamp
             String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
-            Path mediaPath = uploadPath.resolve(mediaFileName);
             
-            // Write the file
-            Files.write(mediaPath, media.getBytes());
-            logger.debug("Media file saved at: {}", mediaPath);
+            // Store the file using StorageService
+            String storedPath = storageService.store(media, directory, mediaFileName);
+            logger.debug("Media file saved at: {}", storedPath);
             
-            // Set media URL (relative path)
-            // Use URLs matching the static-path-pattern configuration
-            String mediaUrl = "video".equals(mediaType) ? 
-                videosUrlPath + "/" + mediaFileName : 
-                imagesUrlPath + "/" + mediaFileName;
+            // Get the URL from StorageService
+            String mediaUrl = storageService.getUrl(storedPath);
             
             response.put("mediaType", mediaType);
             response.put("mediaUrl", mediaUrl);
