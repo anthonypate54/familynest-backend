@@ -22,9 +22,13 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.core.env.Environment;
 import org.springframework.beans.factory.annotation.Autowired;
 import java.io.IOException;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+
 
 /**
  * Implementation of StorageService that stores files in AWS S3
@@ -230,5 +234,94 @@ public class S3StorageService implements StorageService {
         
         // Fallback to direct S3 URL
         return s3Client.getUrl(bucketName, path).toString();
+    }
+    
+    /**
+     * Downloads a file from S3 to a temporary local file for processing
+     * @param s3Path The S3 path to download
+     * @return Local file path of the downloaded file, or null if failed
+     */
+    public String downloadTemporarily(String s3Path) {
+        if (s3Client == null) {
+            logger.error("S3 client not initialized");
+            return null;
+        }
+        
+        try {
+            // Remove leading slash if present
+            if (s3Path.startsWith("/")) {
+                s3Path = s3Path.substring(1);
+            }
+            
+            // Check if object exists
+            if (!s3Client.doesObjectExist(bucketName, s3Path)) {
+                logger.error("File does not exist in S3: {}", s3Path);
+                return null;
+            }
+            
+            // Get S3 object
+            S3Object s3Object = s3Client.getObject(bucketName, s3Path);
+            
+            // Create temporary file
+            String fileName = s3Path.substring(s3Path.lastIndexOf('/') + 1);
+            String tempDir = System.getProperty("java.io.tmpdir");
+            File tempFile = new File(tempDir, "familynest_temp_" + System.currentTimeMillis() + "_" + fileName);
+            
+            // Download to temporary file
+            try (InputStream inputStream = s3Object.getObjectContent();
+                 FileOutputStream outputStream = new FileOutputStream(tempFile)) {
+                
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+            }
+            
+            logger.info("Downloaded S3 file {} to temporary location: {}", s3Path, tempFile.getAbsolutePath());
+            return tempFile.getAbsolutePath();
+            
+        } catch (Exception e) {
+            logger.error("Failed to download file {} from S3 temporarily", s3Path, e);
+            return null;
+        }
+    }
+    
+    /**
+     * Cleans up a temporary file
+     * @param tempFilePath Path to the temporary file to delete
+     */
+    public void cleanupTempFile(String tempFilePath) {
+        if (tempFilePath != null) {
+            try {
+                File tempFile = new File(tempFilePath);
+                if (tempFile.exists()) {
+                    boolean deleted = tempFile.delete();
+                    if (deleted) {
+                        logger.debug("Cleaned up temporary file: {}", tempFilePath);
+                    } else {
+                        logger.warn("Failed to delete temporary file: {}", tempFilePath);
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Error cleaning up temporary file: {}", tempFilePath, e);
+            }
+        }
+    }
+    
+    /**
+     * Get the S3 client for direct operations
+     * @return AmazonS3 client
+     */
+    public AmazonS3 getS3Client() {
+        return s3Client;
+    }
+    
+    /**
+     * Get the bucket name
+     * @return S3 bucket name
+     */
+    public String getBucketName() {
+        return bucketName;
     }
 } 
