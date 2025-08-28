@@ -61,7 +61,7 @@ public class MessageController {
     @Value("${app.base-url}")
     private String baseUrl;
 
-    @Value("${app.default.thumbnail}")
+    @Value("${app.default.thumbnail:/uploads/thumbnails/default_thumbnail.jpg}")
     private String defaultThumbnail;
 
     /**
