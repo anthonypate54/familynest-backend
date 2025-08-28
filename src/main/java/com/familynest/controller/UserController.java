@@ -375,13 +375,9 @@ public class UserController {
             user = userRepository.save(user);
 
             if (photo != null && !photo.isEmpty()) {
-                String fileName = System.currentTimeMillis() + "_" + photo.getOriginalFilename();
-                
-                // Store the photo using StorageService
-                storageService.store(photo, "/photos", fileName);
-                
-                // Store the photo URL in the database
-                user.setPhoto(storageService.getUrl("/photos/" + fileName));
+                // Use MediaService to handle photo upload properly
+                String photoPath = mediaService.uploadMedia(photo, "photo");
+                user.setPhoto(photoPath);
             }
 
             logger.debug("User created successfully with ID: {}", user.getId());
@@ -472,13 +468,8 @@ public class UserController {
             }
             
             if (photo != null && !photo.isEmpty()) {
-                String fileName = System.currentTimeMillis() + "_" + photo.getOriginalFilename();
-                
-                // Store the photo using StorageService
-                storageService.store(photo, "/photos", fileName);
-                
-                // Store the photo URL path in the database
-                String photoPath = storageService.getUrl("/photos/" + fileName);
+                // Use MediaService to handle photo upload properly
+                String photoPath = mediaService.uploadMedia(photo, "photo");
                 
                 // Get the user and update the photo field
                 User user = userRepository.findById(id).orElse(null);
