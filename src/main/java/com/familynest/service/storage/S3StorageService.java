@@ -19,6 +19,8 @@ import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.CannedAccessControlList;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.core.env.Environment;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Path;
@@ -32,6 +34,9 @@ import java.nio.file.Paths;
 public class S3StorageService implements StorageService {
     
     private static final Logger logger = LoggerFactory.getLogger(S3StorageService.class);
+    
+    @Autowired
+    private Environment environment;
     
     @Value("${cloud.aws.credentials.access-key:dummy}")
     private String accessKey;
@@ -52,12 +57,23 @@ public class S3StorageService implements StorageService {
     
     @PostConstruct
     private void initializeAmazon() {
-        // Skip initialization if we're not in an environment that uses S3
-        if (!"staging".equals(System.getProperty("spring.profiles.active")) && 
-            !"production".equals(System.getProperty("spring.profiles.active"))) {
-            logger.info("S3 initialization skipped - not in staging/production profile");
+        // Check if we're in a profile that uses S3
+        String[] activeProfiles = environment.getActiveProfiles();
+        boolean isS3Profile = false;
+        for (String profile : activeProfiles) {
+            if ("staging".equals(profile) || "production".equals(profile)) {
+                isS3Profile = true;
+                break;
+            }
+        }
+        
+        if (!isS3Profile) {
+            logger.info("S3 initialization skipped - not in staging/production profile. Active profiles: {}", 
+                String.join(", ", activeProfiles));
             return;
         }
+        
+        logger.info("Initializing S3 client for profile: {}", String.join(", ", activeProfiles));
         
         try {
             AWSCredentials credentials = new BasicAWSCredentials(this.accessKey, this.secretKey);
