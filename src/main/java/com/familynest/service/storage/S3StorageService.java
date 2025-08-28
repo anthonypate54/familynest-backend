@@ -16,7 +16,7 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.CannedAccessControlList;
+
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.core.env.Environment;
@@ -122,8 +122,7 @@ public class S3StorageService implements StorageService {
             // Upload file to S3
             s3Client.putObject(bucketName, key, file.getInputStream(), metadata);
             
-            // Make the object publicly readable
-            s3Client.setObjectAcl(bucketName, key, CannedAccessControlList.PublicRead);
+            // Note: ACLs are disabled on this bucket - public access is managed through bucket policy
             
             logger.info("Stored file {} in S3 bucket: {}, directory: {}", filename, bucketName, directory);
             
