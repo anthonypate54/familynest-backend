@@ -376,8 +376,8 @@ public class UserController {
 
             if (photo != null && !photo.isEmpty()) {
                 // Use MediaService to handle photo upload properly
-                String photoPath = mediaService.uploadMedia(photo, "photo");
-                user.setPhoto(photoPath);
+                Map<String, String> mediaResult = mediaService.uploadMedia(photo, "photo");
+                user.setPhoto(mediaResult.get("mediaUrl"));
             }
 
             logger.debug("User created successfully with ID: {}", user.getId());
@@ -469,12 +469,12 @@ public class UserController {
             
             if (photo != null && !photo.isEmpty()) {
                 // Use MediaService to handle photo upload properly
-                String photoPath = mediaService.uploadMedia(photo, "photo");
+                Map<String, String> mediaResult = mediaService.uploadMedia(photo, "photo");
                 
                 // Get the user and update the photo field
                 User user = userRepository.findById(id).orElse(null);
                 if (user != null) {
-                    user.setPhoto(photoPath);
+                    user.setPhoto(mediaResult.get("mediaUrl"));
                     userRepository.save(user);
                     logger.debug("Photo updated successfully for user ID: {}", id);
                     return ResponseEntity.ok().build();
