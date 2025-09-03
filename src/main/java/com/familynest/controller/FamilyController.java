@@ -696,6 +696,13 @@ public class FamilyController {
                     "ORDER BY f.name, u.first_name, u.last_name";
 
             List<Map<String, Object>> memberResults = jdbcTemplate.queryForList(membersSql, userId);
+            
+            // Debug: Log the raw member results to see what photo values we're getting
+            logger.debug("🔍 FAMILY_MEMBERS DEBUG: Got {} raw member results", memberResults.size());
+            for (Map<String, Object> rawMember : memberResults) {
+                logger.debug("🔍 FAMILY_MEMBERS DEBUG: Member {} {} has photo: {}", 
+                    rawMember.get("first_name"), rawMember.get("last_name"), rawMember.get("photo"));
+            }
 
             // Query 3: Get family-level message preferences
             String preferencesSql = "SELECT family_id, receive_messages FROM user_family_message_settings WHERE user_id = ?";
