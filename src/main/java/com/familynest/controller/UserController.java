@@ -1944,5 +1944,89 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
         }
     }
 
+    /**
+     * Mark comments as read for a specific message
+     * PUT /api/messages/{messageId}/comments/mark-read
+     */
+    @PutMapping("/messages/{messageId}/comments/mark-read")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> markCommentsAsRead(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable Long messageId) {
+        logger.debug("Marking comments as read for message: {}", messageId);
+        
+        try {
+            // Extract user ID from token
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long currentUserId = authUtil.extractUserId(token);
+            if (currentUserId == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
+            }
+
+            // Validate that the message exists and user has access to it
+            String validateSql = """
+                SELECT m.id, m.family_id 
+                FROM message m
+                JOIN user_family_membership ufm ON m.family_id = ufm.family_id
+                WHERE m.id = ? AND ufm.user_id = ?
+                """;
+            
+            List<Map<String, Object>> messageCheck = jdbcTemplate.queryForList(validateSql, messageId, currentUserId);
+            if (messageCheck.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Message not found or access denied"));
+            }
+
+            // Mark comments as read by updating user_message_read table
+            String markReadSql = """
+                INSERT INTO user_message_read (user_id, message_id, has_unread_comments, updated_at)
+                VALUES (?, ?, false, NOW())
+                ON CONFLICT (user_id, message_id) 
+                DO UPDATE SET has_unread_comments = false, updated_at = NOW()
+                """;
+            
+            int updated = jdbcTemplate.update(markReadSql, currentUserId, messageId);
+            logger.debug("Marked comments as read for message {} and user {} (updated {} records)", messageId, currentUserId, updated);
+            
+            // Broadcast updated message state via WebSocket
+            String broadcastSql = """
+                SELECT m.id, m.content, m.sender_username, m.sender_id, 
+                       m.timestamp, m.media_type, m.media_url, m.thumbnail_url,
+                       s.photo as sender_photo, s.first_name as sender_first_name, 
+                       s.last_name as sender_last_name, f.name as family_name,
+                       m.like_count, m.love_count,
+                       (SELECT COUNT(*) FROM message_comment WHERE parent_message_id = m.id) as comment_count,
+                       false as has_unread_comments
+                FROM message m 
+                LEFT JOIN app_user s ON m.sender_id = s.id 
+                LEFT JOIN family f ON m.family_id = f.id 
+                WHERE m.id = ?
+                """;
+            
+            Map<String, Object> updatedMessage = jdbcTemplate.queryForMap(broadcastSql, messageId);
+            
+            // Broadcast to all family members  
+            Long familyId = (Long) messageCheck.get(0).get("family_id");
+            webSocketBroadcastService.broadcastCommentCountUpdate(familyId, messageId, 
+                (Integer) updatedMessage.get("comment_count"), currentUserId);
+            
+            logger.debug("Broadcasted updated message state for message {}", messageId);
+
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "messageId", messageId,
+                "markedAsRead", true
+            ));
+
+        } catch (org.springframework.dao.DataAccessException e) {
+            logger.error("Database error marking comments as read: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Database error: " + e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Error marking comments as read: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to mark comments as read: " + e.getMessage()));
+        }
+    }
+
 
 }
