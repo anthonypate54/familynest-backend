@@ -27,7 +27,7 @@ public class StorageServiceConfig {
     @Bean
     @Primary
     public StorageService storageService(
-            LocalStorageService localStorageService,
+            @Autowired(required = false) LocalStorageService localStorageService,
             @Autowired(required = false) S3StorageService s3StorageService) {
         
         logger.info("Configuring storage service of type: {}", storageType);
@@ -41,14 +41,19 @@ public class StorageServiceConfig {
                 logger.info("Using S3 storage service");
                 if (s3StorageService != null) {
                     return s3StorageService;
-                } else {
+                } else if (localStorageService != null) {
                     logger.warn("S3 storage service requested but not available, falling back to local");
                     return localStorageService;
+                } else {
+                    throw new IllegalStateException("S3 storage service requested but not available, and no local storage fallback");
                 }
             case "local":
             default:
+                if (localStorageService == null) {
+                    throw new IllegalStateException("Local storage service requested but not available");
+                }
                 logger.info("Using local filesystem storage service");
                 return localStorageService;
         }
     }
-} 
+}
