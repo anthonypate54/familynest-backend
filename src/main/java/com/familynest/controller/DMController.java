@@ -694,7 +694,7 @@ public class DMController {
                 LIMIT ? OFFSET ?
                 """;
 
-            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, currentUserId, conversationId, currentUserId, size, offset);
+            List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, conversationId, currentUserId, size, offset);
             
             // Debug log each message
             for (Map<String, Object> message : messages) {
