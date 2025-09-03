@@ -1,61 +1,26 @@
-HELP.md
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
+# AWS server-specific files
+nohup.out
+bucket-policy.json
+kill-spring.sh
+start-spring.sh
+reset_simple.sh
+*.backup
 
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
+# Runtime logs
+*.log
+logs/
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
+# Temporary files
+*.tmp
+*.temp
 
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-
-### VS Code ###
+# IDE files
 .vscode/
+.idea/
 
-### Application Properties ###
-src/main/resources/application.properties
-src/main/*.sql
-
-### Firebase Credentials ###
+# OS files
+.DS_Store
+Thumbs.db
 src/main/resources/firebase-service-account.json
-
-### Environment Variables ###
-.env
-
-### Uploads Directory ###
-uploads/
-testdb-uploads/
-
-### Build Outputs ###
 target/
-*.jar
-*.war
-*.ear
-*.zip
-*.tar.gz
-*.rar
-src/main/resources/application-local.properties
+uploads/
