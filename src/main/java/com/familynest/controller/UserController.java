@@ -2006,8 +2006,8 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
             
             // Broadcast to all family members  
             Long familyId = (Long) messageCheck.get(0).get("family_id");
-            webSocketBroadcastService.broadcastCommentCountUpdate(familyId, messageId, 
-                (Integer) updatedMessage.get("comment_count"), currentUserId);
+            webSocketBroadcastService.broadcastCommentCountExcludingUser(messageId, 
+                (Integer) updatedMessage.get("comment_count"), familyId, currentUserId);
             
             logger.debug("Broadcasted updated message state for message {}", messageId);
 
