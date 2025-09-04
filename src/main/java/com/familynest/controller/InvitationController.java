@@ -238,6 +238,17 @@ public class InvitationController {
                 }
             }
     
+            // Validate email format
+            if (inviteeEmail == null || inviteeEmail.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email address is required"));
+            }
+            
+            // Basic email validation
+            String emailRegex = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
+            if (!inviteeEmail.matches(emailRegex)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Please enter a valid email address"));
+            }
+            
             // Normalize email to lowercase for consistent checking
             String normalizedEmail = inviteeEmail.toLowerCase().trim();
             
