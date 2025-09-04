@@ -10,7 +10,6 @@ import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
-import com.familynest.service.storage.StorageService;
 import com.familynest.model.Message;
 import java.sql.Timestamp;
 
@@ -18,6 +17,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -41,7 +41,9 @@ import java.util.stream.Collectors;
 
 import org.springframework.cache.annotation.Cacheable;
 
-
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -181,8 +183,12 @@ public class CommentController {
                 messageMap.put("senderUsername", message.get("sender_username"));
                 messageMap.put("senderId", message.get("sender_id"));
                 messageMap.put("senderPhoto", message.get("sender_photo"));
-                messageMap.put("senderFirstName", message.get("sender_first_name"));
-                messageMap.put("senderLastName", message.get("sender_last_name"));
+                messageMap.put("sender_first_name", message.get("sender_first_name"));
+                messageMap.put("sender_last_name", message.get("sender_last_name"));
+                
+                // DEBUG: Log the actual SQL result values
+                logger.info("🧵 CommentController SQL result for ID {}: sender_id={}, sender_first_name={}, sender_last_name={}", 
+                    message.get("id"), message.get("sender_id"), message.get("sender_first_name"), message.get("sender_last_name"));
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
@@ -283,18 +289,26 @@ public class CommentController {
         try {
             logger.debug("Processing media of type: {} for comment ID: {}", mediaType, commentId);
             
-            // Determine directory based on media type
-            String directory = "video".equals(mediaType) ? "videos" : "images";
+            // Create directory structure if it doesn't exist
+            String subdir = "video".equals(mediaType) ? "videos" : "images";
+            Path uploadPath = Paths.get(uploadDir, subdir);
+            if (!Files.exists(uploadPath)) {
+                Files.createDirectories(uploadPath);
+            }
             
-            // Create filename with timestamp
+            // Create filename with timestamp - using simple naming pattern
             String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
+            Path mediaPath = uploadPath.resolve(mediaFileName);
             
-            // Store the file using StorageService
-            String storedPath = storageService.store(media, directory, mediaFileName);
-            logger.debug("Media file saved at: {}", storedPath);
+            // Write the file
+            Files.write(mediaPath, media.getBytes());
+            logger.debug("Media file saved at: {}", mediaPath);
             
-            // Get the URL from StorageService
-            String mediaUrl = storageService.getUrl(storedPath);
+            // Set media URL (relative path)
+            // Use URLs matching the static-path-pattern configuration
+            String mediaUrl = "video".equals(mediaType) ? 
+                videosUrlPath + "/" + mediaFileName : 
+                imagesUrlPath + "/" + mediaFileName;
             
             response.put("mediaType", mediaType);
             response.put("mediaUrl", mediaUrl);
