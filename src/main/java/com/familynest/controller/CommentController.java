@@ -10,6 +10,7 @@ import com.familynest.service.MediaService;
 import com.familynest.service.MessageService;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
+import com.familynest.service.storage.StorageService;
 import com.familynest.model.Message;
 import java.sql.Timestamp;
 
@@ -88,6 +89,7 @@ public class CommentController {
 
     @Autowired
     private StorageService storageService;
+
 
     /**
      * Get comments for a message with efficient pagination
@@ -289,26 +291,16 @@ public class CommentController {
         try {
             logger.debug("Processing media of type: {} for comment ID: {}", mediaType, commentId);
             
-            // Create directory structure if it doesn't exist
-            String subdir = "video".equals(mediaType) ? "videos" : "images";
-            Path uploadPath = Paths.get(uploadDir, subdir);
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
-            
-            // Create filename with timestamp - using simple naming pattern
+            // Use StorageService to handle file storage
+            String directory = "video".equals(mediaType) ? "/videos" : "/images";
             String mediaFileName = System.currentTimeMillis() + "_" + media.getOriginalFilename();
-            Path mediaPath = uploadPath.resolve(mediaFileName);
             
-            // Write the file
-            Files.write(mediaPath, media.getBytes());
-            logger.debug("Media file saved at: {}", mediaPath);
+            // Store the file using StorageService
+            String storedPath = storageService.store(media, directory, mediaFileName);
+            logger.debug("Media file saved at: {}", storedPath);
             
-            // Set media URL (relative path)
-            // Use URLs matching the static-path-pattern configuration
-            String mediaUrl = "video".equals(mediaType) ? 
-                videosUrlPath + "/" + mediaFileName : 
-                imagesUrlPath + "/" + mediaFileName;
+            // Get the URL from StorageService
+            String mediaUrl = storageService.getUrl(storedPath);
             
             response.put("mediaType", mediaType);
             response.put("mediaUrl", mediaUrl);

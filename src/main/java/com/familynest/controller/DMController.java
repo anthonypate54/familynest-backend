@@ -542,6 +542,7 @@ public class DMController {
                     JOIN dm_conversation dc ON dm.conversation_id = dc.id
                     WHERE dm.conversation_id = ? 
                     AND dm.sender_id != ?
+                    AND dm.is_read = FALSE
                     AND (
                         -- For group chats: check participant table
                         (dc.is_group = TRUE AND EXISTS (
@@ -551,7 +552,6 @@ public class DMController {
                         -- For 1:1 chats: check user1_id/user2_id
                         (dc.is_group = FALSE AND (dc.user1_id = ? OR dc.user2_id = ?))
                     )
-                    -- Removed message_view tracking
                     """;
                 
                 Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class, 
