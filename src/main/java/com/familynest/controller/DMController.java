@@ -676,7 +676,7 @@ public class DMController {
                 SELECT 
                     m.id, m.conversation_id, m.sender_id, m.content, m.media_url, m.media_type, 
                     m.media_thumbnail, m.media_filename, m.media_size, m.media_duration,
-                    false as is_read,
+                    m.is_read,
                     m.created_at,
                     u.username as sender_username, u.first_name as sender_first_name, u.last_name as sender_last_name,
                     u.photo as sender_photo
@@ -787,9 +787,19 @@ public class DMController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
 
-            // Removed message_view tracking - no longer mark messages as read
-            logger.debug("View tracking removed - no longer marking messages as read");
-            return ResponseEntity.ok(Map.of("markedAsRead", 0));
+            // Mark all unread messages from other users in this conversation as read
+            String markReadSql = """
+                UPDATE dm_message 
+                SET is_read = TRUE 
+                WHERE conversation_id = ? 
+                AND sender_id != ? 
+                AND is_read = FALSE
+                """;
+            
+            int markedCount = jdbcTemplate.update(markReadSql, conversationId, currentUserId);
+            logger.debug("Marked {} messages as read for user {} in conversation {}", markedCount, currentUserId, conversationId);
+            
+            return ResponseEntity.ok(Map.of("markedAsRead", markedCount));
 
         } catch (DataAccessException e) {
             logger.error("Database error marking messages as read: {}", e.getMessage());
