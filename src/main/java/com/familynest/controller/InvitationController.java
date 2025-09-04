@@ -11,7 +11,6 @@ import com.familynest.repository.InvitationRepository;
 import com.familynest.auth.AuthUtil;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
-import com.familynest.service.EmailService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,9 +56,6 @@ public class InvitationController {
 
     @Autowired
     private PushNotificationService pushNotificationService;
-
-    @Autowired
-    private EmailService emailService;
 
     /**
      * Get invitations for the current user
@@ -198,12 +194,6 @@ public class InvitationController {
             if (inviteeEmail == null || inviteeEmail.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Invitee email is required"));
             }
-            
-            // Prevent users from inviting themselves
-            if (inviteeEmail.equalsIgnoreCase(inviter.getEmail())) {
-                logger.debug("User {} attempted to invite themselves with email {}", userId, inviteeEmail);
-                return ResponseEntity.badRequest().body(Map.of("error", "You cannot invite yourself"));
-            }
 
             // HYBRID APPROACH: Check if email exists and provide enhanced feedback
             User recipient = userRepository.findByEmail(inviteeEmail).orElse(null);
@@ -248,11 +238,16 @@ public class InvitationController {
                 }
             }
     
-            // Check if invitee already has a pending invitation to this family
-            List<Invitation> existingInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
-                inviteeEmail, familyId, "PENDING");
+            // Normalize email to lowercase for consistent checking
+            String normalizedEmail = inviteeEmail.toLowerCase().trim();
+            
+            // Check if invitee already has any invitation to this family (PENDING or ACCEPTED)
+            List<Invitation> pendingInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
+                normalizedEmail, familyId, "PENDING");
+            List<Invitation> acceptedInvitations = invitationRepository.findByEmailAndFamilyIdAndStatus(
+                normalizedEmail, familyId, "ACCEPTED");
                 
-            if (!existingInvitations.isEmpty()) {
+            if (!pendingInvitations.isEmpty()) {
                 Map<String, Object> errorResponse = new HashMap<>();
                 errorResponse.put("error", "An invitation to this family is already pending for this email");
                 errorResponse.put("userExists", userExists);
@@ -261,12 +256,19 @@ public class InvitationController {
                 }
                 return ResponseEntity.badRequest().body(errorResponse);
             }
+            
+            if (!acceptedInvitations.isEmpty()) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("error", "This email has already accepted an invitation to this family");
+                errorResponse.put("userExists", userExists);
+                return ResponseEntity.badRequest().body(errorResponse);
+            }
     
             // Create and save the invitation
             Invitation invitation = new Invitation();
             invitation.setFamilyId(familyId);
             invitation.setSenderId(userId);
-            invitation.setEmail(inviteeEmail);
+            invitation.setEmail(normalizedEmail);
             invitation.setStatus("PENDING");
             invitation.setCreatedAt(LocalDateTime.now());
             invitation.setExpiresAt(LocalDateTime.now().plusDays(7));
@@ -275,19 +277,6 @@ public class InvitationController {
     
             logger.debug("Invitation created successfully: ID={}, familyId={}, email={}, userExists={}", 
                 savedInvitation.getId(), familyId, inviteeEmail, userExists);
-
-            // Send invitation email to the invitee
-            try {
-                Family family = familyRepository.findById(familyId).orElse(null);
-                String familyName = family != null ? family.getName() : "Family";
-                String inviterFullName = inviter.getFirstName() + " " + inviter.getLastName();
-                
-                emailService.sendFamilyInvitationEmail(inviteeEmail, familyName, inviterFullName, savedInvitation.getToken());
-                logger.info("Invitation email sent successfully to: {}", inviteeEmail);
-            } catch (Exception e) {
-                logger.error("Failed to send invitation email to {}: {}", inviteeEmail, e.getMessage(), e);
-                // Don't fail the invitation creation if email fails
-            }
 
             // Broadcast new invitation to recipient via WebSocket (only if user exists)
             if (userExists) {
