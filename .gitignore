@@ -4,6 +4,8 @@ bucket-policy.json
 kill-spring.sh
 start-spring.sh
 reset_simple.sh
+reset_local_db.sh
+reset_staging_db.sh
 *.backup
 
 # Runtime logs
