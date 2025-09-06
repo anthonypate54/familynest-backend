@@ -29,9 +29,7 @@ public class EmailProviderService {
         if ("ses".equalsIgnoreCase(emailProvider)) {
             sesEmailService.sendFamilyInvitationEmail(inviteeEmail, familyName, inviterName, invitationToken);
         } else {
-            // TODO: Add family invitation email to existing EmailService
-            logger.warn("Family invitation email not implemented for SMTP provider yet, using SES");
-            sesEmailService.sendFamilyInvitationEmail(inviteeEmail, familyName, inviterName, invitationToken);
+            emailService.sendFamilyInvitationEmail(inviteeEmail, familyName, inviterName, invitationToken);
         }
     }
     
