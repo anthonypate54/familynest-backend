@@ -447,7 +447,7 @@ public class UserController {
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Error during login: {}", e.getMessage());
+            logger.error("Error during login: {}", e.getMessage(), e);
             return ResponseEntity.status(400)
                 .body(Map.of("error", "Login failed: " + e.getMessage()));
         }
