@@ -83,7 +83,7 @@ public class MessageController {
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "20") int size) {
         
-        logger.debug("Getting messages for user: {}, page: {}, size: {}", userId, page, size);
+        logger.info("🔍 MESSAGE CONTROLLER HIT: Getting messages for user: {}, page: {}, size: {}", userId, page, size);
         
         try {
             // Validate page size to prevent loading too much data

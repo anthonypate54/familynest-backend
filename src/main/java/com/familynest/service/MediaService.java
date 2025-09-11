@@ -131,15 +131,17 @@ public class MediaService {
                                     logger.error("Failed to upload thumbnail directly to S3: {}", e.getMessage(), e);
                                     result.put("thumbnailUrl", getDefaultThumbnailUrl());
                                 }
-                            } else {
-                                // For local storage, use the existing store method
-                                // This would need a proper MultipartFile wrapper, but for now use default
-                                logger.warn("Local storage thumbnail upload not implemented in this path");
-                                result.put("thumbnailUrl", getDefaultThumbnailUrl());
-                            }
+                        } else {
+                            // For local storage, the thumbnail is already in the right place
+                            // Just use the generated thumbnail URL directly
+                            logger.info("Using locally generated thumbnail: {}", generatedThumbnailPath);
+                            result.put("thumbnailUrl", generatedThumbnailPath);
+                        }
                             
-                            // Clean up local file
-                            thumbnailFile.delete();
+                            // Clean up local file (only for S3, not for local storage)
+                            if (storageService instanceof S3StorageService) {
+                                thumbnailFile.delete();
+                            }
                         } else {
                             logger.error("Local thumbnail file not found: {}", localThumbnailPath);
                             result.put("thumbnailUrl", getDefaultThumbnailUrl());

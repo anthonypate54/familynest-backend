@@ -29,6 +29,7 @@ public class FamilyMessageWebSocketController {
         logger.info("User joining family chat: {}", message.getContent());
         
         // Extract family ID from the message data
+        @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) message.getData();
         Long familyId = (Long) data.get("familyId");
         Long userId = (Long) data.get("userId");
@@ -48,6 +49,7 @@ public class FamilyMessageWebSocketController {
     public WebSocketMessage handleFamilyLeave(@Payload WebSocketMessage message) {
         logger.info("User leaving family chat: {}", message.getContent());
         
+        @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) message.getData();
         Long familyId = (Long) data.get("familyId");
         Long userId = (Long) data.get("userId");
@@ -63,6 +65,7 @@ public class FamilyMessageWebSocketController {
     public WebSocketMessage handleTyping(@Payload WebSocketMessage message) {
         logger.debug("User typing in family chat: {}", message.getContent());
         
+        @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) message.getData();
         Long familyId = (Long) data.get("familyId");
         Long userId = (Long) data.get("userId");
@@ -78,6 +81,7 @@ public class FamilyMessageWebSocketController {
     public WebSocketMessage handleNewMessage(@Payload WebSocketMessage message) {
         logger.info("New family message received: {}", message.getContent());
         
+        @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) message.getData();
         Long familyId = (Long) data.get("familyId");
         Long userId = (Long) data.get("userId");
@@ -94,6 +98,7 @@ public class FamilyMessageWebSocketController {
     public WebSocketMessage handleReaction(@Payload WebSocketMessage message) {
         logger.info("Family message reaction received: {}", message.getContent());
         
+        @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) message.getData();
         Long familyId = (Long) data.get("familyId");
         Long messageId = (Long) data.get("messageId");
@@ -112,6 +117,7 @@ public class FamilyMessageWebSocketController {
     public WebSocketMessage handleComment(@Payload WebSocketMessage message) {
         logger.info("Family message comment received: {}", message.getContent());
         
+        @SuppressWarnings("unchecked")
         Map<String, Object> data = (Map<String, Object>) message.getData();
         Long familyId = (Long) data.get("familyId");
         Long parentMessageId = (Long) data.get("parentMessageId");

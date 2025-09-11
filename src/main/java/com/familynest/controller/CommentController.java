@@ -343,11 +343,18 @@ public class CommentController {
         @RequestParam("content") String content,
         @RequestParam(value = "media", required = false) MultipartFile media,
         @RequestParam(value = "mediaType", required = false) String mediaType,
-        @RequestParam(value = "videoUrl", required = false) String videoUrl,  // ADD THIS
+        @RequestParam(value = "videoUrl", required = false) String videoUrl,
+        @RequestParam(value = "localMediaPath", required = false) String localMediaPath,
         @RequestParam(value = "familyId", required = false) Long familyId,
         @RequestHeader("Authorization") String authHeader,
         HttpServletRequest request) {
         try {
+            logger.debug("Starting postComment for parentMessageId: {}", parentMessageId);
+            logger.debug("Content: \"{}\"", content);
+            logger.debug("Media path: {}, media type: {}", media != null ? media.getOriginalFilename() : null, mediaType);
+            logger.debug("Local media path: {}", localMediaPath);
+            logger.debug("Video URL: {}, familyId: {}", videoUrl, familyId);
+
             // Validation
             if (parentMessageId <= 0) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -398,8 +405,8 @@ public class CommentController {
         
             // Insert the comment with family_id = NULL (using new schema)
             String insertSql = "INSERT INTO message_comment (content, user_id, sender_id, sender_username, " +
-                "media_type, media_url, thumbnail_url, family_id, parent_message_id, like_count, love_count) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 0) RETURNING id";
+                "media_type, media_url, thumbnail_url, local_media_path, family_id, parent_message_id, like_count, love_count) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 0) RETURNING id";
     
             Long newCommentId = jdbcTemplate.queryForObject(insertSql, Long.class,
                 content, 
@@ -409,6 +416,7 @@ public class CommentController {
                 mediaType,
                 mediaUrl,
                 thumbnailUrl,
+                localMediaPath,
                 parentMessageId
             );
             

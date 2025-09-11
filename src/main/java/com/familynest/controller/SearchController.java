@@ -56,6 +56,7 @@ public class SearchController {
      * Requires minimum 3 characters for search
      */
     @GetMapping("/messages")
+    // DEBUG: Track endpoint hits
     public ResponseEntity<List<Map<String, Object>>> searchMessages(
             @RequestParam String q,
             @RequestParam(required = false) Long familyId,

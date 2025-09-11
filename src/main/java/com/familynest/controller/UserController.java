@@ -661,6 +661,7 @@ public class UserController {
             @RequestParam(value = "media", required = false) MultipartFile media,
             @RequestParam(value = "mediaType", required = false) String mediaType,
             @RequestParam(value = "videoUrl", required = false) String videoUrl,
+            @RequestParam(value = "localMediaPath", required = false) String localMediaPath,
             @RequestParam(value = "familyId", required = false) Long familyId,
             @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
@@ -736,8 +737,8 @@ public class UserController {
     
             // Insert the message with family_id = NULL (using new schema)
             String insertSql = "INSERT INTO message (content, user_id, sender_id, sender_username, " +
-                "media_type, media_url, thumbnail_url, family_id, like_count, love_count) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0) RETURNING id";
+                "media_type, media_url, thumbnail_url, local_media_path, family_id, like_count, love_count) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0) RETURNING id";
     
             logger.debug("🔨 About to INSERT message with params: content='{}', userId={}, username='{}'", 
                 content, userId, userData.get("username"));
@@ -751,7 +752,8 @@ public class UserController {
                     userData.get("username"),
                     mediaType,
                     mediaUrl,
-                    thumbnailUrl
+                    thumbnailUrl,
+                    localMediaPath
                 );
                 logger.debug("🆔 INSERT succeeded, returned message ID: {}", newMessageId);
             } catch (Exception insertError) {
@@ -825,6 +827,7 @@ public class UserController {
         @PathVariable Long id,
         @RequestHeader("Authorization") String authHeader) {
 
+            logger.info("🔍 BACKEND HIT: Getting messages for user: {}", id);
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
             Long currentUserId = authUtil.extractUserId(token);
             if (currentUserId == null) {
@@ -864,7 +867,7 @@ public class UserController {
                         ") " +
                         "SELECT DISTINCT " +
                         "  m.id, m.content, m.sender_username, m.sender_id, " +
-                        "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
+                        "  m.timestamp, m.media_type, m.media_url, m.thumbnail_url, m.local_media_path, " +
                         "  s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                         "  m.like_count, m.love_count, " +
                         "  COALESCE(cc.count, 0) as comment_count, " +
@@ -891,6 +894,11 @@ public class UserController {
             }
                      
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, id, id, id, currentUserId, currentUserId, currentUserId);
+            
+            // DEBUG: Check if local_media_path is in the SQL results
+            if (!results.isEmpty() && "video".equals(results.get(0).get("media_type"))) {
+                logger.info("🔍 SQL Result - local_media_path: {}", results.get(0).get("local_media_path"));
+            }
             
             // Debug output only for development - just log count, not each individual message
             if (logger.isDebugEnabled() && !results.isEmpty()) {
@@ -920,6 +928,14 @@ public class UserController {
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
+                messageMap.put("localMediaPath", message.get("local_media_path"));
+                
+                // DEBUG: Log what we're putting in the response
+                if ("video".equals(message.get("media_type"))) {
+                    logger.info("🎥 RESPONSE DEBUG - localMediaPath value: {}", message.get("local_media_path"));
+                    logger.info("🎥 RESPONSE DEBUG - messageMap localMediaPath: {}", messageMap.get("localMediaPath"));
+                }
+                
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
                 messageMap.put("commentCount", message.get("comment_count"));
@@ -940,6 +956,13 @@ public class UserController {
             }).collect(Collectors.toList());
             
             logger.debug("Returning {} messages for user {} using a single optimized query", response.size(), id);
+            
+            // 🔥 DEBUG: Check final response
+            if (!response.isEmpty() && "video".equals(response.get(0).get("mediaType"))) {
+                logger.info("🔥 FINAL RESPONSE - First video message localMediaPath: {}", response.get(0).get("localMediaPath"));
+                logger.info("🔥 FINAL RESPONSE - All keys: {}", response.get(0).keySet());
+            }
+            
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error retrieving messages: {}", e.getMessage(), e);

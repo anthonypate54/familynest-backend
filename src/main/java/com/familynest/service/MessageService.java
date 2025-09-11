@@ -21,7 +21,7 @@ public class MessageService {
     public Map<String, Object> getCommentById(Long commentId) {
         String sql = "SELECT " +
             "m.id, m.content, m.sender_username, m.sender_id, " +
-            "m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
+            "m.timestamp, m.media_type, m.media_url, m.thumbnail_url, m.local_media_path, " +
             "s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
             "m.parent_message_id as parent_message_id, " +
             "m.like_count, m.love_count, " +
@@ -40,7 +40,7 @@ public class MessageService {
 
     public Map<String, Object> getMessageById(Long messageId) {
         String sql = "SELECT m.id, m.content, m.sender_username, m.sender_id, mfl.family_id, " +
-                     "m.timestamp, m.media_type, m.media_url, m.thumbnail_url, " +
+                     "m.timestamp, m.media_type, m.media_url, m.thumbnail_url, m.local_media_path, " +
                      "s.photo as sender_photo, s.first_name as sender_first_name, s.last_name as sender_last_name, " +
                      "f.name as family_name, " +
                      "m.like_count, m.love_count, " +

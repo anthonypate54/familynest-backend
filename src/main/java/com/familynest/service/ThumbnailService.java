@@ -3,6 +3,11 @@ package com.familynest.service;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.Java2DFrameConverter;
+import org.bytedeco.ffmpeg.avformat.*;
+import org.bytedeco.ffmpeg.avcodec.*;
+import org.bytedeco.ffmpeg.avutil.*;
+import static org.bytedeco.ffmpeg.global.avutil.*;
+import static org.bytedeco.ffmpeg.global.avformat.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,22 +54,22 @@ public class ThumbnailService {
      */
     public String generateThumbnail(String videoPath, String thumbnailFilename) {
         try {
-            logger.error("THUMBNAIL SERVICE: Starting thumbnail generation for: {}", videoPath);
+            logger.info("THUMBNAIL SERVICE: Starting thumbnail generation for: {}", videoPath);
             // Thumbnail directory creation is handled by StorageService
             
             // First try using FFmpeg to extract an actual frame from the video
             try {
-                logger.error("THUMBNAIL SERVICE: Attempting to use FFmpeg for thumbnail generation");
+                logger.info("THUMBNAIL SERVICE: Attempting to use FFmpeg for thumbnail generation");
                 String result = generateThumbnailInternal(videoPath, thumbnailFilename);
                 
                 // If FFmpeg succeeded, return the result
                 if (result != null && !result.equals("/uploads/thumbnails/default_thumbnail.jpg")) {
-                    logger.error("THUMBNAIL SERVICE: FFmpeg thumbnail generation successful: {}", result);
+                    logger.info("THUMBNAIL SERVICE: FFmpeg thumbnail generation successful: {}", result);
                     return result;
                 }
                 
                 // If FFmpeg method returned default thumbnail, fall back to simple method
-                logger.error("THUMBNAIL SERVICE: FFmpeg returned default thumbnail, trying simple method as fallback");
+                logger.info("THUMBNAIL SERVICE: FFmpeg returned default thumbnail, trying simple method as fallback");
             } catch (Exception e) {
                 logger.error("THUMBNAIL SERVICE: FFmpeg method failed: {}", e.getMessage(), e);
                 // Continue to fallback method
@@ -72,9 +77,9 @@ public class ThumbnailService {
             
             // Use simple method as fallback
             try {
-                logger.error("THUMBNAIL SERVICE: Using simple Java Image method as fallback");
+                logger.info("THUMBNAIL SERVICE: Using simple Java Image method as fallback");
                 String result = generateSimpleThumbnail(videoPath, thumbnailFilename);
-                logger.error("THUMBNAIL SERVICE: Simple thumbnail generation successful: {}", result);
+                logger.info("THUMBNAIL SERVICE: Simple thumbnail generation successful: {}", result);
                 return result;
             } catch (Exception e) {
                 logger.error("THUMBNAIL SERVICE: Simple method failed: {}", e.getMessage(), e);
@@ -90,6 +95,9 @@ public class ThumbnailService {
      * Internal method to generate thumbnail without timeout handling
      */
     private String generateThumbnailInternal(String videoPath, String thumbnailFilename) {
+        long startTime = System.currentTimeMillis();
+        logger.info("⏱️ TIMING: Starting thumbnail generation for: {}", thumbnailFilename);
+        
         if (!useFFmpeg) {
             logger.info("FFmpeg thumbnail generation is disabled. Using default thumbnail.");
             return "/uploads/thumbnails/default_thumbnail.jpg";
@@ -102,96 +110,80 @@ public class ThumbnailService {
             return "/uploads/thumbnails/default_thumbnail.jpg";
         }
         
-        logger.error("VIDEO PATH CHECK: Path exists? {}, Size: {} bytes", Files.exists(Paths.get(videoPath)), videoFile.length());
-        logger.error("THUMBNAIL GENERATION: Video path = {}, Thumbnail filename = {}", videoPath, thumbnailFilename);
-        
         Path thumbnailPath = Paths.get(thumbnailDir, thumbnailFilename);
-        logger.error("THUMBNAIL PATH: Full path = {}, Directory exists? {}", 
-            thumbnailPath.toAbsolutePath(), Files.exists(thumbnailPath.getParent()));
         
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(videoPath)) {
-            logger.error("FFMPEG: Created grabber for video path: {}", videoPath);
-            
             // Set the format explicitly to help FFmpeg recognize the file
             if (videoPath.toLowerCase().endsWith(".mp4")) {
-                logger.error("FFMPEG: Setting format to mp4");
                 grabber.setFormat("mp4");
             } else if (videoPath.toLowerCase().endsWith(".avi")) {
-                logger.error("FFMPEG: Setting format to avi");
                 grabber.setFormat("avi");
             } else if (videoPath.toLowerCase().endsWith(".mov")) {
-                logger.error("FFMPEG: Setting format to mov");
                 grabber.setFormat("mov");
             }
             
-            // Enable detailed FFmpeg logging
-            try {
-                logger.error("FFMPEG: Setting up FFmpeg logging");
-                org.bytedeco.ffmpeg.global.avutil.av_log_set_level(org.bytedeco.ffmpeg.global.avutil.AV_LOG_VERBOSE);
-                org.bytedeco.javacpp.Loader.load(org.bytedeco.ffmpeg.global.avutil.class);
-            } catch (Exception e) {
-                logger.error("FFMPEG: Failed to set up FFmpeg logging: {}", e.getMessage());
-            }
+            // Enable auto-rotation based on video metadata
+            grabber.setOption("autorotate", "1");
             
             try {
-                logger.error("FFMPEG: About to start grabber...");
                 grabber.start();
-                logger.error("FFMPEG: Grabber started successfully!");
-                
-                // Get video duration in seconds
+                  
+                // Get video duration and seek to a good frame
                 long durationInSeconds = Math.max(1, grabber.getLengthInTime() / 1000000);
-                logger.error("FFMPEG: Video duration: {} seconds", durationInSeconds);
-                
-                // Seek to 1 second or 10% of the video, whichever is less
                 long seekTime = Math.min(durationInSeconds / 10, 1);
-                logger.error("FFMPEG: Seeking to {} seconds for thumbnail", seekTime);
                 grabber.setVideoTimestamp(seekTime * 1000000);
                 
                 // Grab a frame for the thumbnail
-                logger.error("FFMPEG: About to grab frame from video for thumbnail");
+                long frameStartTime = System.currentTimeMillis();
                 Frame frame = grabber.grabImage();
                 if (frame == null) {
                     // If seeking failed, try grabbing the first frame
-                    logger.error("FFMPEG: Could not grab frame at {} seconds, trying first frame", seekTime);
                     grabber.setVideoTimestamp(0);
                     frame = grabber.grabImage();
                     
                     if (frame == null) {
-                        logger.error("FFMPEG: Could not grab any frame from video, all attempts failed");
+                        logger.error("FFMPEG: Could not grab any frame from video");
                         return "/uploads/thumbnails/default_thumbnail.jpg";
                     }
                 }
-                logger.error("FFMPEG: Successfully grabbed frame from video!");
-                
+                long frameEndTime = System.currentTimeMillis();
+                 
                 // Convert frame to BufferedImage
-                logger.error("FFMPEG: Converting frame to BufferedImage");
+                long convertStartTime = System.currentTimeMillis();
                 Java2DFrameConverter converter = new Java2DFrameConverter();
                 BufferedImage bufferedImage = converter.convert(frame);
+                long convertEndTime = System.currentTimeMillis();
+                logger.info("⏱️ TIMING: frame conversion took {}ms", convertEndTime - convertStartTime);
                 
                 if (bufferedImage == null) {
                     logger.error("FFMPEG: Failed to convert frame to BufferedImage");
                     return "/uploads/thumbnails/default_thumbnail.jpg";
                 }
-                logger.error("FFMPEG: Successfully converted frame to BufferedImage!");
+                
+                // FFmpeg autorotate=1 handles orientation automatically, no manual rotation needed
                 
                 // Save the thumbnail
-                logger.error("FFMPEG: About to save thumbnail to: {}", thumbnailPath);
                 try {
                     boolean saved = ImageIO.write(bufferedImage, "jpg", thumbnailPath.toFile());
                     if (!saved) {
-                        logger.error("FFMPEG: ImageIO could not find a writer for format: jpg");
+                        logger.error("FFMPEG: Failed to save thumbnail - no writer found");
                         return "/uploads/thumbnails/default_thumbnail.jpg";
                     }
-                    logger.error("FFMPEG: Thumbnail generated successfully: {}", thumbnailPath);
-                } catch (Exception e) {
-                    logger.error("FFMPEG: Failed to save thumbnail image: {}", e.getMessage(), e);
+                    
+                    // Verify the file was created
+                    File savedFile = thumbnailPath.toFile();
+                    if (!savedFile.exists()) {
+                        logger.error("FFMPEG: Thumbnail file was not created: {}", thumbnailPath);
+                        return "/uploads/thumbnails/default_thumbnail.jpg";
+                    }
+                    
+                    long totalTime = System.currentTimeMillis() - startTime;
+                 } catch (Exception e) {
+                    logger.error("FFMPEG: Failed to save thumbnail: {}", e.getMessage());
                     return "/uploads/thumbnails/default_thumbnail.jpg";
                 }
                 
-                // Return URL path for the thumbnail
-                String thumbnailUrl = "/uploads/thumbnails/" + thumbnailFilename;
-                logger.error("FFMPEG: Returning thumbnail URL: {}", thumbnailUrl);
-                return thumbnailUrl;
+                return "/uploads/thumbnails/" + thumbnailFilename;
             } catch (Exception e) {
                 logger.error("FFMPEG: Error processing video: {}", e.getMessage(), e);
                 try {
@@ -208,7 +200,7 @@ public class ThumbnailService {
             
             // Try a simpler approach as a last resort
             try {
-                logger.error("FFMPEG: Attempting simple Java Image fallback method");
+                logger.info("FFMPEG: Attempting simple Java Image fallback method");
                 return generateSimpleThumbnail(videoPath, thumbnailFilename);
             } catch (Exception fallbackEx) {
                 logger.error("FFMPEG: Fallback method also failed: {}", fallbackEx.getMessage());
@@ -227,9 +219,9 @@ public class ThumbnailService {
         int height = 360;
         
         // Debug log the paths we're working with
-        logger.error("PATH DEBUG: videoPath = {}", videoPath);
-        logger.error("PATH DEBUG: thumbnailFilename = {}", thumbnailFilename);
-        logger.error("PATH DEBUG: thumbnailDir = {}", thumbnailDir);
+        logger.info("PATH DEBUG: videoPath = {}", videoPath);
+        logger.info("PATH DEBUG: thumbnailFilename = {}", thumbnailFilename);
+        logger.info("PATH DEBUG: thumbnailDir = {}", thumbnailDir);
         
         // Create a simple colored image with the video name on it
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -268,7 +260,7 @@ public class ThumbnailService {
         // Ensure parent directory exists
         Files.createDirectories(thumbnailPath.getParent());
         
-        logger.error("PATH DEBUG: Final thumbnail path: {}", thumbnailPath.toAbsolutePath());
+        logger.info("PATH DEBUG: Final thumbnail path: {}", thumbnailPath.toAbsolutePath());
         
         // Save the image
         boolean success = ImageIO.write(image, "jpg", thumbnailPath.toFile());
@@ -278,7 +270,7 @@ public class ThumbnailService {
             return "/uploads/thumbnails/default_thumbnail.jpg";
         }
         
-        logger.error("PATH DEBUG: Thumbnail saved successfully");
+        logger.info("PATH DEBUG: Thumbnail saved successfully");
         
         // Return standard URL path
         return "/uploads/thumbnails/" + thumbnailFilename;

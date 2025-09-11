@@ -356,12 +356,17 @@ public class DMController {
             @RequestParam(value = "media", required = false) MultipartFile media,
             @RequestParam(value = "mediaType", required = false) String mediaType,
             @RequestParam(value = "videoUrl", required = false) String videoUrl,
+            @RequestParam(value = "localMediaPath", required = false) String localMediaPath,
             @RequestParam("conversationId") Long conversationId,
             @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
         logger.debug("Posting DM message with media for user: {}", userId);
         
         try {
+            // Debug logging for localMediaPath
+            logger.debug("🎥 DM postMessage - localMediaPath received: {}", localMediaPath);
+            logger.debug("🎥 DM postMessage - mediaType: {}, videoUrl: {}", mediaType, videoUrl);
+            
             // Validation
             if (content == null || content.trim().isEmpty()) {
                 return ResponseEntity.badRequest()
@@ -456,10 +461,14 @@ public class DMController {
                 }
             }
     
+            // Debug what we're about to insert
+            logger.debug("🎥 DM INSERT - About to store localMediaPath: {}", localMediaPath);
+            logger.debug("🎥 DM INSERT - mediaUrl: {}, mediaType: {}, thumbnailUrl: {}", mediaUrl, mediaType, thumbnailUrl);
+            
             // Insert the DM message and get the new ID (fixed parameter count)
             String insertSql = "INSERT INTO dm_message (conversation_id, sender_id, content, " +
-                "media_url, media_type, media_thumbnail, created_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id";
+                "media_url, media_type, media_thumbnail, local_media_path, created_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id";
     
             Long newMessageId = jdbcTemplate.queryForObject(insertSql, Long.class,
                 conversationId,
@@ -468,6 +477,7 @@ public class DMController {
                 mediaUrl,
                 mediaType,
                 thumbnailUrl,
+                localMediaPath,
                 Timestamp.valueOf(LocalDateTime.now())
             );
     
@@ -503,7 +513,7 @@ public class DMController {
                 SELECT 
                     dm.id, dm.conversation_id, dm.sender_id, dm.content, 
                     dm.media_url, dm.media_type, dm.media_thumbnail, 
-                    dm.media_filename, dm.media_size, dm.media_duration, dm.created_at,
+                    dm.media_filename, dm.media_size, dm.media_duration, dm.local_media_path, dm.created_at,
                     u.username as sender_username, u.first_name as sender_first_name, 
                     u.last_name as sender_last_name, u.photo as sender_photo,
                     false as is_read
@@ -526,7 +536,18 @@ public class DMController {
             response.put("media_filename", messageData.get("media_filename"));
             response.put("media_size", messageData.get("media_size"));
             response.put("media_duration", messageData.get("media_duration"));
+            response.put("local_media_path", messageData.get("local_media_path"));
             response.put("created_at", messageData.get("created_at"));
+            
+            // Add camelCase versions for Flutter compatibility
+            response.put("localMediaPath", messageData.get("local_media_path"));
+            response.put("mediaUrl", messageData.get("media_url"));
+            response.put("mediaType", messageData.get("media_type"));
+            response.put("mediaThumbnail", messageData.get("media_thumbnail"));
+            
+            // Debug log the response to verify localMediaPath is included
+            logger.debug("🎯 DM POST Response - localMediaPath: {}", messageData.get("local_media_path"));
+            logger.debug("🎯 DM POST Response - messageData: {}", messageData);
             response.put("sender_username", messageData.get("sender_username"));
             response.put("sender_first_name", messageData.get("sender_first_name"));
             response.put("sender_last_name", messageData.get("sender_last_name"));
@@ -616,6 +637,7 @@ public class DMController {
      * GET /api/dm/conversations/{conversationId}/messages
      */
     @GetMapping("/conversations/{conversationId}/messages")
+    // DEBUG: Track which endpoint is being hit
     @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getConversationMessages(
             @RequestHeader("Authorization") String authHeader,
@@ -675,7 +697,7 @@ public class DMController {
             String messagesSql = """
                 SELECT 
                     m.id, m.conversation_id, m.sender_id, m.content, m.media_url, m.media_type, 
-                    m.media_thumbnail, m.media_filename, m.media_size, m.media_duration,
+                    m.media_thumbnail, m.media_filename, m.media_size, m.media_duration, m.local_media_path,
                     m.is_read,
                     m.created_at,
                     u.username as sender_username, u.first_name as sender_first_name, u.last_name as sender_last_name,
@@ -696,9 +718,28 @@ public class DMController {
 
             List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, conversationId, currentUserId, size, offset);
             
-            // Debug log each message
+            // Process messages to add camelCase versions of fields (like main MessageController does)
             for (Map<String, Object> message : messages) {
-                logger.debug("Message data: {}", message);
+                // Convert local_media_path to localMediaPath for Flutter compatibility
+                if (message.containsKey("local_media_path")) {
+                    Object localMediaPath = message.get("local_media_path");
+                    message.put("localMediaPath", localMediaPath);
+                    logger.debug("🎯 DM Message {} - local_media_path: {}, converted to localMediaPath", 
+                        message.get("id"), localMediaPath);
+                }
+                
+                // Convert other fields for consistency
+                if (message.containsKey("media_url")) {
+                    message.put("mediaUrl", message.get("media_url"));
+                }
+                if (message.containsKey("media_type")) {
+                    message.put("mediaType", message.get("media_type"));
+                }
+                if (message.containsKey("media_thumbnail")) {
+                    message.put("mediaThumbnail", message.get("media_thumbnail"));
+                }
+                
+                logger.debug("DM Message data: {}", message);
             }
 
             // Get total count
