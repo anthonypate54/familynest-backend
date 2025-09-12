@@ -1,6 +1,7 @@
 package com.familynest.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -26,6 +27,12 @@ public class EmailService {
     
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    
+    @Value("${spring.mail.username:NOT_SET}")
+    private String mailUsername;
+    
+    @Value("${spring.mail.password:NOT_SET}")
+    private String mailPassword;
     
     public void sendFamilyInvitationEmail(String inviteeEmail, String familyName, String inviterName, String invitationToken) {
         try {
@@ -62,7 +69,9 @@ public class EmailService {
 
     public void sendPasswordResetEmail(String toEmail, String resetToken) {
         try {
-            logger.info("Sending password reset email to: {}", toEmail);
+            logger.info("EMAIL DEBUG: Sending password reset email to: {}", toEmail);
+            logger.info("EMAIL DEBUG: SMTP Username: {}", mailUsername);
+            logger.info("EMAIL DEBUG: SMTP Password: {}", mailPassword != null && !mailPassword.equals("NOT_SET") ? "[SET]" : "[NOT_SET]");
             
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom("noreply@infamilynest.com");
