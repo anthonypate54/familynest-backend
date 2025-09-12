@@ -52,8 +52,8 @@ public class JwtUtil {
     
     // Generate access token with session ID (for single device enforcement)
     public String generateAccessToken(Long userId, String role, String sessionId) {
-        logger.error("🔧 GENERATING ACCESS TOKEN: userId={}, role={}, sessionId={}", userId, role, sessionId);
-        String token = Jwts.builder()
+        logger.debug("Generating access token with session ID for userId: {}", userId);
+        return Jwts.builder()
             .setSubject(userId.toString())
             .claim("role", role)
             .claim("type", "access")
@@ -61,8 +61,6 @@ public class JwtUtil {
             .setExpiration(new Date(System.currentTimeMillis() + accessTokenExpiration))
             .signWith(key)
             .compact();
-        logger.error("🔧 GENERATED TOKEN: {}", token.substring(0, Math.min(100, token.length())) + "...");
-        return token;
     }
     
     // Generate refresh token (long-lived)
@@ -79,7 +77,7 @@ public class JwtUtil {
     
     // Generate both access and refresh tokens
     public TokenPair generateTokenPair(Long userId, String role) {
-        logger.error("🚨 WRONG METHOD: Called 2-parameter generateTokenPair (NO SESSION ID) for userId: {}", userId);
+        logger.debug("Generating token pair without session ID for userId: {}", userId);
         String accessToken = generateAccessToken(userId, role);
         String refreshToken = generateRefreshToken(userId);
         
@@ -93,10 +91,8 @@ public class JwtUtil {
     
     // Generate both access and refresh tokens with session ID
     public TokenPair generateTokenPair(Long userId, String role, String sessionId) {
-        logger.error("✅ CORRECT METHOD: Called 3-parameter generateTokenPair WITH SESSION ID {} for userId: {}", sessionId, userId);
-        logger.error("🔧 ABOUT TO CALL: generateAccessToken with 3 parameters - userId={}, role={}, sessionId={}", userId, role, sessionId);
+        logger.debug("Generating token pair with session ID for userId: {}", userId);
         String accessToken = generateAccessToken(userId, role, sessionId);
-        logger.error("🔧 RETURNED TOKEN: {}", accessToken.substring(0, Math.min(50, accessToken.length())) + "...");
         String refreshToken = generateRefreshToken(userId);
         
         return new TokenPair(
@@ -133,16 +129,15 @@ public class JwtUtil {
     }
 
     public boolean validateToken(String token) {
-        logger.error("🔍 VALIDATING TOKEN: {}", token.substring(0, Math.min(50, token.length())) + "...");
+        logger.debug("Validating token");
         try {
             Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
                 .parseClaimsJws(token);
-            logger.error("✅ TOKEN VALIDATION SUCCESS");
             return true;
         } catch (Exception e) {
-            logger.error("❌ TOKEN VALIDATION FAILED: {}", e.getMessage(), e);
+            logger.debug("Token validation failed: {}", e.getMessage());
             return false;
         }
     }
@@ -163,18 +158,16 @@ public class JwtUtil {
     }
     
     public String getSessionId(String token) {
-        logger.debug("Extracting session ID from token: {}", token);
+        logger.debug("Extracting session ID from token");
         try {
-            String sessionId = Jwts.parserBuilder()
+            return Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
                 .parseClaimsJws(token)
                 .getBody()
                 .get("sessionId", String.class);
-            logger.debug("Extracted session ID: {}", sessionId);
-            return sessionId;
         } catch (Exception e) {
-            logger.error("Failed to extract session ID from token: {}", e.getMessage(), e);
+            logger.debug("Failed to extract session ID from token: {}", e.getMessage());
             return null;
         }
     }

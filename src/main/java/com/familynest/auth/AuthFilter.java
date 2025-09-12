@@ -128,14 +128,11 @@ public class AuthFilter extends OncePerRequestFilter {
         }
 
         // Extract user info from token
-        logger.error("🔍 EXTRACTING: Starting user info extraction");
         Long userId = jwtUtil.extractUserId(token);
-        logger.error("🔍 EXTRACTED: userId = {}", userId);
         String role = jwtUtil.getUserRole(token);
-        logger.error("🔍 EXTRACTED: role = {}", role);
         String tokenSessionId = jwtUtil.getSessionId(token);
-        logger.error("🔍 EXTRACTED: sessionId = {}", tokenSessionId);
-        logger.error("✅ Token valid! Extracted userId: {}, role: {}, sessionId: {}", userId, role, tokenSessionId);
+        
+        logger.debug("Token valid! Extracted userId: {}, role: {}, sessionId: {}", userId, role, tokenSessionId != null ? "[present]" : "[missing]");
 
         // SINGLE DEVICE ENFORCEMENT: Validate session ID
         if (tokenSessionId != null) {
@@ -144,20 +141,19 @@ public class AuthFilter extends OncePerRequestFilter {
                 String dbSessionId = jdbcTemplate.queryForObject(currentSessionSql, String.class, userId);
                 
                 if (!tokenSessionId.equals(dbSessionId)) {
-                    logger.warn("🚫 SESSION_INVALID: Token session {} doesn't match DB session {} for user {}", 
-                               tokenSessionId, dbSessionId, userId);
+                    logger.warn("Session invalid: Token session doesn't match database session for user {}", userId);
                     response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session invalid - please log in again");
                     return;
                 }
-                logger.debug("✅ SESSION_VALID: Session ID matches for user {}", userId);
+                logger.debug("Session ID validated for user {}", userId);
             } catch (Exception e) {
-                logger.error("❌ SESSION_CHECK_ERROR: Failed to validate session for user {}: {}", userId, e.getMessage());
+                logger.error("Failed to validate session for user {}: {}", userId, e.getMessage());
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session validation failed");
                 return;
             }
         } else {
             // No session ID in token - reject immediately (single device enforcement)
-            logger.error("🚫 NO_SESSION_ID: Token missing session ID for user {} - forcing re-login", userId);
+            logger.warn("Token missing session ID for user {} - session invalid", userId);
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session invalid - please log in again");
             return;
         }

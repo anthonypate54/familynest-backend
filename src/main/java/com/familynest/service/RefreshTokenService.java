@@ -108,18 +108,18 @@ public class RefreshTokenService {
         try {
             String sessionSql = "SELECT current_session_id FROM app_user WHERE id = ?";
             sessionId = jdbcTemplate.queryForObject(sessionSql, String.class, userId);
-            logger.debug("🔄 REFRESH: Retrieved session ID {} for user {}", sessionId, userId);
+            logger.debug("Retrieved session ID for user {} during token refresh", userId);
         } catch (Exception e) {
-            logger.warn("🔄 REFRESH: Could not retrieve session ID for user {}: {}", userId, e.getMessage());
+            logger.warn("Could not retrieve session ID for user {}: {}", userId, e.getMessage());
         }
         
         // Generate new token pair with session ID if available
         TokenPair newTokenPair;
         if (sessionId != null) {
-            logger.debug("🔄 REFRESH: Generating tokens WITH session ID for user {}", userId);
+            logger.debug("Generating tokens with session ID for user {}", userId);
             newTokenPair = jwtUtil.generateTokenPair(userId, user.getRole(), sessionId);
         } else {
-            logger.warn("🔄 REFRESH: No session ID found, generating tokens WITHOUT session ID for user {}", userId);
+            logger.warn("No session ID found, generating tokens without session ID for user {}", userId);
             newTokenPair = jwtUtil.generateTokenPair(userId, user.getRole());
         }
         
