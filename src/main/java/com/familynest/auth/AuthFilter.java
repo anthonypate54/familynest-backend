@@ -128,10 +128,14 @@ public class AuthFilter extends OncePerRequestFilter {
         }
 
         // Extract user info from token
+        logger.error("🔍 EXTRACTING: Starting user info extraction");
         Long userId = jwtUtil.extractUserId(token);
+        logger.error("🔍 EXTRACTED: userId = {}", userId);
         String role = jwtUtil.getUserRole(token);
+        logger.error("🔍 EXTRACTED: role = {}", role);
         String tokenSessionId = jwtUtil.getSessionId(token);
-        logger.debug("✅ Token valid! Extracted userId: {}, role: {}, sessionId: {}", userId, role, tokenSessionId);
+        logger.error("🔍 EXTRACTED: sessionId = {}", tokenSessionId);
+        logger.error("✅ Token valid! Extracted userId: {}, role: {}, sessionId: {}", userId, role, tokenSessionId);
 
         // SINGLE DEVICE ENFORCEMENT: Validate session ID
         if (tokenSessionId != null) {
