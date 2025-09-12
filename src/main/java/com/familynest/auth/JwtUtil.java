@@ -129,16 +129,16 @@ public class JwtUtil {
     }
 
     public boolean validateToken(String token) {
-        logger.debug("Validating token: {}", token);
+        logger.error("🔍 VALIDATING TOKEN: {}", token.substring(0, Math.min(50, token.length())) + "...");
         try {
             Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
                 .parseClaimsJws(token);
-            logger.debug("Token validated successfully");
+            logger.error("✅ TOKEN VALIDATION SUCCESS");
             return true;
         } catch (Exception e) {
-            logger.debug("Token validation failed: {}", e.getMessage());
+            logger.error("❌ TOKEN VALIDATION FAILED: {}", e.getMessage(), e);
             return false;
         }
     }
