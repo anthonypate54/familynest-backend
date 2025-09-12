@@ -154,10 +154,7 @@ public class ThumbnailService {
                 // Apply manual rotation if video has rotation metadata and autorotate may have failed
                 // This serves as a fallback for Android videos where autorotate doesn't work properly
                 if (videoRotation != 0) {
-                    logger.info("ROTATION DEBUG: Video has {}° rotation, applying manual rotation as fallback", videoRotation);
-                    logger.info("ROTATION DEBUG: Original image size: {}x{}", bufferedImage.getWidth(), bufferedImage.getHeight());
-                    bufferedImage = applyManualRotation(bufferedImage, videoRotation);
-                    logger.info("ROTATION DEBUG: Rotated image size: {}x{}", bufferedImage.getWidth(), bufferedImage.getHeight());
+                     bufferedImage = applyManualRotation(bufferedImage, videoRotation);                    logger.info("ROTATION DEBUG: Rotated image size: {}x{}", bufferedImage.getWidth(), bufferedImage.getHeight());
                 } else {
                     logger.info("ROTATION DEBUG: No rotation metadata found, using autorotate result as-is");
                 }
@@ -217,11 +214,7 @@ public class ThumbnailService {
         int width = 640;
         int height = 360;
         
-        // Debug log the paths we're working with
-        logger.info("PATH DEBUG: videoPath = {}", videoPath);
-        logger.info("PATH DEBUG: thumbnailFilename = {}", thumbnailFilename);
-        logger.info("PATH DEBUG: thumbnailDir = {}", thumbnailDir);
-        
+         
         // Create a simple colored image with the video name on it
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         java.awt.Graphics2D g = image.createGraphics();
@@ -259,8 +252,7 @@ public class ThumbnailService {
         // Ensure parent directory exists
         Files.createDirectories(thumbnailPath.getParent());
         
-        logger.info("PATH DEBUG: Final thumbnail path: {}", thumbnailPath.toAbsolutePath());
-        
+       
         // Save the image
         boolean success = ImageIO.write(image, "jpg", thumbnailPath.toFile());
         
@@ -269,7 +261,6 @@ public class ThumbnailService {
             return "/uploads/thumbnails/default_thumbnail.jpg";
         }
         
-        logger.info("PATH DEBUG: Thumbnail saved successfully");
         
         // Return standard URL path
         return "/uploads/thumbnails/" + thumbnailFilename;
@@ -286,13 +277,11 @@ public class ThumbnailService {
             
             // Try to get rotation from basic metadata first (iOS style)
             String rotationStr = grabber.getVideoMetadata("rotate");
-            logger.info("ROTATION DEBUG: Basic rotation metadata: '{}'", rotationStr);
             
             if (rotationStr != null && !rotationStr.isEmpty()) {
                 try {
                     int rotation = Integer.parseInt(rotationStr);
-                    logger.info("ROTATION DEBUG: Found basic rotation: {}°", rotation);
-                    return normalizeRotation(rotation);
+                     return normalizeRotation(rotation);
                 } catch (NumberFormatException e) {
                     logger.warn("ROTATION DEBUG: Invalid basic rotation metadata: {}", rotationStr);
                 }
@@ -302,11 +291,7 @@ public class ThumbnailService {
             try {
                 // Get video stream rotation (Android style)
                 String displayRotation = grabber.getVideoMetadata("displaymatrix");
-                logger.info("ROTATION DEBUG: Display matrix rotation attempt: '{}'", displayRotation);
-                if (displayRotation != null && !displayRotation.isEmpty()) {
-                    logger.info("ROTATION DEBUG: Found display matrix data: {}", displayRotation);
-                }
-            } catch (Exception e) {
+             } catch (Exception e) {
                 logger.debug("ROTATION DEBUG: Could not get displaymatrix directly: {}", e.getMessage());
             }
             
@@ -343,8 +328,7 @@ public class ThumbnailService {
                 return 90;
             }
             
-            logger.info("ROTATION DEBUG: No rotation detected, using as-is");
-            return 0;
+             return 0;
             
         } catch (Exception e) {
             logger.warn("ROTATION: Could not read rotation metadata: {}", e.getMessage());

@@ -807,11 +807,9 @@ public class UserController {
                 @Override
                 public void afterCommit() {
                     try {
-                        logger.error("🚀 AFTER COMMIT: Broadcasting pre-fetched message data for WebSocket");
-                        
+                         
                         // Broadcast the NEW MESSAGE to all target families via WebSocket
                         for (Long targetFamilyId : finalTargetFamilyIds) {
-                            logger.error("Broadcasting new message to family {} (AFTER COMMIT): {}", targetFamilyId, finalMessageData);
                             webSocketBroadcastService.broadcastNewMessage(finalMessageData, targetFamilyId);
                             
                             // Send push notifications to family members (background notifications)
