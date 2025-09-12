@@ -392,6 +392,7 @@ public class UserController {
     }
 
     @PostMapping("/login")
+    @Transactional
     public ResponseEntity<Map<String, Object>> loginUser(@RequestBody Map<String, String> loginData) {
         logger.debug("Received login request for username: {}", loginData.get("username"));
         try {
