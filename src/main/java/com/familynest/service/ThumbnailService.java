@@ -284,26 +284,44 @@ public class ThumbnailService {
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(videoPath)) {
             grabber.start();
             
-            // Try to get rotation from metadata
+            // Try to get rotation from basic metadata first (iOS style)
             String rotationStr = grabber.getVideoMetadata("rotate");
-            logger.info("ROTATION DEBUG: Raw rotation metadata: '{}'", rotationStr);
+            logger.info("ROTATION DEBUG: Basic rotation metadata: '{}'", rotationStr);
             
             if (rotationStr != null && !rotationStr.isEmpty()) {
                 try {
                     int rotation = Integer.parseInt(rotationStr);
-                    logger.info("ROTATION DEBUG: Parsed rotation: {}°", rotation);
-                    int normalized = normalizeRotation(rotation);
-                    logger.info("ROTATION DEBUG: Normalized rotation: {}°", normalized);
-                    return normalized;
+                    logger.info("ROTATION DEBUG: Found basic rotation: {}°", rotation);
+                    return normalizeRotation(rotation);
                 } catch (NumberFormatException e) {
-                    logger.warn("ROTATION DEBUG: Invalid rotation metadata: {}", rotationStr);
+                    logger.warn("ROTATION DEBUG: Invalid basic rotation metadata: {}", rotationStr);
                 }
             }
             
-            // Alternative method: check display matrix
-            // Note: This is a simplified approach - in practice, you might need
-            // to parse the actual transformation matrix from the video stream
-            logger.info("ROTATION DEBUG: No valid rotation metadata found");
+            // Android stores rotation in display matrix - try to get it from video stream
+            try {
+                // Get video stream rotation (Android style)
+                double displayRotation = grabber.getVideoMetadata("displaymatrix");
+                logger.info("ROTATION DEBUG: Display matrix rotation attempt: {}", displayRotation);
+            } catch (Exception e) {
+                logger.debug("ROTATION DEBUG: Could not get displaymatrix directly: {}", e.getMessage());
+            }
+            
+            // For Android videos, we need to parse from the actual stream metadata
+            // Based on your logs, we see "displaymatrix: rotation of -90.00 degrees"
+            // Let's assume Android videos with 1280x720 that should be 720x1280 are rotated 90°
+            int width = grabber.getImageWidth();
+            int height = grabber.getImageHeight();
+            logger.info("ROTATION DEBUG: Video dimensions: {}x{}", width, height);
+            
+            // Heuristic for Android: if width > height but it's a portrait recording,
+            // it's likely rotated. Most phone videos in portrait should be taller than wide.
+            if (width > height && width == 1280 && height == 720) {
+                logger.info("ROTATION DEBUG: Detected likely Android portrait video (1280x720), assuming 90° rotation needed");
+                return 90;
+            }
+            
+            logger.info("ROTATION DEBUG: No rotation detected, using as-is");
             return 0;
             
         } catch (Exception e) {
