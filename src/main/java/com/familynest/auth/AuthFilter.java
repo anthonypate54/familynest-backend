@@ -152,8 +152,10 @@ public class AuthFilter extends OncePerRequestFilter {
                 return;
             }
         } else {
-            // TEMPORARY: Allow legacy tokens while we debug session ID issue
-            logger.warn("⚠️ LEGACY_TOKEN: No session ID found in token for user {} - allowing for now", userId);
+            // No session ID in token - reject immediately
+            logger.error("🚫 NO_SESSION_ID: Token missing session ID for user {} - forcing re-login", userId);
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session invalid - please log in again");
+            return;
         }
 
         // Set user attributes for the request
