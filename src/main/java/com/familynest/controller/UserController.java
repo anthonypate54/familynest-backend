@@ -429,6 +429,20 @@ public class UserController {
             // Password is verified - generate token pair and return login data
             logger.debug("Login successful for username: {}", username);
             
+            // SINGLE DEVICE ENFORCEMENT: Clear all existing sessions and FCM tokens
+            // This ensures only one device can be logged in at a time
+            logger.info("🚪 SINGLE_DEVICE: Enforcing single device login for user {}", userId);
+            
+            // Invalidate all existing refresh tokens (logs out other devices)
+            refreshTokenService.deleteAllTokensForUser(userId);
+            
+            // Clear FCM token to force re-registration on this device
+            String clearTokenSql = "UPDATE app_user SET fcm_token = NULL WHERE id = ?";
+            int clearedTokens = jdbcTemplate.update(clearTokenSql, userId);
+            if (clearedTokens > 0) {
+                logger.info("🧹 SINGLE_DEVICE: Cleared FCM token for user {} - other devices will lose notifications", userId);
+            }
+            
             // Generate both access and refresh tokens
             TokenPair tokenPair = jwtUtil.generateTokenPair(userId, role);
             

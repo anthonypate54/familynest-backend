@@ -473,12 +473,19 @@ public class PushNotificationService {
             logger.error("🔥 FCM Token (first 20 chars): {}", fcmToken != null ? fcmToken.substring(0, Math.min(20, fcmToken.length())) + "..." : "null");
             logger.error("🔥 Full Stack Trace:", e);
             
+            // Handle invalid/stale tokens
             if (e.getMessagingErrorCode() == MessagingErrorCode.UNREGISTERED) {
-                logger.warn("FCM token is invalid, removing from database: {}", fcmToken);
+                logger.warn("🗑️ FCM token is unregistered, removing from database: {}", fcmToken);
                 String cleanupSql = "UPDATE app_user SET fcm_token = NULL WHERE fcm_token = ?";
-                jdbcTemplate.update(cleanupSql, fcmToken);
+                int rowsUpdated = jdbcTemplate.update(cleanupSql, fcmToken);
+                logger.info("🧹 Cleaned up {} user(s) with stale FCM token", rowsUpdated);
+            } else if (e.getHttpResponse() != null && e.getHttpResponse().getStatusCode() == 401) {
+                logger.warn("🗑️ FCM token unauthorized (401), likely stale. Removing from database: {}", fcmToken);
+                String cleanupSql = "UPDATE app_user SET fcm_token = NULL WHERE fcm_token = ?";
+                int rowsUpdated = jdbcTemplate.update(cleanupSql, fcmToken);
+                logger.info("🧹 Cleaned up {} user(s) with unauthorized FCM token", rowsUpdated);
             } else {
-                logger.error("Firebase error - not unregistered token issue");
+                logger.error("🔥 Firebase error - different issue (not token cleanup): {}", e.getMessagingErrorCode());
             }
         } catch (Exception e) {
             logger.error("Unexpected error sending push notification: {}", e.getMessage(), e);
