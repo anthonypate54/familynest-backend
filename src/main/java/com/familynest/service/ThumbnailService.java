@@ -104,7 +104,7 @@ public class ThumbnailService {
         
         // First, detect if the video has rotation metadata
         int videoRotation = getVideoRotation(videoPath);
-        logger.debug("ROTATION: Video has {}° rotation metadata", videoRotation);
+        logger.info("ROTATION DEBUG: Video has {}° rotation metadata", videoRotation);
         
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(videoPath)) {
             // Set the format explicitly to help FFmpeg recognize the file
@@ -154,8 +154,12 @@ public class ThumbnailService {
                 // Apply manual rotation if video has rotation metadata and autorotate may have failed
                 // This serves as a fallback for Android videos where autorotate doesn't work properly
                 if (videoRotation != 0) {
-                    logger.debug("ROTATION: Video has {}° rotation, applying manual rotation as fallback", videoRotation);
+                    logger.info("ROTATION DEBUG: Video has {}° rotation, applying manual rotation as fallback", videoRotation);
+                    logger.info("ROTATION DEBUG: Original image size: {}x{}", bufferedImage.getWidth(), bufferedImage.getHeight());
                     bufferedImage = applyManualRotation(bufferedImage, videoRotation);
+                    logger.info("ROTATION DEBUG: Rotated image size: {}x{}", bufferedImage.getWidth(), bufferedImage.getHeight());
+                } else {
+                    logger.info("ROTATION DEBUG: No rotation metadata found, using autorotate result as-is");
                 }
                 
                 // Save the thumbnail
@@ -282,20 +286,24 @@ public class ThumbnailService {
             
             // Try to get rotation from metadata
             String rotationStr = grabber.getVideoMetadata("rotate");
+            logger.info("ROTATION DEBUG: Raw rotation metadata: '{}'", rotationStr);
+            
             if (rotationStr != null && !rotationStr.isEmpty()) {
                 try {
                     int rotation = Integer.parseInt(rotationStr);
-                    logger.debug("ROTATION: Found rotation metadata: {}°", rotation);
-                    return normalizeRotation(rotation);
+                    logger.info("ROTATION DEBUG: Parsed rotation: {}°", rotation);
+                    int normalized = normalizeRotation(rotation);
+                    logger.info("ROTATION DEBUG: Normalized rotation: {}°", normalized);
+                    return normalized;
                 } catch (NumberFormatException e) {
-                    logger.debug("ROTATION: Invalid rotation metadata: {}", rotationStr);
+                    logger.warn("ROTATION DEBUG: Invalid rotation metadata: {}", rotationStr);
                 }
             }
             
             // Alternative method: check display matrix
             // Note: This is a simplified approach - in practice, you might need
             // to parse the actual transformation matrix from the video stream
-            logger.debug("ROTATION: No rotation metadata found");
+            logger.info("ROTATION DEBUG: No valid rotation metadata found");
             return 0;
             
         } catch (Exception e) {
