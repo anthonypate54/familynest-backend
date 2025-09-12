@@ -52,8 +52,8 @@ public class JwtUtil {
     
     // Generate access token with session ID (for single device enforcement)
     public String generateAccessToken(Long userId, String role, String sessionId) {
-        logger.debug("Generating access token with session ID for userId: {}", userId);
-        return Jwts.builder()
+        logger.error("🔧 GENERATING ACCESS TOKEN: userId={}, role={}, sessionId={}", userId, role, sessionId);
+        String token = Jwts.builder()
             .setSubject(userId.toString())
             .claim("role", role)
             .claim("type", "access")
@@ -61,6 +61,8 @@ public class JwtUtil {
             .setExpiration(new Date(System.currentTimeMillis() + accessTokenExpiration))
             .signWith(key)
             .compact();
+        logger.error("🔧 GENERATED TOKEN: {}", token.substring(0, Math.min(100, token.length())) + "...");
+        return token;
     }
     
     // Generate refresh token (long-lived)
