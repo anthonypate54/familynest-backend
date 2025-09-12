@@ -465,12 +465,20 @@ public class PushNotificationService {
             logger.debug("Successfully sent push notification: {}", response);
             
         } catch (FirebaseMessagingException e) {
+            // Add detailed Firebase error logging
+            logger.error("🔥 FIREBASE ERROR DETAILS:");
+            logger.error("🔥 Error Code: {}", e.getMessagingErrorCode());
+            logger.error("🔥 Error Message: {}", e.getMessage());
+            logger.error("🔥 HTTP Response Code: {}", e.getHttpResponse() != null ? e.getHttpResponse().getStatusCode() : "unknown");
+            logger.error("🔥 FCM Token (first 20 chars): {}", fcmToken != null ? fcmToken.substring(0, Math.min(20, fcmToken.length())) + "..." : "null");
+            logger.error("🔥 Full Stack Trace:", e);
+            
             if (e.getMessagingErrorCode() == MessagingErrorCode.UNREGISTERED) {
                 logger.warn("FCM token is invalid, removing from database: {}", fcmToken);
                 String cleanupSql = "UPDATE app_user SET fcm_token = NULL WHERE fcm_token = ?";
                 jdbcTemplate.update(cleanupSql, fcmToken);
             } else {
-                logger.error("Error sending push notification: {}", e.getMessage(), e);
+                logger.error("Firebase error - not unregistered token issue");
             }
         } catch (Exception e) {
             logger.error("Unexpected error sending push notification: {}", e.getMessage(), e);
