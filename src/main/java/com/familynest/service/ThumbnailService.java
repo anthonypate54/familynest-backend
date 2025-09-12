@@ -310,20 +310,29 @@ public class ThumbnailService {
                 logger.debug("ROTATION DEBUG: Could not get displaymatrix directly: {}", e.getMessage());
             }
             
-            // Check if this is an Android video by looking for Android-specific metadata
+            // Check multiple Android indicators
             String androidVersion = grabber.getVideoMetadata("com.android.version");
-            logger.info("ROTATION DEBUG: Android version metadata: '{}'", androidVersion);
+            String majorBrand = grabber.getVideoMetadata("major_brand");
+            String compatibleBrands = grabber.getVideoMetadata("compatible_brands");
             
-            // For Android videos, we need to parse from the actual stream metadata
-            // Based on your logs, we see "displaymatrix: rotation of -90.00 degrees"
+            logger.info("ROTATION DEBUG: Android version: '{}', major_brand: '{}', compatible_brands: '{}'", 
+                       androidVersion, majorBrand, compatibleBrands);
+            
+            // Get video dimensions
             int width = grabber.getImageWidth();
             int height = grabber.getImageHeight();
             logger.info("ROTATION DEBUG: Video dimensions: {}x{}", width, height);
             
-            // Only apply heuristic if we detect Android metadata AND suspicious dimensions
-            if (androidVersion != null && !androidVersion.isEmpty() && 
-                width > height && width == 1280 && height == 720) {
-                logger.info("ROTATION DEBUG: Detected Android portrait video (1280x720) with Android metadata, assuming 90° rotation needed");
+            // Android detection: check for Android version OR Android-style brands
+            boolean isAndroid = (androidVersion != null && !androidVersion.isEmpty()) ||
+                               (majorBrand != null && majorBrand.equals("mp42")) ||
+                               (compatibleBrands != null && compatibleBrands.contains("isom"));
+            
+            logger.info("ROTATION DEBUG: Is Android video: {}", isAndroid);
+            
+            // Apply rotation for Android videos with landscape dimensions (likely portrait recordings)
+            if (isAndroid && width > height && width >= 1280 && height >= 720) {
+                logger.info("ROTATION DEBUG: Android video {}x{} detected - applying 90° rotation for portrait", width, height);
                 return 90;
             }
             
