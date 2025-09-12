@@ -336,6 +336,13 @@ public class ThumbnailService {
                 return 90;
             }
             
+            // Fallback: ANY video that is 1280x720 (common Android portrait recording size)
+            // This is more aggressive but should catch Android videos we're missing
+            if (width == 1280 && height == 720) {
+                logger.info("ROTATION DEBUG: 1280x720 video detected (likely Android portrait) - applying 90° rotation");
+                return 90;
+            }
+            
             logger.info("ROTATION DEBUG: No rotation detected, using as-is");
             return 0;
             
