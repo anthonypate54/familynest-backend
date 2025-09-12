@@ -94,7 +94,9 @@ public class JwtUtil {
     // Generate both access and refresh tokens with session ID
     public TokenPair generateTokenPair(Long userId, String role, String sessionId) {
         logger.error("✅ CORRECT METHOD: Called 3-parameter generateTokenPair WITH SESSION ID {} for userId: {}", sessionId, userId);
+        logger.error("🔧 ABOUT TO CALL: generateAccessToken with 3 parameters - userId={}, role={}, sessionId={}", userId, role, sessionId);
         String accessToken = generateAccessToken(userId, role, sessionId);
+        logger.error("🔧 RETURNED TOKEN: {}", accessToken.substring(0, Math.min(50, accessToken.length())) + "...");
         String refreshToken = generateRefreshToken(userId);
         
         return new TokenPair(
