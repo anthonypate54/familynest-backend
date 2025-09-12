@@ -3,25 +3,20 @@ package com.familynest.service;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.Java2DFrameConverter;
-import org.bytedeco.ffmpeg.avformat.*;
-import org.bytedeco.ffmpeg.avcodec.*;
-import org.bytedeco.ffmpeg.avutil.*;
-import static org.bytedeco.ffmpeg.global.avutil.*;
-import static org.bytedeco.ffmpeg.global.avformat.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import com.familynest.service.storage.StorageService;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.awt.geom.AffineTransform;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -35,10 +30,6 @@ public class ThumbnailService {
     private static final Logger logger = LoggerFactory.getLogger(ThumbnailService.class);
     
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final int THUMBNAIL_TIMEOUT_SECONDS = 10;
-    
-    @Autowired
-    private StorageService storageService;
        
     @Value("${app.use.ffmpeg:true}")
     private boolean useFFmpeg;
@@ -95,7 +86,6 @@ public class ThumbnailService {
      * Internal method to generate thumbnail without timeout handling
      */
     private String generateThumbnailInternal(String videoPath, String thumbnailFilename) {
-        long startTime = System.currentTimeMillis();
         logger.info("⏱️ TIMING: Starting thumbnail generation for: {}", thumbnailFilename);
         
         if (!useFFmpeg) {
@@ -112,6 +102,10 @@ public class ThumbnailService {
         
         Path thumbnailPath = Paths.get(thumbnailDir, thumbnailFilename);
         
+        // First, detect if the video has rotation metadata
+        int videoRotation = getVideoRotation(videoPath);
+        logger.debug("ROTATION: Video has {}° rotation metadata", videoRotation);
+        
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(videoPath)) {
             // Set the format explicitly to help FFmpeg recognize the file
             if (videoPath.toLowerCase().endsWith(".mp4")) {
@@ -122,7 +116,7 @@ public class ThumbnailService {
                 grabber.setFormat("mov");
             }
             
-            // Enable auto-rotation based on video metadata
+            // Enable auto-rotation based on video metadata (keep for iOS compatibility)
             grabber.setOption("autorotate", "1");
             
             try {
@@ -134,7 +128,6 @@ public class ThumbnailService {
                 grabber.setVideoTimestamp(seekTime * 1000000);
                 
                 // Grab a frame for the thumbnail
-                long frameStartTime = System.currentTimeMillis();
                 Frame frame = grabber.grabImage();
                 if (frame == null) {
                     // If seeking failed, try grabbing the first frame
@@ -146,21 +139,24 @@ public class ThumbnailService {
                         return "/uploads/thumbnails/default_thumbnail.jpg";
                     }
                 }
-                long frameEndTime = System.currentTimeMillis();
                  
                 // Convert frame to BufferedImage
-                long convertStartTime = System.currentTimeMillis();
-                Java2DFrameConverter converter = new Java2DFrameConverter();
-                BufferedImage bufferedImage = converter.convert(frame);
-                long convertEndTime = System.currentTimeMillis();
-                logger.info("⏱️ TIMING: frame conversion took {}ms", convertEndTime - convertStartTime);
+                BufferedImage bufferedImage;
+                try (Java2DFrameConverter converter = new Java2DFrameConverter()) {
+                    bufferedImage = converter.convert(frame);
+                }
                 
                 if (bufferedImage == null) {
                     logger.error("FFMPEG: Failed to convert frame to BufferedImage");
                     return "/uploads/thumbnails/default_thumbnail.jpg";
                 }
                 
-                // FFmpeg autorotate=1 handles orientation automatically, no manual rotation needed
+                // Apply manual rotation if video has rotation metadata and autorotate may have failed
+                // This serves as a fallback for Android videos where autorotate doesn't work properly
+                if (videoRotation != 0) {
+                    logger.debug("ROTATION: Video has {}° rotation, applying manual rotation as fallback", videoRotation);
+                    bufferedImage = applyManualRotation(bufferedImage, videoRotation);
+                }
                 
                 // Save the thumbnail
                 try {
@@ -177,7 +173,6 @@ public class ThumbnailService {
                         return "/uploads/thumbnails/default_thumbnail.jpg";
                     }
                     
-                    long totalTime = System.currentTimeMillis() - startTime;
                  } catch (Exception e) {
                     logger.error("FFMPEG: Failed to save thumbnail: {}", e.getMessage());
                     return "/uploads/thumbnails/default_thumbnail.jpg";
@@ -274,6 +269,108 @@ public class ThumbnailService {
         
         // Return standard URL path
         return "/uploads/thumbnails/" + thumbnailFilename;
+    }
+    
+    /**
+     * Extract rotation metadata from video file
+     * @param videoPath Path to the video file
+     * @return Rotation in degrees (0, 90, 180, 270) or 0 if no rotation metadata
+     */
+    private int getVideoRotation(String videoPath) {
+        try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(videoPath)) {
+            grabber.start();
+            
+            // Try to get rotation from metadata
+            String rotationStr = grabber.getVideoMetadata("rotate");
+            if (rotationStr != null && !rotationStr.isEmpty()) {
+                try {
+                    int rotation = Integer.parseInt(rotationStr);
+                    logger.debug("ROTATION: Found rotation metadata: {}°", rotation);
+                    return normalizeRotation(rotation);
+                } catch (NumberFormatException e) {
+                    logger.debug("ROTATION: Invalid rotation metadata: {}", rotationStr);
+                }
+            }
+            
+            // Alternative method: check display matrix
+            // Note: This is a simplified approach - in practice, you might need
+            // to parse the actual transformation matrix from the video stream
+            logger.debug("ROTATION: No rotation metadata found");
+            return 0;
+            
+        } catch (Exception e) {
+            logger.warn("ROTATION: Could not read rotation metadata: {}", e.getMessage());
+            return 0;
+        }
+    }
+    
+    /**
+     * Normalize rotation to standard values (0, 90, 180, 270)
+     */
+    private int normalizeRotation(int rotation) {
+        // Handle negative rotations and normalize to 0-360 range
+        rotation = ((rotation % 360) + 360) % 360;
+        
+        // Round to nearest 90-degree increment
+        if (rotation >= 45 && rotation < 135) return 90;
+        if (rotation >= 135 && rotation < 225) return 180;
+        if (rotation >= 225 && rotation < 315) return 270;
+        return 0;
+    }
+    
+    /**
+     * Apply manual rotation to BufferedImage when autorotate fails
+     * @param original The original image
+     * @param rotationDegrees Rotation in degrees (90, 180, 270)
+     * @return Rotated image
+     */
+    private BufferedImage applyManualRotation(BufferedImage original, int rotationDegrees) {
+        if (rotationDegrees == 0) {
+            return original;
+        }
+        
+        logger.info("ROTATION: Applying manual rotation of {}° (autorotate fallback)", rotationDegrees);
+        
+        int width = original.getWidth();
+        int height = original.getHeight();
+        
+        // For 90° and 270° rotations, swap width and height
+        int newWidth = (rotationDegrees == 90 || rotationDegrees == 270) ? height : width;
+        int newHeight = (rotationDegrees == 90 || rotationDegrees == 270) ? width : height;
+        
+        BufferedImage rotated = new BufferedImage(newWidth, newHeight, original.getType());
+        Graphics2D g2d = rotated.createGraphics();
+        
+        // Set high quality rendering
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        
+        // Create rotation transform
+        AffineTransform transform = new AffineTransform();
+        
+        switch (rotationDegrees) {
+            case 90:
+                transform.translate(height, 0);
+                transform.rotate(Math.PI / 2);
+                break;
+            case 180:
+                transform.translate(width, height);
+                transform.rotate(Math.PI);
+                break;
+            case 270:
+                transform.translate(0, width);
+                transform.rotate(-Math.PI / 2);
+                break;
+        }
+        
+        g2d.setTransform(transform);
+        g2d.drawImage(original, 0, 0, null);
+        g2d.dispose();
+        
+        logger.debug("ROTATION: Manual rotation completed: {} -> {}x{}", 
+                     rotationDegrees, newWidth, newHeight);
+        
+        return rotated;
     }
     
     /**
