@@ -771,6 +771,8 @@ public class UserController {
             // Fetch the full message with all joins BEFORE committing (to avoid JDBC issues in afterCommit)
             Map<String, Object> messageDataForBroadcast = messageService.getMessageById(newMessageId);
             
+            // TODO: Fix transaction commit issue that prevents afterCommit() from firing
+            /* COMMENTED OUT - Transaction callback magic that doesn't work
             // Schedule WebSocket broadcast and notifications to happen AFTER transaction commits
             final Long finalMessageId = newMessageId;
             final List<Long> finalTargetFamilyIds = new ArrayList<>(targetFamilyIds);
@@ -803,6 +805,27 @@ public class UserController {
                     }
                 }
             });
+            */
+            
+            // TEMPORARY: Direct notification calls to test Firebase (no callback magic)
+            logger.error("🔥 TESTING: Calling notifications DIRECTLY (no callback magic)");
+            
+            try {
+                String senderName = (String) userData.get("username");
+                
+                // Send to all target families immediately
+                for (Long targetFamilyId : targetFamilyIds) {
+                    logger.error("🔥 TESTING: Broadcasting WebSocket to family: {}", targetFamilyId);
+                    webSocketBroadcastService.broadcastNewMessage(messageDataForBroadcast, targetFamilyId);
+                    
+                    // Send push notifications immediately
+                    logger.error("🔥 TESTING: Sending push notification to family: {}", targetFamilyId);
+                    pushNotificationService.sendFamilyMessageNotification(newMessageId, targetFamilyId, senderName, content);
+                    logger.error("🔥 TESTING: Push notification call completed for family: {}", targetFamilyId);
+                }
+            } catch (Exception e) {
+                logger.error("🔥 TESTING: Error in direct notification calls: {}", e.getMessage(), e);
+            }
     
             // Return the message data (reuse the already-fetched data)
             logger.debug("🔍 Returning pre-fetched message data for messageId: {}", newMessageId);
