@@ -50,6 +50,19 @@ public class JwtUtil {
             .compact();
     }
     
+    // Generate access token with session ID (for single device enforcement)
+    public String generateAccessToken(Long userId, String role, String sessionId) {
+        logger.debug("Generating access token with session ID for userId: {}", userId);
+        return Jwts.builder()
+            .setSubject(userId.toString())
+            .claim("role", role)
+            .claim("type", "access")
+            .claim("sessionId", sessionId)
+            .setExpiration(new Date(System.currentTimeMillis() + accessTokenExpiration))
+            .signWith(key)
+            .compact();
+    }
+    
     // Generate refresh token (long-lived)
     public String generateRefreshToken(Long userId) {
         logger.debug("Generating refresh token for userId: {}", userId);
@@ -66,6 +79,20 @@ public class JwtUtil {
     public TokenPair generateTokenPair(Long userId, String role) {
         logger.debug("Generating token pair for userId: {}", userId);
         String accessToken = generateAccessToken(userId, role);
+        String refreshToken = generateRefreshToken(userId);
+        
+        return new TokenPair(
+            accessToken, 
+            refreshToken, 
+            accessTokenExpiration / 1000, // Convert to seconds
+            refreshTokenExpiration / 1000  // Convert to seconds
+        );
+    }
+    
+    // Generate both access and refresh tokens with session ID
+    public TokenPair generateTokenPair(Long userId, String role, String sessionId) {
+        logger.debug("Generating token pair with session ID for userId: {}", userId);
+        String accessToken = generateAccessToken(userId, role, sessionId);
         String refreshToken = generateRefreshToken(userId);
         
         return new TokenPair(
@@ -127,6 +154,21 @@ public class JwtUtil {
                 .get("role", String.class);
         } catch (Exception e) {
             logger.debug("Failed to extract role from token: {}", e.getMessage());
+            return null;
+        }
+    }
+    
+    public String getSessionId(String token) {
+        logger.debug("Extracting session ID from token: {}", token);
+        try {
+            return Jwts.parserBuilder()
+                .setSigningKey(key)
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .get("sessionId", String.class);
+        } catch (Exception e) {
+            logger.debug("Failed to extract session ID from token: {}", e.getMessage());
             return null;
         }
     }

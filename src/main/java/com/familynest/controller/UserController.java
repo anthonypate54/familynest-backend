@@ -57,6 +57,7 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -433,6 +434,10 @@ public class UserController {
             // This ensures only one device can be logged in at a time
             logger.info("🚪 SINGLE_DEVICE: Enforcing single device login for user {}", userId);
             
+            // Generate unique session ID for this login
+            String sessionId = UUID.randomUUID().toString();
+            logger.info("🔑 SINGLE_DEVICE: Generated session ID {} for user {}", sessionId, userId);
+            
             // Invalidate all existing refresh tokens (logs out other devices)
             refreshTokenService.revokeAllUserTokens(userId);
             
@@ -443,8 +448,13 @@ public class UserController {
                 logger.info("🧹 SINGLE_DEVICE: Cleared FCM token for user {} - other devices will lose notifications", userId);
             }
             
-            // Generate both access and refresh tokens
-            TokenPair tokenPair = jwtUtil.generateTokenPair(userId, role);
+            // Store session ID in database for validation
+            String updateSessionSql = "UPDATE app_user SET current_session_id = ? WHERE id = ?";
+            jdbcTemplate.update(updateSessionSql, sessionId, userId);
+            logger.info("💾 SINGLE_DEVICE: Stored session ID for user {} - other sessions are now invalid", userId);
+            
+            // Generate both access and refresh tokens with session ID
+            TokenPair tokenPair = jwtUtil.generateTokenPair(userId, role, sessionId);
             
             // Store refresh token in database
             refreshTokenService.createRefreshToken(userId, tokenPair.getRefreshToken());

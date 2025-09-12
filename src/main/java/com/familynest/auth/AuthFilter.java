@@ -1,6 +1,7 @@
 package com.familynest.auth;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import jakarta.servlet.FilterChain;
@@ -20,6 +21,12 @@ public class AuthFilter extends OncePerRequestFilter {
 
     @Autowired
     private AuthUtil authUtil;
+    
+    @Autowired
+    private JwtUtil jwtUtil;
+    
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
@@ -113,20 +120,46 @@ public class AuthFilter extends OncePerRequestFilter {
         String token = authHeader.substring(7);
         logger.debug("🔑 Token: {}", token);
         
-        if (!authUtil.validateToken(token)) {
+        // Validate JWT token format and signature
+        if (!jwtUtil.validateToken(token)) {
             logger.error("❌ Token validation failed for token: {}", token);
             response.sendError(HttpServletResponse.SC_FORBIDDEN, "Invalid token");
             return;
         }
 
-        Long userId = authUtil.extractUserId(token);
-        String role = authUtil.getUserRole(token);
-        logger.debug("✅ Token valid! Extracted userId: {}, role: {}", userId, role);
+        // Extract user info from token
+        Long userId = jwtUtil.extractUserId(token);
+        String role = jwtUtil.getUserRole(token);
+        String tokenSessionId = jwtUtil.getSessionId(token);
+        logger.debug("✅ Token valid! Extracted userId: {}, role: {}, sessionId: {}", userId, role, tokenSessionId);
+
+        // SINGLE DEVICE ENFORCEMENT: Validate session ID
+        if (tokenSessionId != null) {
+            try {
+                String currentSessionSql = "SELECT current_session_id FROM app_user WHERE id = ?";
+                String dbSessionId = jdbcTemplate.queryForObject(currentSessionSql, String.class, userId);
+                
+                if (!tokenSessionId.equals(dbSessionId)) {
+                    logger.warn("🚫 SESSION_INVALID: Token session {} doesn't match DB session {} for user {}", 
+                               tokenSessionId, dbSessionId, userId);
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session invalid - please log in again");
+                    return;
+                }
+                logger.debug("✅ SESSION_VALID: Session ID matches for user {}", userId);
+            } catch (Exception e) {
+                logger.error("❌ SESSION_CHECK_ERROR: Failed to validate session for user {}: {}", userId, e.getMessage());
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session validation failed");
+                return;
+            }
+        } else {
+            // Legacy token without session ID - allow for backward compatibility but log it
+            logger.warn("⚠️ LEGACY_TOKEN: No session ID found in token for user {} - consider forcing re-login", userId);
+        }
 
         // Set user attributes for the request
         request.setAttribute("userId", userId);
         request.setAttribute("role", role);
-        logger.debug("Valid token for userId: {}, role: {}, proceeding to controller", userId, role);
+        logger.debug("Valid token and session for userId: {}, role: {}, proceeding to controller", userId, role);
 
         chain.doFilter(request, response);
     }
