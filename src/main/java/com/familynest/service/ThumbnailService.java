@@ -301,23 +301,29 @@ public class ThumbnailService {
             // Android stores rotation in display matrix - try to get it from video stream
             try {
                 // Get video stream rotation (Android style)
-                double displayRotation = grabber.getVideoMetadata("displaymatrix");
-                logger.info("ROTATION DEBUG: Display matrix rotation attempt: {}", displayRotation);
+                String displayRotation = grabber.getVideoMetadata("displaymatrix");
+                logger.info("ROTATION DEBUG: Display matrix rotation attempt: '{}'", displayRotation);
+                if (displayRotation != null && !displayRotation.isEmpty()) {
+                    logger.info("ROTATION DEBUG: Found display matrix data: {}", displayRotation);
+                }
             } catch (Exception e) {
                 logger.debug("ROTATION DEBUG: Could not get displaymatrix directly: {}", e.getMessage());
             }
             
+            // Check if this is an Android video by looking for Android-specific metadata
+            String androidVersion = grabber.getVideoMetadata("com.android.version");
+            logger.info("ROTATION DEBUG: Android version metadata: '{}'", androidVersion);
+            
             // For Android videos, we need to parse from the actual stream metadata
             // Based on your logs, we see "displaymatrix: rotation of -90.00 degrees"
-            // Let's assume Android videos with 1280x720 that should be 720x1280 are rotated 90°
             int width = grabber.getImageWidth();
             int height = grabber.getImageHeight();
             logger.info("ROTATION DEBUG: Video dimensions: {}x{}", width, height);
             
-            // Heuristic for Android: if width > height but it's a portrait recording,
-            // it's likely rotated. Most phone videos in portrait should be taller than wide.
-            if (width > height && width == 1280 && height == 720) {
-                logger.info("ROTATION DEBUG: Detected likely Android portrait video (1280x720), assuming 90° rotation needed");
+            // Only apply heuristic if we detect Android metadata AND suspicious dimensions
+            if (androidVersion != null && !androidVersion.isEmpty() && 
+                width > height && width == 1280 && height == 720) {
+                logger.info("ROTATION DEBUG: Detected Android portrait video (1280x720) with Android metadata, assuming 90° rotation needed");
                 return 90;
             }
             
