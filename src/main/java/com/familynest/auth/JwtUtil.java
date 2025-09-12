@@ -161,14 +161,16 @@ public class JwtUtil {
     public String getSessionId(String token) {
         logger.debug("Extracting session ID from token: {}", token);
         try {
-            return Jwts.parserBuilder()
+            String sessionId = Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
                 .parseClaimsJws(token)
                 .getBody()
                 .get("sessionId", String.class);
+            logger.debug("Extracted session ID: {}", sessionId);
+            return sessionId;
         } catch (Exception e) {
-            logger.debug("Failed to extract session ID from token: {}", e.getMessage());
+            logger.error("Failed to extract session ID from token: {}", e.getMessage(), e);
             return null;
         }
     }
