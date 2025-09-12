@@ -434,7 +434,7 @@ public class UserController {
             logger.info("🚪 SINGLE_DEVICE: Enforcing single device login for user {}", userId);
             
             // Invalidate all existing refresh tokens (logs out other devices)
-            refreshTokenService.deleteAllTokensForUser(userId);
+            refreshTokenService.revokeAllUserTokens(userId);
             
             // Clear FCM token to force re-registration on this device
             String clearTokenSql = "UPDATE app_user SET fcm_token = NULL WHERE id = ?";
