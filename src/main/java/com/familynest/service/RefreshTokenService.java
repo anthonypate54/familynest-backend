@@ -9,6 +9,7 @@ import com.familynest.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,9 @@ public class RefreshTokenService {
     
     @Autowired
     private JwtUtil jwtUtil;
+    
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     
     /**
      * Create and store a new refresh token for a user
@@ -99,8 +103,25 @@ public class RefreshTokenService {
         
         User user = userOpt.get();
         
-        // Generate new token pair
-        TokenPair newTokenPair = jwtUtil.generateTokenPair(userId, user.getRole());
+        // Get current session ID from database for session enforcement
+        String sessionId = null;
+        try {
+            String sessionSql = "SELECT current_session_id FROM app_user WHERE id = ?";
+            sessionId = jdbcTemplate.queryForObject(sessionSql, String.class, userId);
+            logger.debug("🔄 REFRESH: Retrieved session ID {} for user {}", sessionId, userId);
+        } catch (Exception e) {
+            logger.warn("🔄 REFRESH: Could not retrieve session ID for user {}: {}", userId, e.getMessage());
+        }
+        
+        // Generate new token pair with session ID if available
+        TokenPair newTokenPair;
+        if (sessionId != null) {
+            logger.debug("🔄 REFRESH: Generating tokens WITH session ID for user {}", userId);
+            newTokenPair = jwtUtil.generateTokenPair(userId, user.getRole(), sessionId);
+        } else {
+            logger.warn("🔄 REFRESH: No session ID found, generating tokens WITHOUT session ID for user {}", userId);
+            newTokenPair = jwtUtil.generateTokenPair(userId, user.getRole());
+        }
         
         // Revoke old refresh token and create new one (token rotation)
         refreshToken.revoke();
