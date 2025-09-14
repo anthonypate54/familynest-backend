@@ -40,11 +40,6 @@ public class AuthFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
 }
-        // DEBUG: Special logging for /error path to diagnose whitelist issue
-        if (path.contains("/error") || path.equals("/")) {
-            logger.error("🔍 DEBUG: Path detected: '{}' (root: {}, error: {})", path, path.equals("/"), path.equals("/error"));
-        }
-        
         // PUBLIC ENDPOINTS - explicitly without auth
         // These are high-priority bypass paths that should never require auth
         if (path.equals("/api/users/connection-test") || 
