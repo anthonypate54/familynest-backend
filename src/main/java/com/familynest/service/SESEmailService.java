@@ -27,6 +27,9 @@ public class SESEmailService {
     @Value("${aws.ses.from-email:noreply@infamilynest.com}")
     private String fromEmail;
     
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
+    
     private SesClient sesClient;
     
     /**
@@ -186,7 +189,7 @@ public class SESEmailService {
             .append("<p>Hello,</p>")
             .append("<p>You have requested to reset your password for your FamilyNest account.</p>")
             .append("<p>Please click the following link to reset your password:</p>")
-            .append("<p><a href='http://localhost:8080/reset-password?token=").append(resetToken).append("' class='button'>Reset Password</a></p>")
+            .append("<p><a href='").append(baseUrl).append("/reset-password?token=").append(resetToken).append("' class='button'>Reset Password</a></p>")
             .append("<p>This link will expire in 24 hours.</p>")
             .append("<p>If you did not request this password reset, please ignore this email.</p>")
             .append("<p>Best regards,<br>The FamilyNest Team</p>")

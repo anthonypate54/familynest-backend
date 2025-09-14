@@ -34,6 +34,9 @@ public class EmailService {
     @Value("${spring.mail.password:NOT_SET}")
     private String mailPassword;
     
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
+    
     public void sendFamilyInvitationEmail(String inviteeEmail, String familyName, String inviterName, String invitationToken) {
         try {
             logger.info("Sending family invitation email to: {}", inviteeEmail);
@@ -50,7 +53,7 @@ public class EmailService {
                 "• Send private messages to family\n" +
                 "• Stay connected with your loved ones\n\n" +
                 "Click the link below to accept this invitation:\n" +
-                "http://localhost:8080/accept-invitation?token=" + invitationToken + "\n\n" +
+                baseUrl + "/accept-invitation?token=" + invitationToken + "\n\n" +
                 "If you already have a FamilyNest account, you can also enter this invitation code in the app: " + invitationToken + "\n\n" +
                 "This invitation will expire in 7 days.\n\n" +
                 "Welcome to the family!\n\n" +
@@ -81,7 +84,7 @@ public class EmailService {
                 "Hello,\n\n" +
                 "You have requested to reset your password for your FamilyNest account.\n\n" +
                 "Please click the following link to reset your password:\n" +
-                "http://localhost:8080/reset-password?token=" + resetToken + "\n\n" +
+                baseUrl + "/reset-password?token=" + resetToken + "\n\n" +
                 "This link will expire in 24 hours.\n\n" +
                 "If you did not request this password reset, please ignore this email.\n\n" +
                 "Best regards,\n" +
