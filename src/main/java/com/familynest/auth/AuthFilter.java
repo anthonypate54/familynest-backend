@@ -56,6 +56,7 @@ public class AuthFilter extends OncePerRequestFilter {
             path.equals("/api/auth/refresh") ||  // Token refresh endpoint
             path.equals("/reset-password") ||
             path.equals("/reset-password.html") ||
+            path.equals("/") ||  // Allow root path access (bots hitting domain)
             path.equals("/error") ||  // Allow error page access
             path.startsWith("/api/users/password-reset") ||
             path.startsWith("/api/videos/public") ||
