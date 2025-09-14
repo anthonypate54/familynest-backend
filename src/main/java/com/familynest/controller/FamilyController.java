@@ -66,6 +66,7 @@ public class FamilyController {
      * POST /api/families
      */
     @PostMapping("")
+    @Transactional
     public ResponseEntity<Map<String, Object>> createFamily(
             @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, String> familyData) {
@@ -181,6 +182,7 @@ public class FamilyController {
      * PUT /api/families/{familyId}
      */
     @PutMapping("/{familyId}")
+    @Transactional
     public ResponseEntity<Map<String, Object>> updateFamily(
             @PathVariable Long familyId,
             @RequestHeader("Authorization") String authHeader,
