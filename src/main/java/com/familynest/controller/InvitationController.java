@@ -11,6 +11,7 @@ import com.familynest.repository.InvitationRepository;
 import com.familynest.auth.AuthUtil;
 import com.familynest.service.WebSocketBroadcastService;
 import com.familynest.service.PushNotificationService;
+import com.familynest.service.EmailProviderService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +57,9 @@ public class InvitationController {
 
     @Autowired
     private PushNotificationService pushNotificationService;
+
+    @Autowired
+    private EmailProviderService emailProviderService;
 
     /**
      * Get invitations for the current user
@@ -288,6 +292,19 @@ public class InvitationController {
     
             logger.debug("Invitation created successfully: ID={}, familyId={}, email={}, userExists={}", 
                 savedInvitation.getId(), familyId, inviteeEmail, userExists);
+
+            // Send invitation email
+            try {
+                Family family = familyRepository.findById(familyId).orElse(null);
+                String familyName = family != null ? family.getName() : "Unknown Family";
+                String inviterName = inviter.getFirstName() + " " + inviter.getLastName();
+                
+                emailProviderService.sendFamilyInvitationEmail(inviteeEmail, familyName, inviterName, savedInvitation.getId().toString());
+                logger.info("Invitation email sent successfully to: {}", inviteeEmail);
+            } catch (Exception e) {
+                logger.error("Failed to send invitation email to {}: {}", inviteeEmail, e.getMessage(), e);
+                // Don't fail the invitation creation if email fails
+            }
 
             // Broadcast new invitation to recipient via WebSocket (only if user exists)
             if (userExists) {
