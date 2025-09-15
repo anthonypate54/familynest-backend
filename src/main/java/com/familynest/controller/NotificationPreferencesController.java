@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -92,6 +93,7 @@ public class NotificationPreferencesController {
      * Update notification preferences for a user
      */
     @PostMapping("/{userId}")
+    @Transactional
     public ResponseEntity<Map<String, Object>> updateNotificationPreferences(
             @PathVariable Long userId,
             @RequestBody Map<String, Object> preferences,
@@ -180,6 +182,7 @@ public class NotificationPreferencesController {
      * Also sets device_permission_granted = TRUE since this is called when user accepts Firebase permissions
      */
     @PostMapping("/{userId}/enable-all")
+    @Transactional
     public ResponseEntity<Map<String, Object>> enableAllNotificationPreferences(
             @PathVariable Long userId,
             @RequestHeader(value = "Authorization", required = false) String authHeader,
@@ -233,6 +236,7 @@ public class NotificationPreferencesController {
      * Only sets device_permission_granted = TRUE, preserves existing push/email preferences
      */
     @PostMapping("/{userId}/sync-device-permission")
+    @Transactional
     public ResponseEntity<Map<String, Object>> syncDevicePermissionStatus(
             @PathVariable Long userId,
             @RequestHeader(value = "Authorization", required = false) String authHeader,

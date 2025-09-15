@@ -315,6 +315,7 @@ public class UserController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
     public ResponseEntity<Map<String, Object>> createUser(
         @RequestPart("userData") String userDataJson,
         @RequestPart(value = "photo", required = false) MultipartFile photo) {
@@ -518,6 +519,7 @@ public class UserController {
     }
 
     @PostMapping("/{id}/create-family")
+    @Transactional
     public ResponseEntity<Map<String, Object>> createFamily(
             @PathVariable Long id,
             @RequestHeader("Authorization") String authHeader,
@@ -600,6 +602,7 @@ public class UserController {
     }
     
     @PostMapping("/{id}/join-family/{familyId}")
+    @Transactional
     public ResponseEntity<Map<String, Object>> joinFamily(@PathVariable Long id, @PathVariable Long familyId) {
         logger.debug("Received request for user ID: {} to join family ID: {}", id, familyId);
         try {
@@ -679,8 +682,8 @@ public class UserController {
         }
     }
 
-    @Transactional
     @PostMapping(value = "/{userId}/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
     public ResponseEntity<Map<String, Object>> postMessage(
             @RequestParam("content") String content,
             @RequestParam(value = "media", required = false) MultipartFile media,
@@ -994,6 +997,7 @@ public class UserController {
     }
 
     @PostMapping("/{id}/messages/{messageId}/mark-read")
+    @Transactional
     public ResponseEntity<Map<String, Object>> markMessageAsRead(
             @PathVariable Long id,
             @PathVariable Long messageId,
@@ -1129,6 +1133,7 @@ public class UserController {
     }
 
     @PostMapping("/{id}/leave-family")
+    @Transactional
     public ResponseEntity<Void> leaveFamily(@PathVariable Long id) {
         logger.debug("Received request for user ID: {} to leave family", id);
         try {
@@ -1425,6 +1430,7 @@ public class UserController {
     }
 
     @PostMapping("/fix-family-memberships")
+    @Transactional
     public ResponseEntity<Map<String, Object>> fixFamilyMemberships() {
         logger.debug("Received request to fix family memberships");
         try {
@@ -1488,6 +1494,7 @@ public class UserController {
     }
 
     @PostMapping("/{id}/profile")
+    @Transactional
     public ResponseEntity<Map<String, Object>> updateUserProfile(
             @PathVariable Long id,
             @RequestBody Map<String, Object> profileData) {
@@ -1580,6 +1587,7 @@ public class UserController {
     }
 
     @PostMapping("/families/{familyId}/update")
+    @Transactional
     public ResponseEntity<Map<String, Object>> updateFamily(
             @PathVariable Long familyId,
             @RequestHeader("Authorization") String authHeader,
@@ -1751,6 +1759,27 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
             }
 
             logger.info("✅ FCM_REGISTER: Successfully updated FCM token for user {}, rows updated: {}", userId, rowsUpdated);
+            
+            // ONBOARDING FIX: Ensure notification matrix exists when FCM token is registered
+            String checkMatrixSql = "SELECT COUNT(*) FROM user_notification_matrix WHERE user_id = ? AND family_id = 0 AND member_id = 0";
+            int matrixCount = jdbcTemplate.queryForObject(checkMatrixSql, Integer.class, userId);
+            
+            if (matrixCount == 0) {
+                logger.info("🔔 FCM_REGISTER: Creating missing notification matrix for user {}", userId);
+                String createMatrixSql = """
+                    INSERT INTO user_notification_matrix (
+                        user_id, family_id, member_id, push_enabled, device_permission_granted,
+                        family_messages_push, dm_messages_push, invitations_push, 
+                        reactions_push, comments_push, new_member_push,
+                        family_messages_websocket, dm_messages_websocket, invitations_websocket,
+                        reactions_websocket, comments_websocket, new_member_websocket,
+                        created_at, updated_at
+                    ) VALUES (?, 0, 0, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW(), NOW())
+                """;
+                int matrixRows = jdbcTemplate.update(createMatrixSql, userId);
+                logger.info("🔔 FCM_REGISTER: Created notification matrix for user {}, rows: {}", userId, matrixRows);
+            }
+            
             return ResponseEntity.ok(Map.of(
                 "message", "FCM token registered successfully",
                 "userId", userId
@@ -1879,6 +1908,7 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
     }
 
     @PostMapping("/forgot-username")
+    @Transactional
     public ResponseEntity<Map<String, Object>> forgotUsername(@RequestBody Map<String, String> requestData) {
         logger.debug("Received request for username reminder");
         try {
