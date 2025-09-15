@@ -364,27 +364,33 @@ public class UserController {
                 logger.debug("Email is available: {}", userData.getEmail());
             }
 
-            // Create and save the new user
+            // Create the new user using raw JDBC (consistent with rest of codebase)
             logger.debug("Creating new user with username: {}, email: {}", userData.getUsername(), userData.getEmail());
-            User user = new User();
-            user.setUsername(userData.getUsername());
-            user.setEmail(userData.getEmail());
-            user.setPassword(authUtil.hashPassword(userData.getPassword()));
-            user.setFirstName(userData.getFirstName());
-            user.setLastName(userData.getLastName());
-            user.setRole(userData.getRole() != null ? userData.getRole() : "USER");
-            // Don't set familyId - it's managed through UserFamilyMembership
-            user = userRepository.save(user);
+            String insertUserSql = """
+                INSERT INTO app_user (username, email, password, first_name, last_name, role)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
+            """;
+            
+            Long userId = jdbcTemplate.queryForObject(insertUserSql, Long.class,
+                userData.getUsername(),
+                userData.getEmail(),
+                authUtil.hashPassword(userData.getPassword()),
+                userData.getFirstName(),
+                userData.getLastName(),
+                userData.getRole() != null ? userData.getRole() : "USER"
+            );
 
             if (photo != null && !photo.isEmpty()) {
                 // Use MediaService to handle photo upload properly
                 Map<String, String> mediaResult = mediaService.uploadMedia(photo, "photo");
-                user.setPhoto(mediaResult.get("mediaUrl"));
+                String updatePhotoSql = "UPDATE app_user SET photo = ? WHERE id = ?";
+                jdbcTemplate.update(updatePhotoSql, mediaResult.get("mediaUrl"), userId);
             }
 
-            logger.debug("User created successfully with ID: {}", user.getId());
+            logger.debug("User created successfully with ID: {}", userId);
             Map<String, Object> response = new HashMap<>();
-            response.put("userId", user.getId());
+            response.put("userId", userId);
             return ResponseEntity.status(201).body(response);
         } catch (Exception e) {
             logger.error("Error creating user: {}", e.getMessage(), e);
