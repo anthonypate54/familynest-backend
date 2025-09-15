@@ -52,9 +52,11 @@ public class EmailService {
                 "• Share photos and memories with family members\n" +
                 "• Send private messages to family\n" +
                 "• Stay connected with your loved ones\n\n" +
-                "Click the link below to accept this invitation:\n" +
-                baseUrl + "/accept-invitation?token=" + invitationToken + "\n\n" +
-                "If you already have a FamilyNest account, you can also enter this invitation code in the app: " + invitationToken + "\n\n" +
+                "To join this family:\n" +
+                "1. Download the FamilyNest app from your app store\n" +
+                "2. Sign up using this email address: " + inviteeEmail + "\n" +
+                "3. Your family invitation will appear automatically!\n\n" +
+                "Already have the app? Enter this invitation code: " + invitationToken + "\n\n" +
                 "This invitation will expire in 7 days.\n\n" +
                 "Welcome to the family!\n\n" +
                 "Best regards,\n" +
@@ -83,8 +85,10 @@ public class EmailService {
             message.setText(
                 "Hello,\n\n" +
                 "You have requested to reset your password for your FamilyNest account.\n\n" +
-                "Please click the following link to reset your password:\n" +
-                baseUrl + "/reset-password?token=" + resetToken + "\n\n" +
+                "To reset your password:\n" +
+                "1. Open the FamilyNest app\n" +
+                "2. Go to 'Forgot Password'\n" +
+                "3. Enter this reset code: " + resetToken + "\n\n" +
                 "This link will expire in 24 hours.\n\n" +
                 "If you did not request this password reset, please ignore this email.\n\n" +
                 "Best regards,\n" +
