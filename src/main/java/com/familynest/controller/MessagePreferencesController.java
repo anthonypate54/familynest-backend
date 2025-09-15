@@ -18,6 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -158,6 +159,7 @@ public class MessagePreferencesController {
      * Update message preferences for a user and family
      */
     @PostMapping("/{userId}/update")
+    @Transactional
     public ResponseEntity<Map<String, Object>> updateMessagePreferences(
             @PathVariable Long userId,
             @RequestHeader(value = "Authorization", required = false) String authHeader,
@@ -301,6 +303,7 @@ public class MessagePreferencesController {
      * Create message settings when a user joins a family
      */
     @PostMapping("/create-for-membership")
+    @Transactional
     public ResponseEntity<Map<String, Object>> createForMembership(
             @RequestBody Map<String, Object> membershipData) {
         

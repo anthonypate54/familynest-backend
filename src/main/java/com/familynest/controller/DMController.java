@@ -350,6 +350,7 @@ public class DMController {
      */
     @Transactional
     @PostMapping(value = "/{userId}/message", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
     public ResponseEntity<Map<String, Object>> postMessage(
             @PathVariable Long userId,
             @RequestParam("content") String content,

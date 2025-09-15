@@ -23,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.http.MediaType;
 import com.familynest.auth.AuthUtil; // Add this import
 
@@ -281,6 +282,7 @@ public class CommentController {
     }
     
     @PostMapping(value = "/comments/{commentId}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
     public ResponseEntity<Map<String, Object>> uploadCommentMedia(
         @PathVariable Long commentId,
         @RequestPart("media") MultipartFile media,
@@ -338,6 +340,7 @@ public class CommentController {
      */
     @Transactional
     @PostMapping(value = "/{parentMessageId}/comments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
     public ResponseEntity<Map<String, Object>> postComment(
         @PathVariable Long parentMessageId, 
         @RequestParam("content") String content,
@@ -533,6 +536,7 @@ public class CommentController {
  */
 @Transactional
 @PutMapping("/comments/{commentId}")
+@Transactional
 public ResponseEntity<Map<String, Object>> updateComment(
     @PathVariable Long commentId,
     @RequestHeader("Authorization") String authHeader,
@@ -600,6 +604,7 @@ public ResponseEntity<Map<String, Object>> updateComment(
      */
     @Transactional
     @DeleteMapping("/comments/{commentId}")
+    @Transactional
     public ResponseEntity<Map<String, Object>> deleteComment(
             @PathVariable Long commentId,
             @RequestHeader("Authorization") String authHeader,

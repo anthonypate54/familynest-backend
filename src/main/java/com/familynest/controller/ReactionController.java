@@ -66,6 +66,7 @@ public class ReactionController {
 
     @Transactional
     @PostMapping("/{messageId}/reactions")
+    @Transactional
     public ResponseEntity<Map<String, Object>> addReaction(
             @PathVariable Long messageId,
             @RequestHeader("Authorization") String authHeader,
@@ -161,6 +162,7 @@ public class ReactionController {
     }
 
     @DeleteMapping("/{messageId}/reactions/{reactionType}")
+    @Transactional
     public ResponseEntity<Map<String, Object>> removeReaction(
             @PathVariable Long messageId,
             @PathVariable String reactionType,
@@ -195,6 +197,7 @@ public class ReactionController {
 
     @Transactional
     @PostMapping("/{messageId}/message_like")
+    @Transactional
     public ResponseEntity<Map<String, Object>> toggleMessageLike(
             @PathVariable Long messageId,
             @RequestHeader("Authorization") String authHeader,
@@ -277,6 +280,7 @@ public class ReactionController {
 
     @Transactional
     @PostMapping("/{messageId}/message_love")
+    @Transactional
     public ResponseEntity<Map<String, Object>> toggleMessageLove(
             @PathVariable Long messageId,
             @RequestHeader("Authorization") String authHeader,
@@ -356,6 +360,7 @@ public class ReactionController {
 
     @Transactional
     @PostMapping("/{commentId}/comment_like")
+    @Transactional
     public ResponseEntity<Map<String, Object>> toggleCommentLike(
             @PathVariable Long commentId,
             @RequestHeader("Authorization") String authHeader,
@@ -454,6 +459,7 @@ public class ReactionController {
 
     @Transactional
     @PostMapping("/{commentId}/comment_love")
+    @Transactional
     public ResponseEntity<Map<String, Object>> toggleCommentLove(
             @PathVariable Long commentId,
             @RequestHeader("Authorization") String authHeader,

@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.HashMap;
@@ -54,6 +55,7 @@ public class VideoController {
      * Upload endpoint - saves the video and generates a thumbnail
      */
     @PostMapping("/upload")
+    @Transactional
     public ResponseEntity<Map<String, String>> uploadVideo(
             @RequestPart("file") MultipartFile file) {
         logger.error("VIDEO UPLOAD ENDPOINT ACCESSED: {}", file.getOriginalFilename());

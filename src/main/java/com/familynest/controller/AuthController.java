@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
 import java.util.Optional;
@@ -24,6 +25,7 @@ public class AuthController {
      * Refresh access token using a valid refresh token
      */
     @PostMapping("/refresh")
+    @Transactional
     public ResponseEntity<?> refreshToken(@RequestBody Map<String, String> request) {
         logger.debug("Received token refresh request");
         
@@ -64,6 +66,7 @@ public class AuthController {
      * Logout - revoke refresh tokens
      */
     @PostMapping("/logout")
+    @Transactional
     public ResponseEntity<?> logout(@RequestBody(required = false) Map<String, String> request,
                                    @RequestHeader(value = "Authorization", required = false) String authHeader) {
         logger.debug("Received logout request");
@@ -106,6 +109,7 @@ public class AuthController {
      * Revoke all refresh tokens for the current user (logout from all devices)
      */
     @PostMapping("/logout-all")
+    @Transactional
     public ResponseEntity<?> logoutAll(@RequestHeader("Authorization") String authHeader) {
         logger.debug("Received logout-all request");
         
