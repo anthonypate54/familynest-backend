@@ -348,7 +348,6 @@ public class DMController {
      * Send a DM message with media (adapted from UserController.postMessage)
      * POST /api/dm/{userId}/message
      */
-    @Transactional
     @PostMapping(value = "/{userId}/message", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Transactional
     public ResponseEntity<Map<String, Object>> postMessage(

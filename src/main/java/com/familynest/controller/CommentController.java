@@ -29,7 +29,6 @@ import com.familynest.auth.AuthUtil; // Add this import
 
 
 import org.springframework.web.bind.annotation.*;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.dao.DataAccessException;
@@ -338,7 +337,6 @@ public class CommentController {
      * 
      * Add a new comment to a message
      */
-    @Transactional
     @PostMapping(value = "/{parentMessageId}/comments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Transactional
     public ResponseEntity<Map<String, Object>> postComment(
@@ -534,7 +532,6 @@ public class CommentController {
 /**
  * Update an existing comment
  */
-@Transactional
 @PutMapping("/comments/{commentId}")
 @Transactional
 public ResponseEntity<Map<String, Object>> updateComment(
@@ -602,7 +599,6 @@ public ResponseEntity<Map<String, Object>> updateComment(
     /**
      * Delete a comment
      */
-    @Transactional
     @DeleteMapping("/comments/{commentId}")
     @Transactional
     public ResponseEntity<Map<String, Object>> deleteComment(

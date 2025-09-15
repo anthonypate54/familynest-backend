@@ -64,7 +64,6 @@ public class ReactionController {
         this.authUtil = authUtil;
     }
 
-    @Transactional
     @PostMapping("/{messageId}/reactions")
     @Transactional
     public ResponseEntity<Map<String, Object>> addReaction(
@@ -195,7 +194,6 @@ public class ReactionController {
         }
     }
 
-    @Transactional
     @PostMapping("/{messageId}/message_like")
     @Transactional
     public ResponseEntity<Map<String, Object>> toggleMessageLike(
@@ -278,7 +276,6 @@ public class ReactionController {
         }
     }
 
-    @Transactional
     @PostMapping("/{messageId}/message_love")
     @Transactional
     public ResponseEntity<Map<String, Object>> toggleMessageLove(
@@ -358,7 +355,6 @@ public class ReactionController {
         }
     }
 
-    @Transactional
     @PostMapping("/{commentId}/comment_like")
     @Transactional
     public ResponseEntity<Map<String, Object>> toggleCommentLike(
@@ -457,7 +453,6 @@ public class ReactionController {
         }
     }
 
-    @Transactional
     @PostMapping("/{commentId}/comment_love")
     @Transactional
     public ResponseEntity<Map<String, Object>> toggleCommentLove(
