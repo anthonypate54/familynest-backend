@@ -56,7 +56,6 @@ public class EmailService {
                 "1. Download the FamilyNest app from your app store\n" +
                 "2. Sign up using this email address: " + inviteeEmail + "\n" +
                 "3. Your family invitation will appear automatically!\n\n" +
-                "Already have the app? Enter this invitation code: " + invitationToken + "\n\n" +
                 "This invitation will expire in 7 days.\n\n" +
                 "Welcome to the family!\n\n" +
                 "Best regards,\n" +
