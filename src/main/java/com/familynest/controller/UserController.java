@@ -1780,7 +1780,7 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
                         family_messages_websocket, dm_messages_websocket, invitations_websocket,
                         reactions_websocket, comments_websocket, new_member_websocket,
                         created_at, updated_at
-                    ) VALUES (?, 0, 0, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW(), NOW())
+                    ) VALUES (?, 0, 0, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW(), NOW())
                 """;
                 int matrixRows = jdbcTemplate.update(createMatrixSql, userId);
                 logger.info("🔔 FCM_REGISTER: Created notification matrix for user {}, rows: {}", userId, matrixRows);
