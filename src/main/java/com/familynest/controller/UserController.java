@@ -1708,6 +1708,7 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
      * Register FCM token for push notifications
      */
     @PostMapping("/{userId}/fcm-token")
+    @Transactional
     public ResponseEntity<Map<String, Object>> registerFcmToken(
             @PathVariable Long userId,
             @RequestBody Map<String, String> request) {
@@ -1766,6 +1767,7 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
      * Debug endpoint to test FCM token reception
      */
     @PostMapping("/{userId}/fcm-token-debug")
+    @Transactional
     public ResponseEntity<Map<String, Object>> debugFcmToken(
             @PathVariable Long userId,
             @RequestBody Map<String, String> request) {
