@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -246,8 +247,125 @@ public class SubscriptionController {
         
         jdbcTemplate.update(sql, status, platform, transactionId, trialEnd, now, now, userId);
         
+        // Record the transaction in payment_transactions table
+        recordPaymentTransaction(userId, platform, transactionId, productId, true); // true = is trial
+        
         logger.info("✅ Updated user {} subscription: status={}, platform={}, trial_end={}", 
                    userId, status, platform, trialEnd);
+    }
+    
+    private void recordPaymentTransaction(Long userId, String platform, String transactionId, String productId, boolean isTrial) {
+        try {
+            String sql = """
+                INSERT INTO payment_transactions 
+                (user_id, platform, amount, description, platform_transaction_id, product_id, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'completed')
+            """;
+            
+            double amount = isTrial ? 0.00 : 4.99;
+            String description = isTrial ? 
+                "30-day free trial started" : 
+                "Premium subscription - " + productId;
+            
+            jdbcTemplate.update(sql, userId, platform, amount, description, transactionId, productId);
+            
+            logger.info("💰 Recorded payment transaction for user {}: ${} - {}", userId, amount, description);
+            
+        } catch (Exception e) {
+            logger.error("❌ Failed to record payment transaction for user {}", userId, e);
+            // Don't fail the whole subscription process if transaction recording fails
+        }
+    }
+
+    /**
+     * Get user's payment history
+     */
+    @GetMapping("/history")
+    public ResponseEntity<Map<String, Object>> getPaymentHistory(
+            @RequestHeader("Authorization") String authHeader) {
+        
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            
+            // Get user's current subscription info
+            String userSql = """
+                SELECT subscription_status, trial_start_date, trial_end_date, 
+                       subscription_start_date, subscription_end_date, monthly_price, platform
+                FROM app_user WHERE id = ?
+            """;
+            
+            Map<String, Object> userInfo = jdbcTemplate.queryForMap(userSql, userId);
+            
+            // Get transaction history
+            String transactionSql = """
+                SELECT transaction_date, amount, description, status, platform, product_id
+                FROM payment_transactions 
+                WHERE user_id = ? 
+                ORDER BY transaction_date DESC 
+                LIMIT 50
+            """;
+            
+            List<Map<String, Object>> transactions = jdbcTemplate.queryForList(transactionSql, userId);
+            
+            // Build response
+            Map<String, Object> response = new HashMap<>(userInfo);
+            response.put("transactions", transactions);
+            
+            // Calculate has_active_access
+            String status = (String) userInfo.get("subscription_status");
+            java.sql.Timestamp trialEndTs = (java.sql.Timestamp) userInfo.get("trial_end_date");
+            java.sql.Timestamp subscriptionEndTs = (java.sql.Timestamp) userInfo.get("subscription_end_date");
+            
+            LocalDateTime trialEnd = trialEndTs != null ? trialEndTs.toLocalDateTime() : null;
+            LocalDateTime subscriptionEnd = subscriptionEndTs != null ? subscriptionEndTs.toLocalDateTime() : null;
+            
+            boolean hasActiveAccess = hasActiveSubscriptionAccess(status, trialEnd, subscriptionEnd);
+            response.put("has_active_access", hasActiveAccess);
+            response.put("is_trial", "trial".equals(status) || "platform_trial".equals(status));
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error getting payment history", e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get payment history"));
+        }
+    }
+
+    /**
+     * Cancel user subscription
+     */
+    @PostMapping("/cancel")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> cancelSubscription(
+            @RequestHeader("Authorization") String authHeader) {
+        
+        try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            
+            // Update subscription status to cancelled
+            String sql = """
+                UPDATE app_user 
+                SET subscription_status = 'cancelled',
+                    updated_at = ?
+                WHERE id = ?
+            """;
+            
+            jdbcTemplate.update(sql, LocalDateTime.now(), userId);
+            
+            logger.info("✅ User {} cancelled their subscription", userId);
+            
+            return ResponseEntity.ok(Map.of(
+                "status", "cancelled",
+                "message", "Subscription cancelled successfully",
+                "effective_date", LocalDateTime.now().toString()
+            ));
+            
+        } catch (Exception e) {
+            logger.error("Error cancelling subscription", e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to cancel subscription"));
+        }
     }
 
     // REAL API IMPLEMENTATIONS (placeholder for when approved)
