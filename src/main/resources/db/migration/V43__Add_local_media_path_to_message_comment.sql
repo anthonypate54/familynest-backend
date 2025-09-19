@@ -8,3 +8,15 @@ COMMENT ON COLUMN message_comment.local_media_path IS 'Local file path on sender
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+

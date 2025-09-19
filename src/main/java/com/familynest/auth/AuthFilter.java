@@ -39,7 +39,14 @@ public class AuthFilter extends OncePerRequestFilter {
             logger.error("⭐⭐⭐ BYPASSING AUTH FOR WEBSOCKET HANDSHAKE: {}", path);
             chain.doFilter(request, response);
             return;
-}
+        }
+        
+        // BYPASS MAIN AUTH FOR ADMIN ENDPOINTS - they have their own AdminAuthFilter
+        if (path.startsWith("/api/admin/")) {
+            logger.error("⭐⭐⭐ BYPASSING MAIN AUTH FOR ADMIN ENDPOINT: {}", path);
+            chain.doFilter(request, response);
+            return;
+        }
         // PUBLIC ENDPOINTS - explicitly without auth
         // These are high-priority bypass paths that should never require auth
         if (path.equals("/api/users/connection-test") || 
@@ -53,6 +60,7 @@ public class AuthFilter extends OncePerRequestFilter {
             path.equals("/reset-password.html") ||
             path.equals("/") ||  // Allow root path access (bots hitting domain)
             path.equals("/error") ||  // Allow error page access
+            path.equals("/api/subscription/google-webhook") ||  // Google Play webhook
             path.startsWith("/api/users/password-reset") ||
             path.startsWith("/api/videos/public") ||
             path.startsWith("/api/videos/test") ||

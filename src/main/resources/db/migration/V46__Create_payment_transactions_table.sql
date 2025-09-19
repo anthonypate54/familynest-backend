@@ -23,3 +23,11 @@ CREATE INDEX idx_payment_transactions_platform_tx_id ON payment_transactions(pla
 
 -- Index for date-based queries
 CREATE INDEX idx_payment_transactions_date ON payment_transactions(transaction_date);
+
+
+
+
+
+
+
+
