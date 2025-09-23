@@ -1867,6 +1867,15 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
         }
     }
 
+    /**
+     * Generate a random 6-digit code for password reset
+     */
+    private String generateSixDigitCode() {
+        // Generate a random 6-digit code
+        int code = 100000 + new java.util.Random().nextInt(900000);
+        return String.valueOf(code);
+    }
+    
     @PostMapping("/forgot-password")
     @Transactional
     public ResponseEntity<Map<String, Object>> forgotPassword(@RequestBody Map<String, String> requestData) {
@@ -1887,8 +1896,8 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
             }
 
             User user = userOpt.get();
-            // Generate a reset token
-            String resetToken = UUID.randomUUID().toString();
+            // Generate a shorter, more user-friendly 6-digit reset code
+            String resetToken = generateSixDigitCode();
             LocalDateTime expiryDate = LocalDateTime.now().plusHours(24); // Token expires in 24 hours
 
             // Update user with reset token and expiry

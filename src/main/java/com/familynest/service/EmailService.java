@@ -80,15 +80,16 @@ public class EmailService {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom("noreply@infamilynest.com");
             message.setTo(toEmail);
-            message.setSubject("FamilyNest - Password Reset Request");
+            message.setSubject("FamilyNest - Password Reset Code");
             message.setText(
                 "Hello,\n\n" +
                 "You have requested to reset your password for your FamilyNest account.\n\n" +
+                "Your password reset code is: " + resetToken + "\n\n" +
                 "To reset your password:\n" +
                 "1. Open the FamilyNest app\n" +
-                "2. Go to 'Forgot Password'\n" +
-                "3. Enter this reset code: " + resetToken + "\n\n" +
-                "This link will expire in 24 hours.\n\n" +
+                "2. Enter this code when prompted\n" +
+                "3. Create your new password\n\n" +
+                "This code will expire in 24 hours.\n\n" +
                 "If you did not request this password reset, please ignore this email.\n\n" +
                 "Best regards,\n" +
                 "The FamilyNest Team"

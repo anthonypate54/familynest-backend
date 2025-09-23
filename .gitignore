@@ -26,3 +26,10 @@ Thumbs.db
 src/main/resources/firebase-service-account.json
 target/
 uploads/
+
+# Specific SQL files to ignore
+debug-payment-transactions.sql
+expire-trial.sql
+reset-bucky-for-ios-test.sql
+reset-bucky-trial.sql
+reset-claude-for-ios-test.sql

@@ -7,8 +7,6 @@ import com.familynest.repository.FamilyRepository;
 import com.familynest.repository.UserRepository;
 import com.familynest.repository.UserFamilyMembershipRepository;
 import com.familynest.repository.UserFamilyMessageSettingsRepository;
-import com.familynest.repository.InvitationRepository;
-import com.familynest.model.Invitation;
 import com.familynest.auth.AuthUtil;
 import com.familynest.auth.JwtUtil;
 import com.familynest.service.PushNotificationService;
@@ -21,10 +19,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
-
-import javax.servlet.http.HttpServletRequest;
-
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -39,9 +33,6 @@ public class FamilyController {
 
     @Autowired
     private UserRepository userRepository;
-
-    @Autowired
-    private InvitationRepository invitationRepository;
 
     @Autowired
     private UserFamilyMembershipRepository userFamilyMembershipRepository;
@@ -553,29 +544,38 @@ public class FamilyController {
             }
             
             // Get ALL families the user belongs to (only active memberships for DM purposes)
+            // De-duplicate users who belong to multiple shared families
             String sql = "WITH user_families AS (" +
                         "  SELECT ufm.family_id " +
                         "  FROM user_family_membership ufm " +
                         "  WHERE ufm.user_id = ? " +
                         "  AND ufm.is_active = true" +
                         "), " +
-                        "all_family_members AS (" +
-                        "  SELECT DISTINCT " +
-                        "    u.id, u.username, u.first_name, u.last_name, u.photo, ufm2.family_id, " +
-                        "    f.name as family_name, f.created_by as family_owner_id, " +
-                        "    ufm.role as membership_role, " +
-                        "    CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
-                        "    of.name as owned_family_name " +
+                        "distinct_users AS (" +
+                        "  SELECT DISTINCT u.id, u.username, u.first_name, u.last_name, u.photo " +
                         "  FROM user_families uf " +
                         "  JOIN user_family_membership ufm2 ON ufm2.family_id = uf.family_id " + 
                         "  JOIN app_user u ON u.id = ufm2.user_id " +
-                        "  JOIN family f ON f.id = uf.family_id " +
-                        "  LEFT JOIN user_family_membership ufm ON ufm.user_id = u.id AND ufm.family_id = uf.family_id " +
-                        "  LEFT JOIN family of ON of.created_by = u.id " +
                         "  WHERE u.id != ? " + // Exclude the requesting user
+                        "), " +
+                        "user_details AS (" +
+                        "  SELECT " +
+                        "    du.id, du.username, du.first_name, du.last_name, du.photo, " +
+                        "    MIN(ufm2.family_id) as family_id, " +
+                        "    MIN(f.name) as family_name, " +
+                        "    MIN(f.created_by) as family_owner_id, " +
+                        "    MIN(ufm.role) as membership_role, " +
+                        "    BOOL_OR(of.id IS NOT NULL) as is_owner, " +
+                        "    MIN(of.name) as owned_family_name " +
+                        "  FROM distinct_users du " +
+                        "  JOIN user_family_membership ufm2 ON ufm2.user_id = du.id " +
+                        "  JOIN family f ON f.id = ufm2.family_id " +
+                        "  LEFT JOIN user_family_membership ufm ON ufm.user_id = du.id " +
+                        "  LEFT JOIN family of ON of.created_by = du.id " +
+                        "  GROUP BY du.id, du.username, du.first_name, du.last_name, du.photo " +
                         ") " +
-                        "SELECT * FROM all_family_members " +
-                        "ORDER BY family_name, first_name, last_name";
+                        "SELECT * FROM user_details " +
+                        "ORDER BY first_name, last_name";
                         
             logger.debug("Executing query for all family members for user ID: {}", tokenUserId);
             

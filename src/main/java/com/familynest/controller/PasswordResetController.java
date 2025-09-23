@@ -84,6 +84,7 @@ public class PasswordResetController {
         logger.debug("Received password reset confirmation");
         try {
             String token = resetData.get("token");
+            String email = resetData.get("email");
             String newPassword = resetData.get("newPassword");
             
             if (token == null || token.trim().isEmpty()) {
@@ -94,12 +95,35 @@ public class PasswordResetController {
                 return ResponseEntity.badRequest().body(Map.of("error", "New password must be at least 6 characters long"));
             }
             
-            // Find user by valid reset token
-            Optional<User> userOpt = userRepository.findByValidPasswordResetToken(token);
+            Optional<User> userOpt;
             
-            if (userOpt.isEmpty()) {
-                logger.debug("Invalid or expired reset token: {}", token);
-                return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
+            // If email is provided, use it to find the user first (more efficient)
+            if (email != null && !email.trim().isEmpty()) {
+                userOpt = userRepository.findByEmail(email.toLowerCase());
+                
+                // Verify the token matches
+                if (userOpt.isPresent()) {
+                    User user = userOpt.get();
+                    if (user.getPasswordResetToken() == null || 
+                        !user.getPasswordResetToken().equals(token) ||
+                        user.getPasswordResetTokenExpiresAt() == null ||
+                        user.getPasswordResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
+                        
+                        logger.debug("Invalid or expired reset token for email: {}", email);
+                        return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
+                    }
+                } else {
+                    logger.debug("User not found for email: {}", email);
+                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid email or reset token"));
+                }
+            } else {
+                // Fall back to finding by token only
+                userOpt = userRepository.findByValidPasswordResetToken(token);
+                
+                if (userOpt.isEmpty()) {
+                    logger.debug("Invalid or expired reset token: {}", token);
+                    return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset token"));
+                }
             }
             
             User user = userOpt.get();
