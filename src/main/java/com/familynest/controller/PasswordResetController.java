@@ -91,8 +91,18 @@ public class PasswordResetController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Reset token is required"));
             }
             
-            if (newPassword == null || newPassword.length() < 6) {
-                return ResponseEntity.badRequest().body(Map.of("error", "New password must be at least 6 characters long"));
+            // Check for null password
+            if (newPassword == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "New password is required"));
+            }
+            
+            // We'll skip the length < 6 check since the validatePasswordStrength will catch it with the stricter requirement
+            
+            // Enhanced password strength validation
+            Map<String, Object> passwordValidation = authUtil.validatePasswordStrength(newPassword);
+            if (!(Boolean)passwordValidation.get("valid")) {
+                logger.debug("Password strength validation failed: {}", passwordValidation.get("message"));
+                return ResponseEntity.badRequest().body(Map.of("error", (String)passwordValidation.get("message")));
             }
             
             Optional<User> userOpt;

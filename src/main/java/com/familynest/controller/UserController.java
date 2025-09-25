@@ -333,9 +333,19 @@ public class UserController {
                 logger.debug("Email validation failed: {}", userData.getEmail());
                 return createErrorResponse(ErrorCodes.EMAIL_INVALID, "Valid email is required");
             }
-            if (userData.getPassword() == null || userData.getPassword().length() < 6) {
-                logger.debug("Password validation failed: length less than 6");
-                return createErrorResponse(ErrorCodes.PASSWORD_TOO_SHORT, "Password must be at least 6 characters long");
+            // Check for null password
+            if (userData.getPassword() == null) {
+                logger.debug("Password validation failed: password is null");
+                return createErrorResponse(ErrorCodes.PASSWORD_TOO_SHORT, "Password is required");
+            }
+            
+            // We'll skip the length < 6 check since the validatePasswordStrength will catch it with the stricter requirement
+            
+            // Enhanced password strength validation for new users
+            Map<String, Object> passwordValidation = authUtil.validatePasswordStrength(userData.getPassword());
+            if (!(Boolean)passwordValidation.get("valid")) {
+                logger.debug("Password strength validation failed: {}", passwordValidation.get("message"));
+                return createErrorResponse(ErrorCodes.PASSWORD_TOO_WEAK, (String)passwordValidation.get("message"));
             }
             if (userData.getFirstName() == null || userData.getFirstName().isEmpty()) {
                 logger.debug("First name validation failed: {}", userData.getFirstName());
@@ -1978,8 +1988,18 @@ logger.info("🔍 DEBUG: User {} email: {}", userId, userEmails.isEmpty() ? "NOT
                 return ResponseEntity.badRequest().body(Map.of("error", "Current password is required"));
             }
 
-            if (newPassword == null || newPassword.length() < 6) {
-                return ResponseEntity.badRequest().body(Map.of("error", "New password must be at least 6 characters long"));
+            // Check for null password
+            if (newPassword == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "New password is required"));
+            }
+            
+            // We'll skip the length < 6 check since the validatePasswordStrength will catch it with the stricter requirement
+            
+            // Enhanced password strength validation
+            Map<String, Object> passwordValidation = authUtil.validatePasswordStrength(newPassword);
+            if (!(Boolean)passwordValidation.get("valid")) {
+                logger.debug("Password strength validation failed: {}", passwordValidation.get("message"));
+                return ResponseEntity.badRequest().body(Map.of("error", (String)passwordValidation.get("message")));
             }
 
             if (currentPassword.equals(newPassword)) {

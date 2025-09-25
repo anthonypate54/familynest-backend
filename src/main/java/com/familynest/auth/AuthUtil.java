@@ -74,6 +74,41 @@ public class AuthUtil {
     public boolean verifyPassword(String rawPassword, String encodedPassword) {
         return passwordEncoder.matches(rawPassword, encodedPassword);
     }
+    
+    /**
+     * Validates password strength according to security requirements.
+     * Requirements:
+     * - At least 8 characters long
+     * - At least 1 uppercase letter
+     * - At least 1 number
+     * 
+     * @param password The password to validate
+     * @return A map with "valid" boolean and "message" string explaining any validation failure
+     */
+    public Map<String, Object> validatePasswordStrength(String password) {
+        if (password == null || password.length() < 8) {
+            return Map.of(
+                "valid", false,
+                "message", "Password must be at least 8 characters long"
+            );
+        }
+        
+        if (!password.matches(".*[A-Z].*")) {
+            return Map.of(
+                "valid", false,
+                "message", "Password must contain at least one uppercase letter"
+            );
+        }
+        
+        if (!password.matches(".*[0-9].*")) {
+            return Map.of(
+                "valid", false,
+                "message", "Password must contain at least one number"
+            );
+        }
+        
+        return Map.of("valid", true);
+    }
 
     public Long extractUserId(String token) {
         logger.debug("Extracting userId from token: {}", token);

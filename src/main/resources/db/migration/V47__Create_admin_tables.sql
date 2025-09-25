@@ -108,5 +108,3 @@ COMMENT ON COLUMN admin_users.role IS 'SUPER_ADMIN: full access, ADMIN: standard
 COMMENT ON COLUMN system_settings.data_type IS 'STRING, NUMBER, BOOLEAN, or JSON for complex settings';
 COMMENT ON COLUMN user_notifications.target_type IS 'ALL, SPECIFIC_USER, TRIAL_USERS, PAID_USERS, or ACTIVE_USERS';
 COMMENT ON COLUMN user_notifications.priority IS '1=low, 2=medium, 3=high, 4=critical';
-
-

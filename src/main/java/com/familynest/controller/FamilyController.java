@@ -685,18 +685,24 @@ public class FamilyController {
                     "  SELECT ufm.family_id " +
                     "  FROM user_family_membership ufm " +
                     "  WHERE ufm.user_id = ? " +
+                    "), " +
+                    "owned_families AS (" +
+                    "  SELECT DISTINCT u.id as user_id, MIN(f.id) as family_id, MIN(f.name) as family_name " +
+                    "  FROM app_user u " +
+                    "  JOIN family f ON f.created_by = u.id " +
+                    "  GROUP BY u.id " +
                     ") " +
                     "SELECT DISTINCT " +
                     "  u.id, u.username, u.first_name, u.last_name, u.photo, " +
                     "  ufm.family_id, f.name as family_name, " +
                     "  ufm.role as membership_role, ufm.joined_at, ufm.is_new_member, " +
-                    "  CASE WHEN of.id IS NOT NULL THEN true ELSE false END as is_owner, " +
-                    "  of.name as owned_family_name " +
+                    "  CASE WHEN of.user_id IS NOT NULL THEN true ELSE false END as is_owner, " +
+                    "  of.family_name as owned_family_name " +
                     "FROM user_families uf " +
                     "JOIN user_family_membership ufm ON ufm.family_id = uf.family_id " +
                     "JOIN app_user u ON u.id = ufm.user_id " +
                     "JOIN family f ON f.id = uf.family_id " +
-                    "LEFT JOIN family of ON of.created_by = u.id " +
+                    "LEFT JOIN owned_families of ON of.user_id = u.id " +
                     "ORDER BY f.name, u.first_name, u.last_name";
 
             List<Map<String, Object>> memberResults = jdbcTemplate.queryForList(membersSql, userId);
