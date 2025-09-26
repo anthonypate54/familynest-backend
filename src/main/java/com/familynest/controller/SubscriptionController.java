@@ -18,6 +18,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/subscription")
+@SuppressWarnings("unchecked") // Suppress unchecked warnings for JDBC operations
 public class SubscriptionController {
 
     private static final Logger logger = LoggerFactory.getLogger(SubscriptionController.class);
@@ -452,7 +453,8 @@ public class SubscriptionController {
             // Extract Google Play notification data
             // Real format: {"version":"1.0","packageName":"com.anthony.familynest","eventTimeMillis":"...","subscriptionNotification":{...}}
             String packageName = (String) notificationData.get("packageName");
-            Map<String, Object> subscriptionNotification = (Map<String, Object>) notificationData.get("subscriptionNotification");
+            Object notificationObj = notificationData.get("subscriptionNotification");
+            Map<String, Object> subscriptionNotification = (notificationObj instanceof Map) ? (Map<String, Object>) notificationObj : null;
             
             if (subscriptionNotification == null) {
                 logger.warn("⚠️ No subscriptionNotification in webhook data");
