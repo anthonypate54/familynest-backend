@@ -1,20 +1,57 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
-    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
     
-    <!-- Configure SQL monitoring with higher visibility -->
-    <logger name="com.familynest.config.SqlStatementMonitor" level="INFO" />
+    <!-- Set default logging level to INFO -->
+    <root level="INFO"/>
     
-    <!-- Configure our controllers at debug level -->
-    <logger name="com.familynest.controller" level="DEBUG" />
+    <!-- Your application packages at INFO level -->
+    <logger name="com.familynest" level="INFO"/>
     
-    <!-- Quiet down noisy Hibernate and Spring logs -->
-    <logger name="org.hibernate.SQL" level="INFO" />
-    <logger name="org.hibernate.type.descriptor.sql" level="WARN" />
-    <logger name="org.springframework" level="WARN" />
+    <!-- Specifically target verbose controllers -->
+    <logger name="com.familynest.controller" level="WARN"/>
+    <logger name="com.familynest.controller.UserController" level="WARN"/>
+    <logger name="com.familynest.config.SqlStatementMonitor" level="WARN"/>
     
-    <root level="INFO">
-        <appender-ref ref="CONSOLE" />
-    </root>
-</configuration> 
+    <!-- Turn off all SQL query logging -->
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="org.hibernate.type.descriptor.sql" level="WARN"/>
+    <logger name="org.hibernate.type.descriptor.sql.BasicBinder" level="WARN"/>
+    <logger name="org.hibernate.type.descriptor.sql.BasicExtractor" level="WARN"/>
+    <logger name="Hibernate" level="WARN"/>
+    
+    <!-- Reduce noise from common verbose components -->
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="org.hibernate.type.descriptor.sql" level="WARN"/>
+    <logger name="org.apache" level="INFO"/>
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+    
+    <!-- Specifically reduce web request logging -->
+    <logger name="org.springframework.web" level="WARN"/>
+    
+    <!-- Turn off debug logging for security -->
+    <logger name="org.springframework.security" level="INFO"/>
+    
+    <!-- Reduce WebSocket noise -->
+    <logger name="org.springframework.web.socket" level="ERROR"/>
+    <logger name="org.springframework.web.socket.handler.LoggingWebSocketHandlerDecorator" level="OFF"/>
+    <logger name="org.apache.tomcat.websocket" level="ERROR"/>
+    <logger name="com.familynest.config.WebSocketEventListener" level="WARN"/>
+    <logger name="org.springframework.messaging.simp.broker.SimpleBrokerMessageHandler" level="ERROR"/>
+    
+    <!-- Silence auth filter logs -->
+    <logger name="com.familynest.auth.AuthFilter" level="WARN"/>
+    
+    <!-- Completely silence connection reset exceptions -->
+    <logger name="org.apache.tomcat.util.net.NioEndpoint" level="ERROR"/>
+    
+    <!-- Completely silence PROPFIND method rejection logs -->
+    <logger name="s.s.w.f.HttpStatusRequestRejectedHandler" level="OFF"/>
+    <logger name="org.springframework.security.web.firewall.StrictHttpFirewall" level="OFF"/>
+    
+    <!-- Suppress Spring Security firewall rejections -->
+    <logger name="org.springframework.security.web.firewall.StrictHttpFirewall" level="ERROR"/>
+</configuration>

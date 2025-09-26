@@ -869,7 +869,6 @@ public class UserController {
         @PathVariable Long id,
         @RequestHeader("Authorization") String authHeader) {
 
-            logger.info("🔍 BACKEND HIT: Getting messages for user: {}", id);
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
             Long currentUserId = authUtil.extractUserId(token);
             if (currentUserId == null) {
@@ -972,11 +971,7 @@ public class UserController {
                 messageMap.put("mediaUrl", message.get("media_url"));
                 messageMap.put("localMediaPath", message.get("local_media_path"));
                 
-                // DEBUG: Log what we're putting in the response
-                if ("video".equals(message.get("media_type"))) {
-                    logger.info("🎥 RESPONSE DEBUG - localMediaPath value: {}", message.get("local_media_path"));
-                    logger.info("🎥 RESPONSE DEBUG - messageMap localMediaPath: {}", messageMap.get("localMediaPath"));
-                }
+                // Removed unnecessary debug logging for video paths
                 
                 messageMap.put("likeCount", message.get("like_count"));
                 messageMap.put("loveCount", message.get("love_count"));
@@ -1192,42 +1187,45 @@ public class UserController {
      * GET /api/users/current/settings
      */
     @GetMapping("/current/settings")
-    @Transactional(readOnly = true)
+    // Remove readOnly since we might need to write if preferences don't exist
+    @Transactional
     public ResponseEntity<Map<String, Object>> getCurrentUserSettings() {
-        logger.debug("Received request to get current user settings");
         try {
             HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
             Long userId = (Long) request.getAttribute("userId");
             if (userId == null) {
-                logger.debug("No userId found in request");
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
             }
             
-            logger.debug("Getting user preferences for user ID: {}", userId);
-            
-            // Get or create user preferences
-            UserPreferences preferences = userPreferencesRepository.findByUserId(userId)
-                .orElseGet(() -> {
-                    logger.debug("Creating default preferences for user {}", userId);
-                    UserPreferences newPrefs = new UserPreferences(userId);
-                    return userPreferencesRepository.save(newPrefs);
-                });
-            
-            // Build response with all user preferences
+            // Build response map directly - no need for intermediate UserPreferences object
             Map<String, Object> response = new HashMap<>();
             response.put("userId", userId);
             
-            // Demographics/Privacy Settings
-            response.put("showAddress", preferences.getShowAddress());
-            response.put("showPhoneNumber", preferences.getShowPhoneNumber());
-            response.put("showBirthday", preferences.getShowBirthday());
+            // Use PostgreSQL UPSERT (INSERT ON CONFLICT) to ensure preferences exist
+            // This creates default preferences if they don't exist, or does nothing if they do
+            jdbcTemplate.update(
+                "INSERT INTO user_preferences (user_id, show_address, show_phone_number, show_birthday, " +
+                "family_messages_notifications, new_member_notifications, invitation_notifications, created_at, updated_at) " +
+                "VALUES (?, true, true, true, true, true, true, now(), now()) " +
+                "ON CONFLICT (user_id) DO NOTHING", // Do nothing if record already exists
+                userId
+            );
             
-            // Notification Preferences
-            response.put("familyMessagesNotifications", preferences.getFamilyMessagesNotifications());
-            response.put("newMemberNotifications", preferences.getNewMemberNotifications());
-            response.put("invitationNotifications", preferences.getInvitationNotifications());
+            // Now we can safely get the preferences (which definitely exist)
+            String sql = "SELECT show_address, show_phone_number, show_birthday, " +
+                         "family_messages_notifications, new_member_notifications, invitation_notifications " +
+                         "FROM user_preferences WHERE user_id = ?";
             
-            logger.debug("Returning user preferences: {}", response);
+            Map<String, Object> prefs = jdbcTemplate.queryForMap(sql, userId);
+            
+            // Map database column names to camelCase response keys
+            response.put("showAddress", prefs.get("show_address"));
+            response.put("showPhoneNumber", prefs.get("show_phone_number"));
+            response.put("showBirthday", prefs.get("show_birthday"));
+            response.put("familyMessagesNotifications", prefs.get("family_messages_notifications"));
+            response.put("newMemberNotifications", prefs.get("new_member_notifications"));
+            response.put("invitationNotifications", prefs.get("invitation_notifications"));
+            
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error retrieving user preferences: {}", e.getMessage(), e);
@@ -1235,6 +1233,8 @@ public class UserController {
                 .body(Map.of("error", "Error retrieving user preferences: " + e.getMessage()));
         }
     }
+    
+    // Helper method removed - now handled directly in getCurrentUserSettings
 
     /**
      * Update current user's preferences

@@ -231,9 +231,7 @@ public class WebSocketBroadcastService {
             commentData.put("type", "COMMENT");
             commentData.put("parentMessageId", parentMessageId);
             commentData.put("family_id", familyId);
-            
-            logger.debug("Broadcasting COMMENT for thread {} to family {} members", parentMessageId, familyId);
-            
+                        
             List<Long> familyMemberIds = userFamilyMembershipRepository.findByFamilyId(familyId)
                 .stream()
                 .map(membership -> membership.getUserId())
@@ -373,9 +371,7 @@ public class WebSocketBroadcastService {
      */
     public void broadcastCommentCountExcludingUser(Long messageId, int commentCount, Long familyId, Long excludeUserId) {
         try {
-            logger.debug("Broadcasting COMMENT COUNT for message {} to family {} members excluding user {}", 
-                messageId, familyId, excludeUserId);
-            
+             
             List<Long> familyMemberIds = userFamilyMembershipRepository.findByFamilyId(familyId)
                 .stream()
                 .map(membership -> membership.getUserId())

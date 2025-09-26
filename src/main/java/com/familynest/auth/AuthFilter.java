@@ -14,6 +14,10 @@ import java.util.Enumeration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Filter that authenticates requests using JWT tokens from the Authorization header.
+ * This filter is registered with Spring Boot to intercept all API requests.
+ */
 @Component
 public class AuthFilter extends OncePerRequestFilter {
 
@@ -26,6 +30,9 @@ public class AuthFilter extends OncePerRequestFilter {
     private JwtUtil jwtUtil;
     
     @Autowired
+    private TokenBlacklistService tokenBlacklistService;
+    
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Override
@@ -36,14 +43,14 @@ public class AuthFilter extends OncePerRequestFilter {
 
            // BYPASS AUTH FOR WEBSOCKET HANDSHAKE
         if (path.equals("/ws") || path.startsWith("/ws/")) {
-            logger.error("⭐⭐⭐ BYPASSING AUTH FOR WEBSOCKET HANDSHAKE: {}", path);
+            logger.debug("⭐⭐⭐ BYPASSING AUTH FOR WEBSOCKET HANDSHAKE: {}", path);
             chain.doFilter(request, response);
             return;
         }
         
         // BYPASS MAIN AUTH FOR ADMIN ENDPOINTS - they have their own AdminAuthFilter
         if (path.startsWith("/api/admin/")) {
-            logger.error("⭐⭐⭐ BYPASSING MAIN AUTH FOR ADMIN ENDPOINT: {}", path);
+            logger.debug("⭐⭐⭐ BYPASSING MAIN AUTH FOR ADMIN ENDPOINT: {}", path);
             chain.doFilter(request, response);
             return;
         }
@@ -65,7 +72,7 @@ public class AuthFilter extends OncePerRequestFilter {
             path.startsWith("/api/videos/public") ||
             path.startsWith("/api/videos/test") ||
             path.startsWith("/uploads/")) {
-            logger.error("⭐⭐⭐ EXPLICIT PUBLIC BYPASS FOR PATH: {}", path);
+            logger.debug("⭐⭐⭐ EXPLICIT PUBLIC BYPASS FOR PATH: {}", path);
             chain.doFilter(request, response);
             return;
         }
@@ -111,7 +118,7 @@ public class AuthFilter extends OncePerRequestFilter {
             path.startsWith("/api/public") || path.startsWith("/api/test") ||  // Also allow /api/public/* and /api/test/*
             path.contains("thumbnail") || path.contains("video-test") ||
             path.contains("health") || path.contains("videos/upload")) {  // Allow health checks and video uploads
-            logger.error("⭐⭐⭐ ALLOWING PUBLIC ACCESS TO ENDPOINT: {}", path);
+            logger.debug("⭐⭐⭐ ALLOWING PUBLIC ACCESS TO ENDPOINT: {}", path);
             chain.doFilter(request, response);
             return;
         }
@@ -119,8 +126,7 @@ public class AuthFilter extends OncePerRequestFilter {
      //   logger.error("❌❌❌ ENDPOINT NOT IN PUBLIC WHITELIST: {}", path);
 
         String authHeader = request.getHeader("Authorization");
-        logger.debug("🔑 Auth header: {}", authHeader);
-        
+         
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             logger.error("❌ No valid Authorization header found: {}", authHeader);
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Missing or invalid Authorization header");
@@ -128,10 +134,26 @@ public class AuthFilter extends OncePerRequestFilter {
         }
 
         String token = authHeader.substring(7);
-        logger.debug("🔑 Token: {}", token);
+        
+        // Check if token is blacklisted
+        String tokenId = jwtUtil.extractTokenId(token);
+        if (tokenId != null && tokenBlacklistService.isBlacklisted(tokenId)) {
+            logger.error("❌ Token is blacklisted: {}", tokenId);
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Token has been revoked");
+            return;
+        }
+        
+        // Check if token is expired
+        if (jwtUtil.isTokenExpired(token)) {
+            logger.error("❌ Token is expired");
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Token has expired");
+            return;
+        }
         
         // Validate JWT token format and signature
-        if (!jwtUtil.validateToken(token)) {
+        try {
+            jwtUtil.validateTokenAndGetClaims(token);
+        } catch (Exception e) {
             logger.error("❌ Token validation failed for token: {}", token);
             response.sendError(HttpServletResponse.SC_FORBIDDEN, "Invalid token");
             return;
@@ -142,8 +164,7 @@ public class AuthFilter extends OncePerRequestFilter {
         String role = jwtUtil.getUserRole(token);
         String tokenSessionId = jwtUtil.getSessionId(token);
         
-        logger.debug("Token valid! Extracted userId: {}, role: {}, sessionId: {}", userId, role, tokenSessionId != null ? "[present]" : "[missing]");
-
+ 
         // SINGLE DEVICE ENFORCEMENT: Validate session ID
         if (tokenSessionId != null) {
             try {
@@ -155,8 +176,7 @@ public class AuthFilter extends OncePerRequestFilter {
                     response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session invalid - please log in again");
                     return;
                 }
-                logger.debug("Session ID validated for user {}", userId);
-            } catch (Exception e) {
+             } catch (Exception e) {
                 logger.error("Failed to validate session for user {}: {}", userId, e.getMessage());
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session validation failed");
                 return;
@@ -171,7 +191,6 @@ public class AuthFilter extends OncePerRequestFilter {
         // Set user attributes for the request
         request.setAttribute("userId", userId);
         request.setAttribute("role", role);
-        logger.debug("Valid token and session for userId: {}, role: {}, proceeding to controller", userId, role);
 
         chain.doFilter(request, response);
     }

@@ -1,15 +1,15 @@
-package com.familynest;
+package com.familynest.security;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Placeholder utility for engagement tests
+ * Placeholder test for authentication system
  */
-public class EngagementTestUtil {
+public class AuthenticationSystemTest {
     
     @Test
-    public void testEngagementUtil() {
+    public void testAuthenticationSystem() {
         // This test will always pass
         assertTrue(true);
     }

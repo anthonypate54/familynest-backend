@@ -1,15 +1,15 @@
-package com.familynest;
+package com.familynest.security;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Placeholder utility for engagement tests
+ * Simple placeholder test that always passes
  */
-public class EngagementTestUtil {
+public class BasicJwtTest {
     
     @Test
-    public void testEngagementUtil() {
+    public void testAlwaysPasses() {
         // This test will always pass
         assertTrue(true);
     }

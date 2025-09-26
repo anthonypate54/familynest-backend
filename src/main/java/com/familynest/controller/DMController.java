@@ -724,9 +724,7 @@ public class DMController {
                 if (message.containsKey("local_media_path")) {
                     Object localMediaPath = message.get("local_media_path");
                     message.put("localMediaPath", localMediaPath);
-                    logger.debug("🎯 DM Message {} - local_media_path: {}, converted to localMediaPath", 
-                        message.get("id"), localMediaPath);
-                }
+                 }
                 
                 // Convert other fields for consistency
                 if (message.containsKey("media_url")) {

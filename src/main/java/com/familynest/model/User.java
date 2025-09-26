@@ -113,6 +113,9 @@ public class User {
     // Onboarding state tracking using bitmap
     // Bit 0 (1): Has messages, Bit 1 (2): Has DMs, Bit 2 (4): Has family membership, Bit 3 (8): Has pending invitations
     private Integer onboardingState = 0;
+    
+    // Session management for single device enforcement
+    private String currentSessionId;
 
     // Getters and setters
     public Long getId() {
@@ -447,5 +450,19 @@ public class User {
 
     public void setOnboardingState(Integer onboardingState) {
         this.onboardingState = onboardingState;
+    }
+    
+    /**
+     * Get the current session ID for single device enforcement
+     */
+    public String getCurrentSessionId() {
+        return currentSessionId;
+    }
+    
+    /**
+     * Set the current session ID for single device enforcement
+     */
+    public void setCurrentSessionId(String currentSessionId) {
+        this.currentSessionId = currentSessionId;
     }
 }

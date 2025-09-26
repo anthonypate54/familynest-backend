@@ -19,6 +19,9 @@ public interface UserFamilyMembershipRepository extends JpaRepository<UserFamily
     // Find specific membership
     Optional<UserFamilyMembership> findByUserIdAndFamilyId(Long userId, Long familyId);
     
+    // Check if a user is a member of a family
+    boolean existsByUserIdAndFamilyId(Long userId, Long familyId);
+    
     // Find the active family membership for a user
     Optional<UserFamilyMembership> findByUserIdAndIsActiveTrue(Long userId);
     
@@ -34,4 +37,4 @@ public interface UserFamilyMembershipRepository extends JpaRepository<UserFamily
     // This method will return just the family IDs without loading the entire entities
     @Query("SELECT m.familyId FROM UserFamilyMembership m WHERE m.userId = :userId")
     List<Long> findFamilyIdsByUserId(@Param("userId") Long userId);
-} 
+}

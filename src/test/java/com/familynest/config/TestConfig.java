@@ -14,8 +14,6 @@ import com.familynest.auth.AuthFilter;
 import com.familynest.auth.AuthUtil;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.liquibase.LiquibaseAutoConfiguration;
-import com.familynest.controller.VideoController;
-import com.familynest.controller.TestVideoController;
 import org.mockito.Mockito;
 import com.familynest.service.ThumbnailService;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -47,9 +45,9 @@ public class TestConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf().disable()
-            .authorizeRequests()
-            .anyRequest().permitAll(); // Disable authentication for all requests during testing
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().permitAll()); // Disable authentication for all requests during testing
         System.out.println("DEBUG: Security disabled for test environment - all requests permitted");
         return http.build();
     }
@@ -85,11 +83,6 @@ public class TestConfig {
         return mock;
     }
     
-    @Bean(name = "videoController")
-    public VideoController videoController() {
-        return new TestVideoController();
-    }
-    
     @Bean
     public ThumbnailService thumbnailService() {
         return Mockito.mock(ThumbnailService.class);
@@ -99,4 +92,4 @@ public class TestConfig {
     public JdbcTemplate jdbcTemplate() {
         return Mockito.mock(JdbcTemplate.class);
     }
-} 
+}

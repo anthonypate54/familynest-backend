@@ -31,6 +31,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.email) = LOWER(:email)")
     boolean existsByEmail(@Param("email") String email);
     
+    // Override the default existsById method with an optimized version
+    @Override
+    @Query(value = "SELECT EXISTS(SELECT 1 FROM app_user WHERE id = :id)", nativeQuery = true)
+    boolean existsById(@Param("id") Long id);
+    
     // Trial expiry methods
     @Query(value = "SELECT * FROM app_user WHERE subscription_status = 'trial' AND trial_end_date < CURRENT_TIMESTAMP", nativeQuery = true)
     List<User> findExpiredTrials();

@@ -1,15 +1,15 @@
-package com.familynest;
+package com.familynest.security.controller;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Placeholder utility for engagement tests
+ * Placeholder test for UserController
  */
-public class EngagementTestUtil {
+public class UserControllerTest {
     
     @Test
-    public void testEngagementUtil() {
+    public void testUserController() {
         // This test will always pass
         assertTrue(true);
     }

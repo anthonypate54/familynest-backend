@@ -189,8 +189,6 @@ public class CommentController {
                 messageMap.put("sender_last_name", message.get("sender_last_name"));
                 
                 // DEBUG: Log the actual SQL result values
-                logger.info("🧵 CommentController SQL result for ID {}: sender_id={}, sender_first_name={}, sender_last_name={}", 
-                    message.get("id"), message.get("sender_id"), message.get("sender_first_name"), message.get("sender_last_name"));
                 messageMap.put("timestamp", message.get("timestamp").toString());
                 messageMap.put("mediaType", message.get("media_type"));
                 messageMap.put("mediaUrl", message.get("media_url"));
@@ -470,7 +468,6 @@ public class CommentController {
                         Map<String, Object> commentData = messageService.getCommentById(finalCommentId);
                         
                         // Broadcast the comment via WebSocket using thread-specific approach
-                        logger.debug("Broadcasting comment via thread-specific WebSocket (AFTER COMMIT): {}", commentData);
                         // Broadcast to each family the parent message is visible in
                         for (Map<String, Object> family : finalParentMessageFamilies) {
                             Long targetFamilyId = ((Number) family.get("family_id")).longValue();
