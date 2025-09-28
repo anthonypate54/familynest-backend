@@ -75,3 +75,5 @@ echo "JAR backed up to: $VERSIONED_JAR"
 echo "Configurations backed up to: $CONFIGS_DIR/$VERSION_TAG"
 echo "Log saved to: $LOG_FILE"
 
+
+

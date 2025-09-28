@@ -50,3 +50,5 @@ echo ""
 echo "To manually rotate logs, run: sudo logrotate -f /etc/logrotate.d/familynest"
 
 
+
+

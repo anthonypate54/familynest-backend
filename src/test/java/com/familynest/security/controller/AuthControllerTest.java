@@ -264,3 +264,5 @@ public class AuthControllerTest {
                 .andExpect(jsonPath("$.roles").value("USER"));
     }
 }
+
+

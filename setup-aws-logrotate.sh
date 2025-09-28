@@ -62,3 +62,5 @@ echo ""
 echo "You can continue to use 'tail -f nohup.out' to monitor your application"
 
 
+
+
