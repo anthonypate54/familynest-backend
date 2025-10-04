@@ -4,115 +4,265 @@ import com.familynest.auth.AuthUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
+/**
+ * Controller for handling subscription-related endpoints.
+ * 
+ * SUBSCRIPTION MODEL:
+ * 1. App initiates purchase through platform store (Google Play/Apple App Store)
+ * 2. On successful purchase, app sends purchase details to backend via /put-subscription
+ *    - This establishes the user_id ↔ purchase_token link for future webhook notifications
+ * 3. Backend stores purchase details and updates user subscription status
+ * 4. For subsequent status changes (renewal, cancellation, expiration):
+ *    - Google Play: Real-Time Developer Notifications webhook (/google-webhook) updates backend directly
+ *    - Apple: Server-to-server notifications will update backend directly (TODO: implement /apple-webhook)
+ * 5. App queries backend for current subscription status via /get-subscription
+ * 
+ * This model minimizes app-side logic and relies on server-side webhooks for accuracy.
+ * The backend is the source of truth for subscription status.
+ */
 @RestController
 @RequestMapping("/api/subscription")
-@SuppressWarnings("unchecked") // Suppress unchecked warnings for JDBC operations
 public class SubscriptionController {
 
     private static final Logger logger = LoggerFactory.getLogger(SubscriptionController.class);
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
+    
     @Autowired
     private AuthUtil authUtil;
-
-    @Value("${payments.mock.enabled:true}")
-    private boolean mockPaymentsEnabled;
-
-    @Value("${apple.bundle-id:com.anthony.familynest}")
-    private String appleBundleId;
-
-    @Value("${google.package-name:com.anthony.familynest}")
-    private String googlePackageName;
-
-    // Global subscription pricing - should be managed by admin interface
-    @Value("${subscription.monthly.price:2.99}")
-    private double monthlyPrice;
-
+    
     /**
-     * Verify Apple App Store purchase receipt
+     * Google Play Real-Time Developer Notifications webhook endpoint
+     * This endpoint receives notifications from Google Play about subscription events
+     * See: https://developer.android.com/google/play/billing/rtdn-reference
      */
-    @PostMapping("/verify-apple")
-    @Transactional
-    public ResponseEntity<Map<String, Object>> verifyApplePurchase(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, Object> request) {
-        
-        logger.info("🍎 Apple purchase verification request received");
+    @PostMapping("/google-webhook")
+    public ResponseEntity<Map<String, Object>> googleWebhook(@RequestBody Map<String, Object> notification) {
+        logger.info("📱 Received Google Play RTDN notification: {}", notification);
         
         try {
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);
-            String receiptData = (String) request.get("receipt_data");
-            String productId = (String) request.get("product_id");
+            // Extract the notification data
+            // The structure follows Google's RTDN format
+            if (notification.containsKey("message")) {
+                Map<String, Object> message = (Map<String, Object>) notification.get("message");
+                if (message.containsKey("data")) {
+                    // The data is base64 encoded
+                    String encodedData = (String) message.get("data");
+                    String decodedData = new String(java.util.Base64.getDecoder().decode(encodedData));
+                    logger.info("📱 Decoded notification data: {}", decodedData);
+                    
+                    // Parse the JSON data
+                    Map<String, Object> data = new org.springframework.boot.json.JacksonJsonParser().parseMap(decodedData);
+                    
+                    // Process the notification based on its type
+                    String notificationType = (String) data.get("notificationType");
+                    logger.info("📱 Notification type: {}", notificationType);
+                    
+                    // Handle subscription notifications
+                    if ("SUBSCRIPTION_PURCHASED".equals(notificationType) || 
+                        "SUBSCRIPTION_RENEWED".equals(notificationType) ||
+                        "SUBSCRIPTION_CANCELED".equals(notificationType) ||
+                        "SUBSCRIPTION_EXPIRED".equals(notificationType)) {
+                        
+                        processSubscriptionNotification(data);
+                    }
+                }
+            }
             
-            if (receiptData == null || productId == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Missing receipt_data or product_id"));
-            }
-
-            if (mockPaymentsEnabled) {
-                return mockAppleVerification(userId, receiptData, productId);
-            } else {
-                return verifyWithApple(userId, receiptData, productId);
-            }
-
+            // Return 200 OK to acknowledge receipt
+            return ResponseEntity.ok(Map.of("status", "received"));
         } catch (Exception e) {
-            logger.error("Error verifying Apple purchase", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Verification failed"));
+            logger.error("❌ Error processing Google Play notification", e);
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Process a subscription notification from Google Play
+     */
+    private void processSubscriptionNotification(Map<String, Object> data) {
+        try {
+            // Extract the subscription info
+            Map<String, Object> subscriptionNotification = (Map<String, Object>) data.get("subscriptionNotification");
+            if (subscriptionNotification == null) {
+                logger.warn("⚠️ No subscription notification data found");
+                return;
+            }
+            
+            String purchaseToken = (String) subscriptionNotification.get("purchaseToken");
+            String subscriptionId = (String) subscriptionNotification.get("subscriptionId");
+            Integer notificationType = (Integer) subscriptionNotification.get("notificationType");
+            
+            logger.info("📱 Processing subscription notification: token={}, id={}, type={}", 
+                purchaseToken, subscriptionId, notificationType);
+            
+            // Find the user associated with this purchase token
+            Long userId = findUserByPurchaseToken(purchaseToken);
+            if (userId == null) {
+                logger.warn("⚠️ No user found for purchase token: {}", purchaseToken);
+                return;
+            }
+            
+            // Process based on notification type
+            switch (notificationType) {
+                case 1: // SUBSCRIPTION_PURCHASED
+                case 2: // SUBSCRIPTION_RENEWED
+                    // Update user status to active
+                    updateUserSubscriptionStatus(userId, "active");
+                    // Record transaction
+                    recordPaymentTransaction(userId, "GOOGLE", purchaseToken, subscriptionId, 0.0);
+                    logger.info("✅ Updated user {} subscription to ACTIVE", userId);
+                    break;
+                    
+                case 3: // SUBSCRIPTION_CANCELED
+                case 4: // SUBSCRIPTION_EXPIRED
+                    // Update user status to inactive
+                    updateUserSubscriptionStatus(userId, "inactive");
+                    // Record transaction
+                    recordExpirationTransaction(userId, "GOOGLE", purchaseToken, subscriptionId, 0.0);
+                    logger.info("⏰ Updated user {} subscription to INACTIVE", userId);
+                    break;
+                    
+                default:
+                    logger.warn("⚠️ Unknown notification type: {}", notificationType);
+            }
+        } catch (Exception e) {
+            logger.error("❌ Error processing subscription notification", e);
+        }
+    }
+    
+    /**
+     * Find the user ID associated with a purchase token
+     */
+    /**
+     * Apple App Store Server Notifications webhook endpoint.
+     * TODO: Implement this endpoint for Apple subscription status updates.
+     * 
+     * This will receive server-to-server notifications from Apple about subscription events
+     * such as renewals, expirations, and cancellations.
+     * 
+     * See: https://developer.apple.com/documentation/appstoreservernotifications
+     */
+    @PostMapping("/apple-webhook")
+    public ResponseEntity<Map<String, Object>> appleWebhook(@RequestBody Map<String, Object> notification) {
+        logger.info("🍎 Received Apple App Store notification: {}", notification);
+        // TODO: Implement Apple App Store server notifications processing
+        // This will be similar to the Google webhook but with Apple-specific fields
+        return ResponseEntity.ok(Map.of("status", "received"));
+    }
+    
+    /**
+     * Find a user by their purchase token.
+     * This is used to link webhook notifications to the correct user.
+     */
+    private Long findUserByPurchaseToken(String purchaseToken) {
+        try {
+            String sql = "SELECT user_id FROM payment_transactions WHERE platform_transaction_id = ? LIMIT 1";
+            return jdbcTemplate.queryForObject(sql, Long.class, purchaseToken);
+        } catch (Exception e) {
+            logger.warn("⚠️ Could not find user for purchase token: {}", purchaseToken);
+            return null;
         }
     }
 
     /**
-     * Verify Google Play Store purchase receipt
+     * Record subscription purchase from any platform
+     * This endpoint updates the user's subscription status and records the transaction
      */
-    @PostMapping("/verify-google")
+    @PostMapping("/put-subscription")
     @Transactional
-    public ResponseEntity<Map<String, Object>> verifyGooglePurchase(
+    public ResponseEntity<Map<String, Object>> putSubscription(
             @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, Object> request) {
         
-        logger.info("🤖 Google purchase verification request received");
+        logger.info("📱 Subscription update request received");
         
         try {
+            // Extract user ID from auth token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
             Long userId = authUtil.extractUserId(token);
-            String purchaseToken = (String) request.get("purchase_token");
-            String productId = (String) request.get("product_id");
             
-            if (purchaseToken == null || productId == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Missing purchase_token or product_id"));
+            // Extract request parameters
+            String transactionId = (String) request.get("transaction_id");
+            String platform = (String) request.get("platform");
+            String productId = (String) request.get("product_id");
+            Double price = request.get("price") instanceof Number ? 
+                ((Number) request.get("price")).doubleValue() : 0.0;
+            Boolean isExpired = Boolean.TRUE.equals(request.get("is_expired"));
+            
+            // Validate required parameters
+            if (transactionId == null || platform == null || productId == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Missing required parameters: transaction_id, platform, and product_id are required"
+                ));
+            }
+            
+            // Validate platform value
+            if (!platform.equals("GOOGLE") && !platform.equals("APPLE")) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Invalid platform. Must be either 'GOOGLE' or 'APPLE'"
+                ));
             }
 
-            if (mockPaymentsEnabled) {
-                return mockGoogleVerification(userId, purchaseToken, productId);
+            if (isExpired) {
+                // Handle expired/cancelled subscription
+                logger.info("⏰ Recording subscription expiration for user {} product {}", userId, productId);
+                
+                // 1. Update user subscription status to inactive
+                updateUserSubscriptionStatus(userId, "inactive");
+                
+                // 2. Record expiration in payment_transactions table
+                recordExpirationTransaction(userId, platform, transactionId, productId, price);
+                
+                return ResponseEntity.ok(Map.of(
+                    "status", "expired",
+                    "user_id", userId,
+                    "platform", platform,
+                    "transaction_id", transactionId,
+                    "message", "Subscription marked as inactive"
+                ));
             } else {
-                return verifyWithGoogle(userId, purchaseToken, productId);
+                // Record new purchase
+                logger.info("💰 Recording {} purchase for user {} product {} price {}", platform, userId, productId, price);
+                
+                // 1. Update user subscription in app_user table
+                updateUserSubscription(userId, platform, transactionId, productId);
+                
+                // 2. Record transaction in payment_transactions table
+                recordPaymentTransaction(userId, platform, transactionId, productId, price);
             }
+            
+            return ResponseEntity.ok(Map.of(
+                "status", "recorded",
+                "user_id", userId,
+                "platform", platform,
+                "transaction_id", transactionId,
+                "product_id", productId
+            ));
 
         } catch (Exception e) {
-            logger.error("Error verifying Google purchase", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Verification failed"));
+            logger.error("Error recording subscription", e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to record subscription: " + e.getMessage()));
         }
     }
 
     /**
      * Get user's current subscription status
      */
-    @GetMapping("/status")
-    public ResponseEntity<Map<String, Object>> getSubscriptionStatus(
+    @GetMapping("/get-subscription")
+    public ResponseEntity<Map<String, Object>> getSubscription(
             @RequestHeader("Authorization") String authHeader) {
         
         try {
@@ -121,620 +271,250 @@ public class SubscriptionController {
             
             String sql = """
                 SELECT subscription_status, trial_end_date, subscription_end_date, 
-                       platform, platform_transaction_id
+                       platform, platform_transaction_id, subscription_start_date
                 FROM app_user WHERE id = ?
             """;
             
             Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId);
             
-            // Check if subscription is actually active
-            String status = (String) result.get("subscription_status");
-            java.sql.Timestamp trialEndTs = (java.sql.Timestamp) result.get("trial_end_date");
-            java.sql.Timestamp subscriptionEndTs = (java.sql.Timestamp) result.get("subscription_end_date");
-            
-            LocalDateTime trialEnd = trialEndTs != null ? trialEndTs.toLocalDateTime() : null;
-            LocalDateTime subscriptionEnd = subscriptionEndTs != null ? subscriptionEndTs.toLocalDateTime() : null;
-            
-            boolean hasActiveAccess = hasActiveSubscriptionAccess(status, trialEnd, subscriptionEnd);
-            
+            // Return the raw subscription data - let the client decide what to do with it
             Map<String, Object> response = new HashMap<>(result);
-            response.put("has_active_access", hasActiveAccess);
-            response.put("is_trial", "trial".equals(status) || "platform_trial".equals(status));
-            // Use global pricing from application properties
-            response.put("monthly_price", monthlyPrice);
+            
+            // No hardcoded pricing - the frontend will get real pricing from the app stores
+            response.put("monthly_price", 0.00);
             
             return ResponseEntity.ok(response);
             
         } catch (Exception e) {
-            logger.error("Error getting subscription status", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get status"));
+            logger.error("Error getting subscription data", e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get subscription data"));
         }
     }
-
+    
     /**
-     * Check if user has active subscription access
+     * Get user's payment transaction history
      */
-    public boolean hasActiveSubscriptionAccess(Long userId) {
+    @GetMapping("/get-payment-history")
+    public ResponseEntity<Map<String, Object>> getPaymentHistory(
+            @RequestHeader("Authorization") String authHeader) {
+        
+        logger.info("📊 Payment history request received");
+        
         try {
+            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+            Long userId = authUtil.extractUserId(token);
+            logger.info("📊 Getting payment history for user ID: {}", userId);
+            
             String sql = """
-                SELECT subscription_status, trial_end_date, subscription_end_date
-                FROM app_user WHERE id = ?
+                SELECT id, user_id, platform, amount, currency, transaction_date, 
+                       description, platform_transaction_id, product_id, status, 
+                       created_at
+                FROM payment_transactions 
+                WHERE user_id = ? 
+                ORDER BY transaction_date DESC
+                LIMIT 20
             """;
             
-            Map<String, Object> result = jdbcTemplate.queryForMap(sql, userId);
-            String status = (String) result.get("subscription_status");
-            java.sql.Timestamp trialEndTs = (java.sql.Timestamp) result.get("trial_end_date");
-            java.sql.Timestamp subscriptionEndTs = (java.sql.Timestamp) result.get("subscription_end_date");
+            List<Map<String, Object>> transactions = jdbcTemplate.queryForList(sql, userId);
+            logger.info("📊 Found {} transactions for user {}", transactions.size(), userId);
             
-            LocalDateTime trialEnd = trialEndTs != null ? trialEndTs.toLocalDateTime() : null;
-            LocalDateTime subscriptionEnd = subscriptionEndTs != null ? subscriptionEndTs.toLocalDateTime() : null;
+            // Format the transaction data for the frontend
+            List<Map<String, Object>> formattedTransactions = new ArrayList<>();
             
-            return hasActiveSubscriptionAccess(status, trialEnd, subscriptionEnd);
+            for (Map<String, Object> transaction : transactions) {
+                Map<String, Object> formatted = new HashMap<>();
+                formatted.put("transaction_date", ((java.sql.Timestamp) transaction.get("transaction_date")).getTime());
+                formatted.put("amount", transaction.get("amount"));
+                formatted.put("description", transaction.get("description"));
+                formatted.put("status", transaction.get("status"));
+                formatted.put("platform", transaction.get("platform"));
+                formatted.put("product_id", transaction.get("product_id"));
+                formatted.put("platform_transaction_id", transaction.get("platform_transaction_id"));
+                formatted.put("created_at", ((java.sql.Timestamp) transaction.get("created_at")).getTime());
+                
+                formattedTransactions.add(formatted);
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("transactions", formattedTransactions);
+            
+            logger.info("📊 Retrieved {} payment transactions for user {}", transactions.size(), userId);
+            
+            return ResponseEntity.ok(response);
             
         } catch (Exception e) {
-            logger.error("Error checking subscription access for user " + userId, e);
-            return false;
+            logger.error("❌ Error getting payment history", e);
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get payment history"));
         }
     }
 
-    private boolean hasActiveSubscriptionAccess(String status, LocalDateTime trialEnd, LocalDateTime subscriptionEnd) {
-        LocalDateTime now = LocalDateTime.now();
-        
-        logger.debug("🔍 Checking access: status={}, trialEnd={}, subscriptionEnd={}, now={}", 
-                    status, trialEnd, subscriptionEnd, now);
-        
-        switch (status) {
-            case "trial":
-            case "platform_trial":
-                // For trials, check trial_end_date using DATE-ONLY comparison (ignore time)
-                if (trialEnd == null) {
-                    logger.debug("❌ Trial access: no trial end date");
-                    return false;
-                }
-                
-                // Compare dates only - if trial ends today or later, still active
-                boolean trialActive = !trialEnd.toLocalDate().isBefore(now.toLocalDate());
-                logger.debug("📅 Trial access (date-only): trialDate={}, todayDate={}, active={}", 
-                           trialEnd.toLocalDate(), now.toLocalDate(), trialActive);
-                return trialActive;
-                
-            case "active":
-                // For paid subscriptions, if no end date specified, assume ongoing access
-                // This handles platform-managed subscriptions where we don't track end dates
-                if (subscriptionEnd == null) {
-                    logger.debug("✅ Active subscription with no end date - granting access");
-                    return true;
-                }
-                // If end date is specified, check it using date-only comparison
-                boolean subscriptionActive = !subscriptionEnd.toLocalDate().isBefore(now.toLocalDate());
-                logger.debug("📅 Paid subscription access (date-only): subDate={}, todayDate={}, active={}", 
-                           subscriptionEnd.toLocalDate(), now.toLocalDate(), subscriptionActive);
-                return subscriptionActive;
-                
-            case "past_due":
-                // GRACE PERIOD: When billing fails, Google/Apple gives users time to fix payment
-                // During grace period (usually 7-16 days), user still has access but should see warnings
-                if (subscriptionEnd == null) {
-                    logger.debug("⚠️ Past due subscription with no end date - granting grace access");
-                    return true; // Grant access during grace period
-                }
-                
-                // Check if still within grace period (assume 7 days grace)
-                LocalDateTime graceEnd = subscriptionEnd.plusDays(7);
-                boolean inGracePeriod = !graceEnd.toLocalDate().isBefore(now.toLocalDate());
-                logger.debug("⚠️ Past due access check: graceEnd={}, todayDate={}, inGrace={}", 
-                           graceEnd.toLocalDate(), now.toLocalDate(), inGracePeriod);
-                return inGracePeriod;
-                
-            case "cancelled":
-                // Cancelled users keep access until their paid period ends
-                if (subscriptionEnd == null) {
-                    logger.debug("❌ Cancelled subscription with no end date - denying access");
-                    return false;
-                }
-                boolean cancelledActive = !subscriptionEnd.toLocalDate().isBefore(now.toLocalDate());
-                logger.debug("📅 Cancelled subscription access (date-only): subDate={}, todayDate={}, active={}", 
-                           subscriptionEnd.toLocalDate(), now.toLocalDate(), cancelledActive);
-                return cancelledActive;
-                
-            case "expired":
-                logger.debug("❌ Subscription expired - denying access");
-                return false;
-                
-            default:
-                logger.warn("⚠️ Unknown subscription status '{}' - denying access", status);
-                return false;
-        }
-    }
-
-    // MOCK IMPLEMENTATIONS FOR TESTING
-
-    private ResponseEntity<Map<String, Object>> mockAppleVerification(Long userId, String receiptData, String productId) {
-        logger.info("🧪 MOCK: Apple verification for user {} product {}", userId, productId);
-        
-        // Simulate successful Apple verification
-        String transactionId = "mock_apple_" + UUID.randomUUID().toString().substring(0, 8);
-        
-        // Update user subscription in database
-        updateUserSubscription(userId, "active", "APPLE", transactionId, productId);
-        
-        Map<String, Object> response = Map.of(
-            "status", "verified",
-            "platform", "APPLE",
-            "transaction_id", transactionId,
-            "product_id", productId,
-            "is_trial", false,
-            "message", "Mock Apple verification successful"
-        );
-        
-        return ResponseEntity.ok(response);
-    }
-
-    private ResponseEntity<Map<String, Object>> mockGoogleVerification(Long userId, String purchaseToken, String productId) {
-        logger.info("🧪 MOCK: Google verification for user {} product {}", userId, productId);
-        
-        // Simulate successful Google verification
-        String transactionId = "mock_google_" + UUID.randomUUID().toString().substring(0, 8);
-        
-        // Update user subscription in database
-        updateUserSubscription(userId, "active", "GOOGLE", transactionId, productId);
-        
-        Map<String, Object> response = Map.of(
-            "status", "verified",
-            "platform", "GOOGLE",
-            "transaction_id", transactionId,
-            "product_id", productId,
-            "is_trial", false,
-            "message", "Mock Google verification successful"
-        );
-        
-        return ResponseEntity.ok(response);
-    }
-
-    private void updateUserSubscription(Long userId, String status, String platform, String transactionId, String productId) {
+    private void updateUserSubscription(Long userId, String platform, String transactionId, String productId) {
         // CRITICAL: Use UTC for all subscription time handling
         LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
-        LocalDateTime trialEnd = now.plusDays(30); // 30-day trial
-        LocalDateTime subscriptionEnd = now.plusDays(30); // Monthly subscription period
         
         String sql = """
             UPDATE app_user 
-            SET subscription_status = ?, 
+            SET subscription_status = 'active', 
                 platform = ?, 
                 platform_transaction_id = ?,
-                trial_end_date = ?,
+                trial_end_date = NULL,
                 subscription_start_date = ?,
                 subscription_end_date = ?,
                 updated_at = ?
             WHERE id = ?
         """;
         
-        jdbcTemplate.update(sql, status, platform, transactionId, trialEnd, now, subscriptionEnd, now, userId);
+        // Set subscription end date to 30 days from now (for monthly subscription)
+        LocalDateTime subscriptionEnd = now.plusDays(30);
         
-        // Record the transaction in payment_transactions table
-        boolean isTrial = "trial".equals(status) || "platform_trial".equals(status);
-        recordPaymentTransaction(userId, platform, transactionId, productId, isTrial);
+        jdbcTemplate.update(sql, platform, transactionId, now, subscriptionEnd, now, userId);
         
-        logger.info("✅ Updated user {} subscription: status={}, platform={}, trial_end={}", 
-                   userId, status, platform, trialEnd);
+        logger.info("✅ Updated user {} subscription: platform={}, transaction_id={}", 
+                   userId, platform, transactionId);
     }
     
-    private void recordPaymentTransaction(Long userId, String platform, String transactionId, String productId, boolean isTrial) {
+    /**
+     * Record a payment transaction in the history
+     * Only adds a new record if the status has changed from the most recent record
+     */
+    private void recordPaymentTransaction(Long userId, String platform, String transactionId, String productId, double price) {
         try {
-            String sql = """
-                INSERT INTO payment_transactions 
-                (user_id, platform, amount, description, platform_transaction_id, product_id, status, transaction_date)
-                VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+            // Check the most recent transaction for this user and product
+            String checkSql = """
+                SELECT platform_transaction_id, status 
+                FROM payment_transactions 
+                WHERE user_id = ? 
+                AND product_id = ?
+                ORDER BY transaction_date DESC
+                LIMIT 1
             """;
             
-            double amount = isTrial ? 0.00 : monthlyPrice;
-            String description = isTrial ? 
-                "30-day free trial started" : 
-                "Premium subscription - " + productId;
+            boolean shouldInsert = true;
             
-            LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
-            jdbcTemplate.update(sql, userId, platform, amount, description, transactionId, productId, now);
+            try {
+                // Query for the most recent record
+                Map<String, Object> lastRecord = jdbcTemplate.queryForMap(checkSql, userId, productId);
+                
+                // Extract values from the last record
+                String lastTransactionId = (String) lastRecord.get("platform_transaction_id");
+                String lastStatus = (String) lastRecord.get("status");
+                
+                // If the last record has the same transaction ID and status, skip creating a duplicate
+                if (lastTransactionId != null && lastTransactionId.equals(transactionId) && 
+                    lastStatus != null && lastStatus.equals("completed")) {
+                    logger.info("⏰ Skipping duplicate completed record for user {}: {} (same as last record)", 
+                        userId, productId);
+                    shouldInsert = false; // Skip creating a duplicate record
+                } else {
+                    logger.info("✅ Creating new completed record because it's different from the last record");
+                    logger.info("   Last record: transactionId={}, status={}", lastTransactionId, lastStatus);
+                    logger.info("   New record:  transactionId={}, status=completed", transactionId);
+                }
+                
+            } catch (Exception e) {
+                // If there's no previous record or other error, proceed with creating the record
+                logger.info("ℹ️ No previous record found or error occurred, creating first completed record");
+            }
             
-            logger.info("💰 Recorded payment transaction for user {}: ${} - {}", userId, amount, description);
+            if (shouldInsert) {
+                // Insert the new record
+                String sql = """
+                    INSERT INTO payment_transactions 
+                    (user_id, platform, amount, description, platform_transaction_id, product_id, status, transaction_date)
+                    VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+                """;
+                
+                // Use the price from the app store
+                double amount = price;
+                String description = "Premium subscription - " + productId;
+                
+                LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
+                jdbcTemplate.update(sql, userId, platform, amount, description, transactionId, productId, now);
+                
+                logger.info("💰 Recorded payment transaction for user {}: {} - {}", userId, platform, productId);
+            }
             
         } catch (Exception e) {
             logger.error("❌ Failed to record payment transaction for user {}", userId, e);
             // Don't fail the whole subscription process if transaction recording fails
         }
     }
-
+    
     /**
-     * Get user's payment history
+     * Update user's subscription status
      */
-    @GetMapping("/history")
-    public ResponseEntity<Map<String, Object>> getPaymentHistory(
-            @RequestHeader("Authorization") String authHeader) {
-        
-        try {
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);
-            
-            // Get user's current subscription info
-            String userSql = """
-                SELECT subscription_status, trial_start_date, trial_end_date, 
-                       subscription_start_date, subscription_end_date, monthly_price, platform
-                FROM app_user WHERE id = ?
-            """;
-            
-            Map<String, Object> userInfo = jdbcTemplate.queryForMap(userSql, userId);
-            
-            // Get transaction history
-            String transactionSql = """
-                SELECT transaction_date, amount, description, status, platform, product_id, created_at
-                FROM payment_transactions 
-                WHERE user_id = ? 
-                ORDER BY transaction_date DESC 
-                LIMIT 50
-            """;
-            
-            List<Map<String, Object>> transactions = jdbcTemplate.queryForList(transactionSql, userId);
-            
-            // Build response
-            Map<String, Object> response = new HashMap<>(userInfo);
-            response.put("transactions", transactions);
-            
-            // Calculate has_active_access
-            String status = (String) userInfo.get("subscription_status");
-            java.sql.Timestamp trialEndTs = (java.sql.Timestamp) userInfo.get("trial_end_date");
-            java.sql.Timestamp subscriptionEndTs = (java.sql.Timestamp) userInfo.get("subscription_end_date");
-            
-            LocalDateTime trialEnd = trialEndTs != null ? trialEndTs.toLocalDateTime() : null;
-            LocalDateTime subscriptionEnd = subscriptionEndTs != null ? subscriptionEndTs.toLocalDateTime() : null;
-            
-            boolean hasActiveAccess = hasActiveSubscriptionAccess(status, trialEnd, subscriptionEnd);
-            response.put("has_active_access", hasActiveAccess);
-            response.put("is_trial", "trial".equals(status) || "platform_trial".equals(status));
-            
-            return ResponseEntity.ok(response);
-            
-        } catch (Exception e) {
-            logger.error("Error getting payment history", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to get payment history"));
-        }
-    }
-
-    /**
-     * Cancel user subscription
-     */
-    @PostMapping("/cancel")
-    @Transactional
-    public ResponseEntity<Map<String, Object>> cancelSubscription(
-            @RequestHeader("Authorization") String authHeader) {
-        
-        try {
-            String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
-            Long userId = authUtil.extractUserId(token);
-            
-            // Update subscription status to cancelled
-            String sql = """
-                UPDATE app_user 
-                SET subscription_status = 'cancelled',
-                    updated_at = ?
-                WHERE id = ?
-            """;
-            
-            LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
-            jdbcTemplate.update(sql, now, userId);
-            
-            // Record the cancellation as a transaction
-            recordCancellationTransaction(userId);
-            
-            logger.info("✅ User {} cancelled their subscription", userId);
-            
-            return ResponseEntity.ok(Map.of(
-                "status", "cancelled",
-                "message", "Subscription cancelled successfully",
-                "effective_date", LocalDateTime.now(java.time.ZoneOffset.UTC).toString()
-            ));
-            
-        } catch (Exception e) {
-            logger.error("Error cancelling subscription", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to cancel subscription"));
-        }
-    }
-
-    /**
-     * Google Play Real-time Developer Notifications webhook
-     * This is called by Google Play when subscription events occur (renewals, cancellations, etc.)
-     * URL to configure in Google Play Console: https://yourdomain.com/api/subscription/google-webhook
-     */
-    @PostMapping("/google-webhook")
-    public ResponseEntity<Map<String, Object>> handleGoogleWebhook(
-            @RequestBody Map<String, Object> notificationData) {
-        
-        try {
-            logger.info("🔔 Google Play webhook received: {}", notificationData);
-            
-            // Extract Google Play notification data
-            // Real format: {"version":"1.0","packageName":"com.anthony.familynest","eventTimeMillis":"...","subscriptionNotification":{...}}
-            String packageName = (String) notificationData.get("packageName");
-            Object notificationObj = notificationData.get("subscriptionNotification");
-            Map<String, Object> subscriptionNotification = (notificationObj instanceof Map) ? (Map<String, Object>) notificationObj : null;
-            
-            if (subscriptionNotification == null) {
-                logger.warn("⚠️ No subscriptionNotification in webhook data");
-                return ResponseEntity.ok(Map.of("status", "ignored"));
-            }
-            
-            String purchaseToken = (String) subscriptionNotification.get("purchaseToken");
-            Integer notificationType = (Integer) subscriptionNotification.get("notificationType");
-            String subscriptionId = (String) subscriptionNotification.get("subscriptionId");
-            
-            // Find user by purchase token
-            String findUserSql = "SELECT id, username FROM app_user WHERE platform_transaction_id = ?";
-            List<Map<String, Object>> users = jdbcTemplate.queryForList(findUserSql, purchaseToken);
-            
-            if (users.isEmpty()) {
-                logger.warn("⚠️ No user found for purchase token: {}", purchaseToken);
-                return ResponseEntity.ok(Map.of("status", "user_not_found"));
-            }
-            
-            Long userId = ((Number) users.get(0).get("id")).longValue();
-            
-            // Handle different notification types
-            switch (notificationType) {
-                case 2: // SUBSCRIPTION_RENEWED
-                    logger.info("📅 Subscription renewed for user {}", userId);
-                    recordPaymentTransaction(userId, "GOOGLE", purchaseToken, subscriptionId, false);
-                    break;
-                case 3: // SUBSCRIPTION_CANCELED
-                    logger.info("🚫 Subscription canceled by Google for user {}", userId);
-                    recordCancellationTransaction(userId);
-                    break;
-                case 4: // SUBSCRIPTION_PURCHASED
-                    logger.info("🛒 New subscription purchased for user {}", userId);
-                    recordPaymentTransaction(userId, "GOOGLE", purchaseToken, subscriptionId, false);
-                    break;
-                case 12: // SUBSCRIPTION_EXPIRED
-                    logger.info("⏰ Subscription expired for user {}", userId);
-                    updateUserSubscriptionStatus(userId, "expired");
-                    break;
-                default:
-                    logger.info("ℹ️ Unhandled notification type {} for user {}", notificationType, userId);
-            }
-            
-            return ResponseEntity.ok(Map.of("status", "processed", "notificationType", notificationType));
-            
-        } catch (Exception e) {
-            logger.error("Error processing Google webhook", e);
-            return ResponseEntity.ok(Map.of("status", "error")); // Always return 200 to Google
-        }
-    }
-
-    /**
-     * Handle billing failure notifications from Google Play / Apple App Store
-     * This endpoint would be called by webhooks when credit card fails
-     */
-    @PostMapping("/billing-failure")
-    @Transactional
-    public ResponseEntity<Map<String, Object>> handleBillingFailure(
-            @RequestBody Map<String, Object> billingEvent) {
-        
-        try {
-            String platform = (String) billingEvent.get("platform"); // "GOOGLE" or "APPLE"
-            String transactionId = (String) billingEvent.get("transaction_id");
-            String failureReason = (String) billingEvent.get("failure_reason");
-            
-            logger.warn("💳 BILLING FAILURE: platform={}, transactionId={}, reason={}", 
-                       platform, transactionId, failureReason);
-            
-            // Find user by platform transaction ID
-            String findUserSql = """
-                SELECT id, username, email, subscription_status, fcm_token
-                FROM app_user 
-                WHERE platform_transaction_id = ?
-            """;
-            
-            List<Map<String, Object>> users = jdbcTemplate.queryForList(findUserSql, transactionId);
-            
-            if (users.isEmpty()) {
-                logger.warn("⚠️ No user found for failed transaction: {}", transactionId);
-                return ResponseEntity.ok(Map.of("status", "ignored", "message", "User not found"));
-            }
-            
-            Map<String, Object> user = users.get(0);
-            Long userId = ((Number) user.get("id")).longValue();
-            String currentStatus = (String) user.get("subscription_status");
-            String fcmToken = (String) user.get("fcm_token");
-            
-            // Transition from 'active' to 'past_due' (grace period)
-            if ("active".equals(currentStatus)) {
-                String updateSql = """
-                    UPDATE app_user 
-                    SET subscription_status = 'past_due',
-                        updated_at = ?
-                    WHERE id = ?
-                """;
-                
-                LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
-                jdbcTemplate.update(updateSql, now, userId);
-                
-                // Record failed transaction
-                recordFailedTransaction(userId, platform, transactionId, failureReason);
-                
-                // Send push notification to user about billing issue
-                sendBillingFailureNotification(userId, fcmToken, failureReason);
-                
-                logger.info("⚠️ User {} moved to 'past_due' status due to billing failure", userId);
-                
-                return ResponseEntity.ok(Map.of(
-                    "status", "processed",
-                    "message", "User moved to grace period",
-                    "user_id", userId,
-                    "new_status", "past_due"
-                ));
-            }
-            
-            logger.info("ℹ️ User {} already in non-active status: {}", userId, currentStatus);
-            return ResponseEntity.ok(Map.of("status", "ignored", "message", "User not in active status"));
-            
-        } catch (Exception e) {
-            logger.error("Error handling billing failure", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to process billing failure"));
-        }
-    }
-
-    private void recordFailedTransaction(Long userId, String platform, String transactionId, String failureReason) {
-        try {
-            String sql = """
-                INSERT INTO payment_transactions 
-                (user_id, platform, amount, description, platform_transaction_id, status, transaction_date)
-                VALUES (?, ?, ?, ?, ?, 'failed', ?)
-            """;
-            
-            String description = "Billing failed: " + (failureReason != null ? failureReason : "Unknown reason");
-            
-            LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
-            jdbcTemplate.update(sql, userId, platform, 0.00, description, transactionId, now);
-            
-            logger.info("💳 Recorded failed transaction for user {}: {}", userId, description);
-            
-        } catch (Exception e) {
-            logger.error("❌ Failed to record failed transaction for user {}", userId, e);
-        }
-    }
-
-    private void recordCancellationTransaction(Long userId) {
-        try {
-            // Get user's current platform for the cancellation record
-            String userSql = "SELECT platform, platform_transaction_id FROM app_user WHERE id = ?";
-            Map<String, Object> userInfo = jdbcTemplate.queryForMap(userSql, userId);
-            
-            String platform = (String) userInfo.get("platform");
-            // Generate unique cancellation transaction ID (don't reuse original purchase token)
-            String cancellationTransactionId = platform.toLowerCase() + "_cancel_" + UUID.randomUUID().toString().substring(0, 8);
-            
-            String sql = """
-                INSERT INTO payment_transactions 
-                (user_id, platform, amount, description, platform_transaction_id, status, transaction_date)
-                VALUES (?, ?, ?, ?, ?, 'cancelled', ?)
-            """;
-            
-            String description = "Subscription cancelled by user";
-            LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
-            
-            jdbcTemplate.update(sql, userId, platform, 0.00, description, cancellationTransactionId, now);
-            
-            logger.info("🚫 Recorded cancellation transaction for user {}", userId);
-            
-        } catch (Exception e) {
-            logger.error("❌ Failed to record cancellation transaction for user {}", userId, e);
-            // Don't fail the cancellation if transaction recording fails
-        }
-    }
-
-    private void updateUserSubscriptionStatus(Long userId, String newStatus) {
+    private void updateUserSubscriptionStatus(Long userId, String status) {
         try {
             String sql = "UPDATE app_user SET subscription_status = ?, updated_at = ? WHERE id = ?";
             LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
-            jdbcTemplate.update(sql, newStatus, now, userId);
-            logger.info("✅ Updated user {} subscription status to: {}", userId, newStatus);
+            jdbcTemplate.update(sql, status, now, userId);
+            logger.info("✅ Updated user {} subscription status to: {}", userId, status);
         } catch (Exception e) {
             logger.error("❌ Failed to update subscription status for user {}", userId, e);
         }
     }
-
-    private void sendBillingFailureNotification(Long userId, String fcmToken, String failureReason) {
+    
+    /**
+     * Record an expiration/cancellation transaction in the history
+     * Only adds a new record if the status has changed from the most recent record
+     */
+    private void recordExpirationTransaction(Long userId, String platform, String transactionId, String productId, double price) {
         try {
-            if (fcmToken == null || fcmToken.trim().isEmpty()) {
-                logger.debug("📱 No FCM token for user {}, skipping push notification", userId);
-                return;
+            // Check the most recent transaction for this user and product
+            String checkSql = """
+                SELECT platform_transaction_id, status 
+                FROM payment_transactions 
+                WHERE user_id = ? 
+                AND product_id = ?
+                ORDER BY transaction_date DESC
+                LIMIT 1
+            """;
+            
+            boolean shouldInsert = true;
+            
+            try {
+                // Query for the most recent record
+                Map<String, Object> lastRecord = jdbcTemplate.queryForMap(checkSql, userId, productId);
+                
+                // Extract values from the last record
+                String lastTransactionId = (String) lastRecord.get("platform_transaction_id");
+                String lastStatus = (String) lastRecord.get("status");
+                
+                // If the last record has the same transaction ID and status, skip creating a duplicate
+                if (lastTransactionId != null && lastTransactionId.equals(transactionId) && 
+                    lastStatus != null && lastStatus.equals("inactive")) {
+                    logger.info("⏰ Skipping duplicate inactive record for user {}: {} (same as last record)", 
+                        userId, productId);
+                    shouldInsert = false; // Skip creating a duplicate record
+                } else {
+                    logger.info("✅ Creating new inactive record because it's different from the last record");
+                    logger.info("   Last record: transactionId={}, status={}", lastTransactionId, lastStatus);
+                    logger.info("   New record:  transactionId={}, status=inactive", transactionId);
+                }
+                
+            } catch (Exception e) {
+                // If there's no previous record or other error, proceed with creating the record
+                logger.info("ℹ️ No previous record found or error occurred, creating first inactive record");
             }
             
-            // Here you would integrate with your PushNotificationService
-            // For now, just log what we would send
-            String title = "Payment Issue - FamilyNest";
-            String body = "We couldn't process your payment. Please update your payment method to continue using FamilyNest.";
-            
-            logger.info("📱 Would send billing failure notification to user {}: {}", userId, body);
-            
-            // TODO: Integrate with PushNotificationService
-            // pushNotificationService.sendNotification(fcmToken, title, body);
-            
-        } catch (Exception e) {
-            logger.error("❌ Failed to send billing failure notification to user {}", userId, e);
-        }
-    }
-
-    // REAL API IMPLEMENTATIONS (placeholder for when approved)
-
-    private ResponseEntity<Map<String, Object>> verifyWithApple(Long userId, String receiptData, String productId) {
-        try {
-            logger.info("🍎 Real Apple App Store verification for user {} product {}", userId, productId);
-            
-            // TODO: Implement real Apple receipt verification
-            // For now, simulate the real verification process
-            
-            // In production, this would call:
-            // POST https://buy.itunes.apple.com/verifyReceipt (production)
-            // POST https://sandbox.itunes.apple.com/verifyReceipt (sandbox)
-            // with receipt data and app-specific shared secret
-            
-            // For testing purposes, accept any valid-looking receipt
-            if (receiptData != null && receiptData.length() > 10) {
-                String transactionId = "apple_" + UUID.randomUUID().toString().substring(0, 8);
+            if (shouldInsert) {
+                // Insert the new record
+                String sql = """
+                    INSERT INTO payment_transactions 
+                    (user_id, platform, amount, description, platform_transaction_id, product_id, status, transaction_date)
+                    VALUES (?, ?, ?, ?, ?, ?, 'inactive', ?)
+                """;
                 
-                // Update user subscription in database
-                updateUserSubscription(userId, "active", "APPLE", transactionId, productId);
+                String description = "Subscription inactive - " + productId;
                 
-                return ResponseEntity.ok(Map.of(
-                    "status", "verified",
-                    "platform", "APPLE",
-                    "transaction_id", transactionId,
-                    "product_id", productId,
-                    "is_trial", false,
-                    "message", "Apple App Store verification successful"
-                ));
-            } else {
-                logger.warn("🍎 Invalid Apple receipt data: {}", receiptData);
-                return ResponseEntity.badRequest().body(Map.of("error", "Invalid receipt data"));
-            }
-            
-        } catch (Exception e) {
-            logger.error("🍎 Apple verification error", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Apple verification failed: " + e.getMessage()));
-        }
-    }
-
-    private ResponseEntity<Map<String, Object>> verifyWithGoogle(Long userId, String purchaseToken, String productId) {
-        try {
-            logger.info("🤖 Real Google Play verification for user {} product {}", userId, productId);
-            
-            // TODO: Implement real Google Play Developer API call
-            // For now, simulate the real verification process
-            
-            // In production, this would call:
-            // POST https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}
-            // with proper OAuth2 authentication
-            
-            // For testing purposes, accept any valid-looking token
-            if (purchaseToken != null && purchaseToken.length() > 10) {
-                String transactionId = "goog_" + UUID.randomUUID().toString().substring(0, 8);
+                LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
+                jdbcTemplate.update(sql, userId, platform, price, description, transactionId, productId, now);
                 
-                // Update user subscription in database
-                updateUserSubscription(userId, "active", "GOOGLE", transactionId, productId);
-                
-                return ResponseEntity.ok(Map.of(
-                    "status", "verified",
-                    "platform", "GOOGLE", 
-                    "transaction_id", transactionId,
-                    "product_id", productId,
-                    "is_trial", false,
-                    "message", "Google Play verification successful"
-                ));
-            } else {
-                logger.warn("🤖 Invalid Google purchase token: {}", purchaseToken);
-                return ResponseEntity.badRequest().body(Map.of("error", "Invalid purchase token"));
+                logger.info("⏰ Recorded subscription inactive transaction for user {}: {}", userId, productId);
             }
             
         } catch (Exception e) {
-            logger.error("🤖 Google verification error", e);
-            return ResponseEntity.badRequest().body(Map.of("error", "Google verification failed: " + e.getMessage()));
+            logger.error("❌ Failed to record subscription inactive transaction for user {}", userId, e);
         }
     }
 }

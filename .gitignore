@@ -33,3 +33,8 @@ expire-trial.sql
 reset-bucky-for-ios-test.sql
 reset-bucky-trial.sql
 reset-claude-for-ios-test.sql
+/config/keys/
+
+# Credentials directory - contains sensitive information
+src/main/resources/credentials/*
+!src/main/resources/credentials/README.md
