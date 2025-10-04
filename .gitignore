@@ -42,3 +42,6 @@ src/main/resources/credentials/*
 # Shell scripts - exclude from git
 *.sh
 !gradlew.sh
+
+# Local properties - exclude from git
+src/main/resources/application-local.properties

@@ -122,3 +122,6 @@ The authentication system integrates with Spring Security through:
 The system is designed to be permissive at the Spring Security level (allowing all requests) and then enforcing authentication in the custom filter. This approach provides flexibility while maintaining security.
 
 
+
+
+
