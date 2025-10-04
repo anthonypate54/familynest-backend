@@ -38,3 +38,7 @@ reset-claude-for-ios-test.sql
 # Credentials directory - contains sensitive information
 src/main/resources/credentials/*
 !src/main/resources/credentials/README.md
+
+# Shell scripts - exclude from git
+*.sh
+!gradlew.sh
