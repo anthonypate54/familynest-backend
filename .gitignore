@@ -45,3 +45,4 @@ src/main/resources/credentials/*
 
 # Local properties - exclude from git
 src/main/resources/application-local.properties
+*.bak
