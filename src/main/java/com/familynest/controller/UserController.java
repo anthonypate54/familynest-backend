@@ -924,8 +924,8 @@ public class UserController {
                         "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
                         "  ON m.id = cc.parent_message_id " +
                         "LEFT JOIN user_message_read umr ON m.id = umr.message_id AND umr.user_id = ? " +
-                        "LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE' " +
-                        "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE' " +
+                        "LEFT JOIN message_reaction mr ON m.id = mr.target_message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE' " +
+                        "LEFT JOIN message_reaction mr2 ON m.id = mr2.target_message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE' " +
                         "ORDER BY m.id DESC";
 
             // Check if user exists first for a better error message

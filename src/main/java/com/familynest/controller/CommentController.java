@@ -158,8 +158,8 @@ public class CommentController {
             "LEFT JOIN app_user s ON m.sender_id = s.id " +
             "LEFT JOIN (SELECT parent_message_id, COUNT(*) as count FROM message_comment GROUP BY parent_message_id) cc " +
             "  ON m.id = cc.parent_message_id " +
-            "LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT' " +
-            "LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT' " +
+            "LEFT JOIN message_reaction mr ON m.id = mr.target_comment_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT' " +
+            "LEFT JOIN message_reaction mr2 ON m.id = mr2.target_comment_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT' " +
             "ORDER BY m.id ASC";
             // Execute query
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, userId, userId, userId, messageId, userId, userId);

@@ -118,10 +118,11 @@ public class MessageController {
                          "LEFT JOIN app_user u ON m.sender_id = u.id " +
                          "-- Removed message_view table references " +
                          "LEFT JOIN ( " +
-                         "  SELECT message_id, COUNT(*) as reaction_count " +
+                         "  SELECT target_message_id, COUNT(*) as reaction_count " +
                          "  FROM message_reaction " +
-                         "  GROUP BY message_id " +
-                         ") r ON m.id = r.message_id " +
+                         "  WHERE target_type = 'MESSAGE' " +
+                         "  GROUP BY target_message_id " +
+                         ") r ON m.id = r.target_message_id " +
                          "LEFT JOIN ( " +
                          "  SELECT message_id, COUNT(*) as comment_count " +
                          "  FROM message_comment " +

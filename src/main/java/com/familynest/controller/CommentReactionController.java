@@ -55,20 +55,20 @@ public class CommentReactionController {
             }
 
             // Check if like already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE'";
+            String checkSql = "SELECT id FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
 
             if (!existingReaction.isEmpty()) {
                 // Remove like
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'", 
                     commentId, userId);
-                jdbcTemplate.update("UPDATE message SET like_count = like_count - 1 WHERE id = ?", commentId);
+                jdbcTemplate.update("UPDATE message_comment SET like_count = like_count - 1 WHERE id = ?", commentId);
                 return ResponseEntity.ok(Map.of("action", "removed", "type", "like"));
             } else {
                 // Add like
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type) VALUES (?, ?, 'LIKE')",
-                    commentId, userId);
-                jdbcTemplate.update("UPDATE message SET like_count = like_count + 1 WHERE id = ?", commentId);
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, target_comment_id, user_id, reaction_type, target_type) VALUES (?, ?, ?, 'LIKE', 'COMMENT')",
+                    commentId, commentId, userId);
+                jdbcTemplate.update("UPDATE message_comment SET like_count = like_count + 1 WHERE id = ?", commentId);
                 return ResponseEntity.ok(Map.of("action", "added", "type", "like"));
             }
         } catch (Exception e) {
@@ -93,20 +93,20 @@ public class CommentReactionController {
             }
 
             // Check if love already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE'";
+            String checkSql = "SELECT id FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
 
             if (!existingReaction.isEmpty()) {
                 // Remove love
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'", 
                     commentId, userId);
-                jdbcTemplate.update("UPDATE message SET love_count = love_count - 1 WHERE id = ?", commentId);
+                jdbcTemplate.update("UPDATE message_comment SET love_count = love_count - 1 WHERE id = ?", commentId);
                 return ResponseEntity.ok(Map.of("action", "removed", "type", "love"));
             } else {
                 // Add love
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type) VALUES (?, ?, 'LOVE')",
-                    commentId, userId);
-                jdbcTemplate.update("UPDATE message SET love_count = love_count + 1 WHERE id = ?", commentId);
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, target_comment_id, user_id, reaction_type, target_type) VALUES (?, ?, ?, 'LOVE', 'COMMENT')",
+                    commentId, commentId, userId);
+                jdbcTemplate.update("UPDATE message_comment SET love_count = love_count + 1 WHERE id = ?", commentId);
                 return ResponseEntity.ok(Map.of("action", "added", "type", "love"));
             }
         } catch (Exception e) {

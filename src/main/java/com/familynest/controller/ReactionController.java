@@ -52,11 +52,11 @@ public class ReactionController {
     /*
      * Note on Message vs Comment Reactions:
      * - Both messages and comments use the same message_reaction table
-     * - The distinction is in the target table:
-     *   - message: Regular messages with no parent_id
-     *   - message_comment: Comments in threads with a NOT NULL parent_message_id
-     * - IDs are unique across both tables, so message_reaction.message_id can reference either
-     * - The appropriate count is updated based on which table the ID exists in
+     * - The distinction is in the target type and target ID fields:
+     *   - For messages: target_type = 'MESSAGE' and target_message_id is set
+     *   - For comments: target_type = 'COMMENT' and target_comment_id is set
+     * - The message_id field is kept for backward compatibility but is being phased out
+     * - Each reaction has proper foreign keys to the appropriate target table
      */
 
     public ReactionController(JdbcTemplate jdbcTemplate, AuthUtil authUtil) {
@@ -209,21 +209,21 @@ public class ReactionController {
             }
 
             // Check if like already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'";
+            String checkSql = "SELECT id FROM message_reaction WHERE target_message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, messageId, userId);
 
             String action;
             if (!existingReaction.isEmpty()) {
                 // Remove like
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE target_message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'MESSAGE'", 
                     messageId, userId);
                     
                 jdbcTemplate.update("UPDATE message SET like_count = like_count - 1 WHERE id = ?", messageId);
                 action = "removed";
             } else {
                 // Add like
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LIKE', 'MESSAGE')", 
-                    messageId, userId);
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, target_message_id, user_id, reaction_type, target_type) VALUES (?, ?, ?, 'LIKE', 'MESSAGE')", 
+                    messageId, messageId, userId);
 
                 jdbcTemplate.update("UPDATE message SET like_count = like_count + 1 WHERE id = ?", messageId);
                 action = "added";
@@ -236,8 +236,8 @@ public class ReactionController {
                     CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
                     CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
                 FROM message m
-                LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
-                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr ON m.id = mr.target_message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr2 ON m.id = mr2.target_message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
                 WHERE m.id = ?
                 """;
             
@@ -291,20 +291,20 @@ public class ReactionController {
             }
 
             // Check if love already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'";
+            String checkSql = "SELECT id FROM message_reaction WHERE target_message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, messageId, userId);
 
             String action;
             if (!existingReaction.isEmpty()) {
                 // Remove love
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE target_message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'MESSAGE'", 
                     messageId, userId);
                 jdbcTemplate.update("UPDATE message SET love_count = love_count - 1 WHERE id = ?", messageId);
                 action = "removed";
             } else {
                 // Add love
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LOVE', 'MESSAGE')", 
-                    messageId, userId);
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, target_message_id, user_id, reaction_type, target_type) VALUES (?, ?, ?, 'LOVE', 'MESSAGE')", 
+                    messageId, messageId, userId);
                 jdbcTemplate.update("UPDATE message SET love_count = love_count + 1 WHERE id = ?", messageId);
                 action = "added";
             }
@@ -316,8 +316,8 @@ public class ReactionController {
                     CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
                     CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
                 FROM message m
-                LEFT JOIN message_reaction mr ON m.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
-                LEFT JOIN message_reaction mr2 ON m.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr ON m.id = mr.target_message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'MESSAGE'
+                LEFT JOIN message_reaction mr2 ON m.id = mr2.target_message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'MESSAGE'
                 WHERE m.id = ?
                 """;
             
@@ -382,14 +382,14 @@ public class ReactionController {
             Long parentMessageId = ((Number) commentData.get(0).get("parent_message_id")).longValue();
 
             // Check if like already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'";
+            String checkSql = "SELECT id FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
             logger.info("Checking existing reaction for comment {}: found {} results", commentId, existingReaction.size());
 
             String action;
             if (!existingReaction.isEmpty()) {
                 // Remove like
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LIKE' AND target_type = 'COMMENT'", 
                     commentId, userId);
                 logger.info("Removed like reaction for comment {}", commentId);
                     
@@ -397,8 +397,8 @@ public class ReactionController {
                 action = "removed";
             } else {
                 // Add like
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LIKE', 'COMMENT')", 
-                    commentId, userId);
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, target_comment_id, user_id, reaction_type, target_type) VALUES (?, ?, ?, 'LIKE', 'COMMENT')", 
+                    commentId, commentId, userId);
                 logger.info("Added like reaction for comment {}", commentId);
 
                 jdbcTemplate.update("UPDATE message_comment SET like_count = like_count + 1 WHERE id = ?", commentId);
@@ -412,8 +412,8 @@ public class ReactionController {
                     CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
                     CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
                 FROM message_comment mc
-                LEFT JOIN message_reaction mr ON mc.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT'
-                LEFT JOIN message_reaction mr2 ON mc.id = mr2.message_id AND mr.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
+                LEFT JOIN message_reaction mr ON mc.id = mr.target_comment_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT'
+                LEFT JOIN message_reaction mr2 ON mc.id = mr2.target_comment_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
                 WHERE mc.id = ?
                 """;
             
@@ -479,21 +479,21 @@ public class ReactionController {
             Long parentMessageId = ((Number) commentData.get(0).get("parent_message_id")).longValue();
 
             // Check if love already exists
-            String checkSql = "SELECT id FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'";
+            String checkSql = "SELECT id FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'";
             List<Map<String, Object>> existingReaction = jdbcTemplate.queryForList(checkSql, commentId, userId);
 
             String action;
             if (!existingReaction.isEmpty()) {
                 // Remove love
-                jdbcTemplate.update("DELETE FROM message_reaction WHERE message_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'", 
+                jdbcTemplate.update("DELETE FROM message_reaction WHERE target_comment_id = ? AND user_id = ? AND reaction_type = 'LOVE' AND target_type = 'COMMENT'", 
                     commentId, userId);
                 
                 jdbcTemplate.update("UPDATE message_comment SET love_count = love_count - 1 WHERE id = ?", commentId);
                 action = "removed";
             } else {
                 // Add love
-                jdbcTemplate.update("INSERT INTO message_reaction (message_id, user_id, reaction_type, target_type) VALUES (?, ?, 'LOVE', 'COMMENT')", 
-                    commentId, userId);
+                jdbcTemplate.update("INSERT INTO message_reaction (message_id, target_comment_id, user_id, reaction_type, target_type) VALUES (?, ?, ?, 'LOVE', 'COMMENT')", 
+                    commentId, commentId, userId);
 
                 jdbcTemplate.update("UPDATE message_comment SET love_count = love_count + 1 WHERE id = ?", commentId);
                 action = "added";
@@ -506,8 +506,8 @@ public class ReactionController {
                     CASE WHEN mr.id IS NOT NULL THEN true ELSE false END as is_liked,
                     CASE WHEN mr2.id IS NOT NULL THEN true ELSE false END as is_loved
                 FROM message_comment mc
-                LEFT JOIN message_reaction mr ON mc.id = mr.message_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT'
-                LEFT JOIN message_reaction mr2 ON mc.id = mr2.message_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
+                LEFT JOIN message_reaction mr ON mc.id = mr.target_comment_id AND mr.user_id = ? AND mr.reaction_type = 'LIKE' AND mr.target_type = 'COMMENT'
+                LEFT JOIN message_reaction mr2 ON mc.id = mr2.target_comment_id AND mr2.user_id = ? AND mr2.reaction_type = 'LOVE' AND mr2.target_type = 'COMMENT'
                 WHERE mc.id = ?
                 """;
             

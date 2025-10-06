@@ -66,7 +66,7 @@ public class EngagementService {
         
         // Check if reaction already exists, remove it if so (toggle behavior)
         Optional<MessageReaction> existingReaction = 
-            reactionRepository.findByMessageIdAndUserIdAndReactionType(messageId, userId, reactionType);
+            reactionRepository.findByTargetMessageIdAndUserIdAndReactionTypeAndTargetType(messageId, userId, reactionType, "MESSAGE");
         
         if (existingReaction.isPresent()) {
             reactionRepository.delete(existingReaction.get());
@@ -76,7 +76,7 @@ public class EngagementService {
         
         // Create and save new reaction
         MessageReaction reaction = new MessageReaction();
-        reaction.setMessageId(messageId);
+        reaction.setTargetId(messageId, "MESSAGE"); // This sets messageId, targetMessageId, and targetType
         reaction.setSenderId(userId);
         reaction.setReactionType(reactionType);
         reaction.setCreatedAt(LocalDateTime.now());
@@ -86,12 +86,12 @@ public class EngagementService {
     
     public List<MessageReaction> getMessageReactions(Long messageId) {
         logger.info("Getting reactions for message: {}", messageId);
-        return reactionRepository.findByMessageId(messageId);
+        return reactionRepository.findByTargetMessageId(messageId);
     }
     
     public Map<String, Long> getMessageReactionCounts(Long messageId) {
         logger.info("Getting reaction counts for message: {}", messageId);
-        List<MessageReaction> reactions = reactionRepository.findByMessageId(messageId);
+        List<MessageReaction> reactions = reactionRepository.findByTargetMessageId(messageId);
         
         // Group by reaction type and count
         Map<String, Long> counts = new HashMap<>();
@@ -106,7 +106,7 @@ public class EngagementService {
     @Transactional
     public void removeReaction(Long messageId, Long userId, String reactionType) {
         logger.info("Removing reaction: {} from message: {} by user: {}", reactionType, messageId, userId);
-        reactionRepository.deleteByMessageIdAndUserIdAndReactionType(messageId, userId, reactionType);
+        reactionRepository.deleteByTargetMessageIdAndUserIdAndReactionTypeAndTargetType(messageId, userId, reactionType, "MESSAGE");
     }
     
     // ----- Comment methods -----
@@ -272,7 +272,7 @@ public class EngagementService {
         
         Map<String, Object> data = new HashMap<>();
         
-        // Add reaction counts
+        // Add reaction counts using the new schema
         data.put("reactions", getMessageReactionCounts(messageId));
         
         // Add total comment count
@@ -318,10 +318,10 @@ public class EngagementService {
                    "  -- Removed view tracking" +
                    "  " +
                    "  -- Reactions " +
-                   "  SELECT 'reaction' AS type, message_id, COUNT(*) AS count " +
+                   "  SELECT 'reaction' AS type, target_message_id AS message_id, COUNT(*) AS count " +
                    "  FROM message_reaction " +
-                   "  WHERE message_id IN (SELECT id FROM message_ids) " +
-                   "  GROUP BY message_id " +
+                   "  WHERE target_message_id IN (SELECT id FROM message_ids) AND target_type = 'MESSAGE' " +
+                   "  GROUP BY target_message_id " +
                    "  " +
                    "  UNION ALL " +
                    "  " +
@@ -350,10 +350,10 @@ public class EngagementService {
                    "  GROUP BY message_id" +
                    "), " +
                    "reactions_detail AS (" +
-                   "  SELECT message_id, reaction_type, COUNT(*) AS count " +
+                   "  SELECT target_message_id AS message_id, reaction_type, COUNT(*) AS count " +
                    "  FROM message_reaction " +
-                   "  WHERE message_id IN (SELECT id FROM message_ids) " +
-                   "  GROUP BY message_id, reaction_type" +
+                   "  WHERE target_message_id IN (SELECT id FROM message_ids) AND target_type = 'MESSAGE' " +
+                   "  GROUP BY target_message_id, reaction_type" +
                    ")" +
                    "SELECT " +
                    "  mi.id AS message_id, " +

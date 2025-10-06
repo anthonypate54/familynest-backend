@@ -6,24 +6,34 @@ import java.util.List;
 import java.util.Optional;
 
 public interface MessageReactionRepository extends JpaRepository<MessageReaction, Long> {
-    // Find all reactions for a message
+    // Legacy methods using message_id (kept for backward compatibility)
     List<MessageReaction> findByMessageId(Long messageId);
+    List<MessageReaction> findByMessageIdAndReactionType(Long messageId, String reactionType);
+    Optional<MessageReaction> findByMessageIdAndUserIdAndReactionType(Long messageId, Long userId, String reactionType);
+    void deleteByMessageIdAndUserIdAndReactionType(Long messageId, Long userId, String reactionType);
+    long countByMessageIdAndReactionType(Long messageId, String reactionType);
+    long countByMessageId(Long messageId);
     
     // Find all reactions by a user
     List<MessageReaction> findByUserId(Long userId);
     
-    // Find all reactions of a specific type for a message
-    List<MessageReaction> findByMessageIdAndReactionType(Long messageId, String reactionType);
+    // New methods using target_message_id for message reactions
+    List<MessageReaction> findByTargetMessageId(Long targetMessageId);
+    List<MessageReaction> findByTargetMessageIdAndReactionType(Long targetMessageId, String reactionType);
+    Optional<MessageReaction> findByTargetMessageIdAndUserIdAndReactionTypeAndTargetType(
+        Long targetMessageId, Long userId, String reactionType, String targetType);
+    void deleteByTargetMessageIdAndUserIdAndReactionTypeAndTargetType(
+        Long targetMessageId, Long userId, String reactionType, String targetType);
+    long countByTargetMessageIdAndReactionType(Long targetMessageId, String reactionType);
+    long countByTargetMessageId(Long targetMessageId);
     
-    // Find a specific reaction by a user on a message
-    Optional<MessageReaction> findByMessageIdAndUserIdAndReactionType(Long messageId, Long userId, String reactionType);
-    
-    // Delete a specific reaction by a user on a message
-    void deleteByMessageIdAndUserIdAndReactionType(Long messageId, Long userId, String reactionType);
-    
-    // Count reactions by type for a message
-    long countByMessageIdAndReactionType(Long messageId, String reactionType);
-    
-    // Count total reactions for a message
-    long countByMessageId(Long messageId);
-} 
+    // New methods using target_comment_id for comment reactions
+    List<MessageReaction> findByTargetCommentId(Long targetCommentId);
+    List<MessageReaction> findByTargetCommentIdAndReactionType(Long targetCommentId, String reactionType);
+    Optional<MessageReaction> findByTargetCommentIdAndUserIdAndReactionTypeAndTargetType(
+        Long targetCommentId, Long userId, String reactionType, String targetType);
+    void deleteByTargetCommentIdAndUserIdAndReactionTypeAndTargetType(
+        Long targetCommentId, Long userId, String reactionType, String targetType);
+    long countByTargetCommentIdAndReactionType(Long targetCommentId, String reactionType);
+    long countByTargetCommentId(Long targetCommentId);
+}
