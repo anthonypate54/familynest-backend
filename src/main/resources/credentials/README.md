@@ -33,3 +33,4 @@ For production, instead of using a file:
 - Keep your service account keys secure and rotate them periodically
 - Restrict the permissions of your service account to only what's needed
 - For production, use environment variables instead of files when possible
+
