@@ -104,4 +104,3 @@ public class TokenBlacklistService {
         logger.debug("Blacklist cleanup complete. Remaining tokens: {}", blacklistedTokens.size());
     }
 }
-

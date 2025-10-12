@@ -318,4 +318,3 @@ public class MainUserControllerTest {
                 .andExpect(jsonPath("$.showPhoneNumber").value(true)); // Mock returns original values
     }
 }
-

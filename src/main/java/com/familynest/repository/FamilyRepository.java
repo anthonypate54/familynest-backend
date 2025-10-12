@@ -17,4 +17,3 @@ public interface FamilyRepository extends JpaRepository<Family, Long> {
     @Query("SELECT f FROM Family f WHERE f.name = :name")
     List<Family> findByName(@Param("name") String name);
 }
-

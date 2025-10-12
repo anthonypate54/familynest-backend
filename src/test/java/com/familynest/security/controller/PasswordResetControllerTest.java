@@ -144,4 +144,3 @@ public class PasswordResetControllerTest {
                 .andExpect(jsonPath("$.message").value("Password must be at least 8 characters long"));
     }
 }
-
