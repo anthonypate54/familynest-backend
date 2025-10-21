@@ -42,17 +42,17 @@ public class DMController {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-    
+
     /**
      * Check if a recipient has muted the sender
      */
     private boolean isRecipientMutedBySender(Long recipientId, Long senderId) {
         try {
             String muteSql = """
-                SELECT COUNT(*) > 0 
-                FROM user_member_message_settings umms 
-                WHERE umms.user_id = ? 
-                AND umms.member_user_id = ? 
+                SELECT COUNT(*) > 0
+                FROM user_member_message_settings umms
+                WHERE umms.user_id = ?
+                AND umms.member_user_id = ?
                 AND umms.receive_messages = false
                 """;
             Boolean isMuted = jdbcTemplate.queryForObject(muteSql, Boolean.class, recipientId, senderId);
@@ -91,7 +91,7 @@ public class DMController {
         Map<String, Object> config = new HashMap<>();
         config.put("maxParticipants", maxGroupChatParticipants);
         config.put("minParticipants", 1); // Minimum participants to create a group (excluding creator)
-        
+
         return ResponseEntity.ok(config);
     }
 
@@ -105,7 +105,7 @@ public class DMController {
             @RequestHeader("Authorization") String authHeader,
             @PathVariable Long otherUserId) {
         logger.debug("Getting/creating conversation with user: {}", otherUserId);
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -137,15 +137,15 @@ public class DMController {
                 String insertSql = "INSERT INTO dm_conversation (user1_id, user2_id, created_at) VALUES (?, ?, ?) RETURNING id, created_at";
                 conversation = jdbcTemplate.queryForMap(insertSql, user1Id, user2Id, Timestamp.valueOf(LocalDateTime.now()));
                 logger.debug("Created new conversation: {}", conversation.get("id"));
-                
+
                 // Broadcast new conversation to both participants so their conversation lists refresh
                 Long conversationId = ((Number) conversation.get("id")).longValue();
-                
+
                 // Schedule WebSocket broadcast to happen AFTER transaction commits
                 final Long finalCurrentUserId = currentUserId;
                 final Long finalOtherUserId = otherUserId;
                 final Long finalConversationId = conversationId;
-                
+
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
@@ -153,7 +153,7 @@ public class DMController {
                         notificationData.put("type", "new_conversation");
                         notificationData.put("conversationId", finalConversationId);
                         notificationData.put("isGroup", false);
-                        
+
                         // Notify both participants
                         webSocketBroadcastService.broadcastDMMessage(notificationData, finalCurrentUserId);
                         webSocketBroadcastService.broadcastDMMessage(notificationData, finalOtherUserId);
@@ -194,7 +194,7 @@ public class DMController {
     public ResponseEntity<Map<String, Object>> getUserConversations(
             @RequestHeader("Authorization") String authHeader) {
         logger.debug("Getting conversations for user");
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -205,7 +205,7 @@ public class DMController {
 
             // Get all conversations (1:1 and groups) with last message info
             String sql = """
-                SELECT 
+                SELECT
                     c.id as conversation_id,
                     c.name as group_name,
                     c.is_group,
@@ -218,10 +218,10 @@ public class DMController {
                     u.photo as other_user_photo,
                     m.content as last_message_content,
                     m.created_at as last_message_created_at,
-                    CASE 
+                    CASE
                         WHEN c.is_group = TRUE THEN (
-                            SELECT COUNT(*) 
-                            FROM dm_conversation_participant dcp 
+                            SELECT COUNT(*)
+                            FROM dm_conversation_participant dcp
                             WHERE dcp.conversation_id = c.id
                         )
                         ELSE 2
@@ -232,12 +232,12 @@ public class DMController {
                 -- For 1:1 chats, get the other user info
                 LEFT JOIN app_user u ON (
                     c.is_group = FALSE AND (
-                        (c.user1_id = ? AND u.id = c.user2_id) OR 
+                        (c.user1_id = ? AND u.id = c.user2_id) OR
                         (c.user2_id = ? AND u.id = c.user1_id)
                     )
                 )
                 LEFT JOIN (
-                    SELECT DISTINCT ON (conversation_id) 
+                    SELECT DISTINCT ON (conversation_id)
                         conversation_id, content, created_at
                     FROM dm_message
                     ORDER BY conversation_id, created_at DESC
@@ -248,35 +248,35 @@ public class DMController {
                     -- Include 1:1 conversations where user is user1 or user2
                     (c.is_group = FALSE AND (c.user1_id = ? OR c.user2_id = ?))
                 )
-                ORDER BY COALESCE(m.created_at, c.created_at) DESC                
+                ORDER BY COALESCE(m.created_at, c.created_at) DESC
             """;
 
-            List<Map<String, Object>> rawConversations = jdbcTemplate.queryForList(sql, 
+            List<Map<String, Object>> rawConversations = jdbcTemplate.queryForList(sql,
                 currentUserId, currentUserId, currentUserId, currentUserId, currentUserId);
 
             // Process and format conversations
             List<Map<String, Object>> formattedConversations = new ArrayList<>();
-            
+
             for (Map<String, Object> conv : rawConversations) {
                 Map<String, Object> formatted = new HashMap<>();
-                
+
                 // Common fields
                 formatted.put("id", conv.get("conversation_id"));
                 formatted.put("created_at", ((Timestamp) conv.get("created_at")).getTime());
                 formatted.put("last_message_content", conv.get("last_message_content"));
-                formatted.put("last_message_time", 
-                    conv.get("last_message_created_at") != null ? 
+                formatted.put("last_message_time",
+                    conv.get("last_message_created_at") != null ?
                     ((Timestamp) conv.get("last_message_created_at")).getTime() : null);
-                    
+
                 Boolean isGroup = (Boolean) conv.get("is_group");
                 formatted.put("is_group", isGroup != null ? isGroup : false);
-                
+
                 if (isGroup != null && isGroup) {
                     // Group chat formatting
                     formatted.put("name", conv.get("group_name"));
                     formatted.put("participant_count", conv.get("participant_count"));
                     formatted.put("created_by", conv.get("created_by"));
-                    
+
                     // Get participant data for group chats
                     Long conversationId = ((Number) conv.get("conversation_id")).longValue();
                     String participantSql = """
@@ -287,10 +287,10 @@ public class DMController {
                         ORDER BY dcp.joined_at
                         LIMIT 4
                         """;
-                    
+
                     List<Map<String, Object>> participants = jdbcTemplate.queryForList(participantSql, conversationId);
                     formatted.put("participants", participants);
-                    
+
                     // For group compatibility with existing UI
                     formatted.put("user1_id", 0); // Not applicable for groups
                     formatted.put("user2_id", 0); // Not applicable for groups
@@ -305,26 +305,26 @@ public class DMController {
                     formatted.put("participant_count", conv.get("participant_count"));
                     formatted.put("created_by", null);
                     formatted.put("participants", null);
-                    
+
                     // User info
                     formatted.put("user1_id", conv.get("user1_id"));
                     formatted.put("user2_id", conv.get("user2_id"));
                     formatted.put("other_user_id", conv.get("other_user_id"));
-                    formatted.put("other_user_name", 
+                    formatted.put("other_user_name",
                         (conv.get("other_first_name") != null ? conv.get("other_first_name") + " " : "") +
                         (conv.get("other_last_name") != null ? conv.get("other_last_name") : ""));
                     formatted.put("other_user_photo", conv.get("other_user_photo"));
                     formatted.put("other_first_name", conv.get("other_first_name"));
                     formatted.put("other_last_name", conv.get("other_last_name"));
                 }
-                
+
                 // Calculate unread count for this conversation
                 // Removed view tracking - set unread count to 0 for now
                 Long conversationId = ((Number) conv.get("conversation_id")).longValue();
-                
+
                 formatted.put("unread_count", 0);
                 formatted.put("has_unread_messages", false);
-                
+
                 formattedConversations.add(formatted);
             }
 
@@ -352,7 +352,7 @@ public class DMController {
     @Transactional
     public ResponseEntity<Map<String, Object>> postMessage(
             @PathVariable Long userId,
-            @RequestParam("content") String content,
+            @RequestParam(value = "content", required = false) String content,
             @RequestParam(value = "media", required = false) MultipartFile media,
             @RequestParam(value = "mediaType", required = false) String mediaType,
             @RequestParam(value = "videoUrl", required = false) String videoUrl,
@@ -361,41 +361,50 @@ public class DMController {
             @RequestHeader("Authorization") String authHeader,
             HttpServletRequest request) {
         logger.debug("Posting DM message with media for user: {}", userId);
-        
+
         try {
             // Debug logging for localMediaPath
             logger.debug("🎥 DM postMessage - localMediaPath received: {}", localMediaPath);
             logger.debug("🎥 DM postMessage - mediaType: {}, videoUrl: {}", mediaType, videoUrl);
-            
-            // Validation
-            if (content == null || content.trim().isEmpty()) {
+
+            // Validation: require content OR media
+            boolean hasContent = content != null && !content.trim().isEmpty();
+            boolean hasMedia = (media != null && !media.isEmpty()) ||
+                             (videoUrl != null && !videoUrl.trim().isEmpty());
+
+            if (!hasContent && !hasMedia) {
                 return ResponseEntity.badRequest()
-                       .body(Map.of("error", "Message content cannot be empty"));
+                       .body(Map.of("error", "Message must have either content or media"));
             }
-    
+
+            // Use empty string for content if only media is provided
+            if (!hasContent) {
+                content = "";
+            }
+
             // Extract user ID from token for authorization
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
             Long tokenUserId = authUtil.extractUserId(token);
             if (tokenUserId == null) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Unauthorized"));
             }
-            
+
             // Ensure the token user matches the path userId
             if (!tokenUserId.equals(userId)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this user"));
             }
-            
+
             Long senderId = userId;
 
             // Validate conversation exists and user is part of it
             String validateSql = """
                 SELECT c.id, c.is_group, c.user1_id, c.user2_id, c.name,
-                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp 
+                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp
                               WHERE dcp.conversation_id = c.id AND dcp.user_id = ?) as is_participant
-                FROM dm_conversation c 
+                FROM dm_conversation c
                 WHERE c.id = ?
                 """;
-            
+
             List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, senderId, conversationId);
             if (convData.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Conversation not found"));
@@ -404,7 +413,7 @@ public class DMController {
             Map<String, Object> conv = convData.get(0);
             Boolean isGroup = (Boolean) conv.get("is_group");
             Boolean isParticipant = (Boolean) conv.get("is_participant");
-            
+
             // Check authorization based on conversation type
             boolean authorized = false;
             if (isGroup != null && isGroup) {
@@ -420,19 +429,19 @@ public class DMController {
                     authorized = senderId.equals(user1Id) || senderId.equals(user2Id);
                 }
             }
-            
+
             if (!authorized) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
-    
+
             // Get user data for sender_username, etc.
             String userSql = "SELECT username, first_name, last_name, photo FROM app_user WHERE id = ?";
             Map<String, Object> userData = jdbcTemplate.queryForMap(userSql, senderId);
-    
+
             // Handle media upload if present
             String mediaUrl = null;
             String thumbnailUrl = null;
-            
+
             // Handle regular media upload first (but not if we have external video URL)
             if (media != null && !media.isEmpty() && (videoUrl == null || !videoUrl.startsWith("http"))) {
                 Map<String, String> mediaResult = mediaService.uploadMedia(media, mediaType);
@@ -443,7 +452,7 @@ public class DMController {
             } // Handle external video URL (takes priority and may override above)
             else if (videoUrl != null && videoUrl.startsWith("http")) {
                 logger.debug("Processing external video URL: {}", videoUrl);
-                
+
                 // If we uploaded media, it's actually a thumbnail for the external video
                 if (media != null && !media.isEmpty() && "image".equals(mediaType)) {
                     // Use our new clean method instead of reassignment
@@ -460,35 +469,35 @@ public class DMController {
                     logger.debug("External video without thumbnail - mediaUrl: {}", mediaUrl);
                 }
             }
-    
+
             // Debug what we're about to insert
             logger.debug("🎥 DM INSERT - About to store localMediaPath: {}", localMediaPath);
             logger.debug("🎥 DM INSERT - mediaUrl: {}, mediaType: {}, thumbnailUrl: {}", mediaUrl, mediaType, thumbnailUrl);
-            
+
             // Insert the DM message and get the new ID (fixed parameter count)
             String insertSql = "INSERT INTO dm_message (conversation_id, sender_id, content, " +
                 "media_url, media_type, media_thumbnail, local_media_path, created_at) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id";
-    
+
             Long newMessageId = jdbcTemplate.queryForObject(insertSql, Long.class,
                 conversationId,
                 senderId,
-                content, 
+                content,
                 mediaUrl,
                 mediaType,
                 thumbnailUrl,
                 localMediaPath,
                 Timestamp.valueOf(LocalDateTime.now())
             );
-    
+
             // Determine recipients for broadcasting
             List<Long> recipientIds = new ArrayList<>();
-            
+
             if (isGroup != null && isGroup) {
                 // For group chats, get all participants except sender
                 String getParticipantsSql = """
-                    SELECT user_id 
-                    FROM dm_conversation_participant 
+                    SELECT user_id
+                    FROM dm_conversation_participant
                     WHERE conversation_id = ? AND user_id != ?
                     """;
                 List<Map<String, Object>> participants = jdbcTemplate.queryForList(getParticipantsSql, conversationId, senderId);
@@ -499,7 +508,7 @@ public class DMController {
                 // For 1:1 chats, send only to the other participant
                 Long user1Id = conv.get("user1_id") != null ? ((Number) conv.get("user1_id")).longValue() : null;
                 Long user2Id = conv.get("user2_id") != null ? ((Number) conv.get("user2_id")).longValue() : null;
-                
+
                 if (user1Id != null && user2Id != null) {
                     Long recipientId = senderId.equals(user1Id) ? user2Id : user1Id;
                     recipientIds.add(recipientId);
@@ -508,13 +517,13 @@ public class DMController {
 
             // Fetch the full DM message with sender info (for first recipient or all participants)
             Long primaryRecipientId = recipientIds.isEmpty() ? null : recipientIds.get(0);
-            
+
             String fetchSql = """
-                SELECT 
-                    dm.id, dm.conversation_id, dm.sender_id, dm.content, 
-                    dm.media_url, dm.media_type, dm.media_thumbnail, 
+                SELECT
+                    dm.id, dm.conversation_id, dm.sender_id, dm.content,
+                    dm.media_url, dm.media_type, dm.media_thumbnail,
                     dm.media_filename, dm.media_size, dm.media_duration, dm.local_media_path, dm.created_at,
-                    u.username as sender_username, u.first_name as sender_first_name, 
+                    u.username as sender_username, u.first_name as sender_first_name,
                     u.last_name as sender_last_name, u.photo as sender_photo,
                     false as is_read
                 FROM dm_message dm
@@ -538,13 +547,13 @@ public class DMController {
             response.put("media_duration", messageData.get("media_duration"));
             response.put("local_media_path", messageData.get("local_media_path"));
             response.put("created_at", messageData.get("created_at"));
-            
+
             // Add camelCase versions for Flutter compatibility
             response.put("localMediaPath", messageData.get("local_media_path"));
             response.put("mediaUrl", messageData.get("media_url"));
             response.put("mediaType", messageData.get("media_type"));
             response.put("mediaThumbnail", messageData.get("media_thumbnail"));
-            
+
             // Debug log the response to verify localMediaPath is included
             logger.debug("🎯 DM POST Response - localMediaPath: {}", messageData.get("local_media_path"));
             logger.debug("🎯 DM POST Response - messageData: {}", messageData);
@@ -553,7 +562,7 @@ public class DMController {
             response.put("sender_last_name", messageData.get("sender_last_name"));
             response.put("sender_photo", messageData.get("sender_photo"));
             response.put("is_read", messageData.get("is_read"));
-    
+
             // Broadcast the raw database result to all recipients
             logger.debug("Broadcasting DM message to {} recipients: {}", recipientIds.size(), messageData);
             for (Long recipientId : recipientIds) {
@@ -561,31 +570,31 @@ public class DMController {
                 String unreadCountSql = """
                     SELECT COUNT(*) FROM dm_message dm
                     JOIN dm_conversation dc ON dm.conversation_id = dc.id
-                    WHERE dm.conversation_id = ? 
+                    WHERE dm.conversation_id = ?
                     AND dm.sender_id != ?
                     AND dm.is_read = FALSE
                     AND (
                         -- For group chats: check participant table
                         (dc.is_group = TRUE AND EXISTS (
-                            SELECT 1 FROM dm_conversation_participant dcp 
+                            SELECT 1 FROM dm_conversation_participant dcp
                             WHERE dcp.conversation_id = dc.id AND dcp.user_id = ?
                         )) OR
                         -- For 1:1 chats: check user1_id/user2_id
                         (dc.is_group = FALSE AND (dc.user1_id = ? OR dc.user2_id = ?))
                     )
                     """;
-                
-                Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class, 
+
+                Long unreadCount = jdbcTemplate.queryForObject(unreadCountSql, Long.class,
                     conversationId, recipientId, recipientId, recipientId, recipientId);
-                
+
                 // Add unread count to the message data for this recipient
                 Map<String, Object> recipientMessageData = new HashMap<>(messageData);
                 recipientMessageData.put("unread_count", unreadCount != null ? unreadCount : 0);
-                
+
                 // Schedule WebSocket broadcast to happen AFTER transaction commits
                 final Map<String, Object> finalRecipientMessageData = recipientMessageData;
                 final Long finalRecipientId = recipientId;
-                
+
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
@@ -600,7 +609,7 @@ public class DMController {
                     }
                 });
             }
-            
+
             // Send push notification to all recipients (background notification)
             try {
                 String senderName = (String) userData.get("username");
@@ -618,13 +627,13 @@ public class DMController {
                 logger.error("Error sending DM push notification for message {}: {}", newMessageId, pushError.getMessage());
                 // Don't let push notification errors break the DM posting flow
             }
-            
+
       // Return the fully-formed message as the response
             return ResponseEntity.status(HttpStatus.CREATED)
                     .contentType(MediaType.APPLICATION_JSON)
                     .header("Content-Type", "application/json; charset=UTF-8")
                     .body(response);
-    
+
         } catch (Exception e) {
             logger.error("Error posting DM message: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -645,7 +654,7 @@ public class DMController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
         logger.debug("Getting messages for conversation: {}", conversationId);
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -657,9 +666,9 @@ public class DMController {
             // Validate user is part of this conversation (both 1:1 and group chats)
             String validateSql = """
                 SELECT c.id, c.is_group, c.user1_id, c.user2_id,
-                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp 
+                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp
                               WHERE dcp.conversation_id = c.id AND dcp.user_id = ?) as is_participant
-                FROM dm_conversation c 
+                FROM dm_conversation c
                 WHERE c.id = ?
                 """;
             List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, currentUserId, conversationId);
@@ -670,7 +679,7 @@ public class DMController {
             Map<String, Object> conv = convData.get(0);
             Boolean isGroup = (Boolean) conv.get("is_group");
             Boolean isParticipant = (Boolean) conv.get("is_participant");
-            
+
             // Check authorization based on conversation type
             boolean authorized = false;
             if (isGroup != null && isGroup) {
@@ -686,7 +695,7 @@ public class DMController {
                     authorized = currentUserId.equals(user1Id) || currentUserId.equals(user2Id);
                 }
             }
-            
+
             if (!authorized) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
@@ -695,8 +704,8 @@ public class DMController {
             int offset = page * size;
             logger.debug("Getting DM messages for conversation {} for user {} (checking for muted users)", conversationId, currentUserId);
             String messagesSql = """
-                SELECT 
-                    m.id, m.conversation_id, m.sender_id, m.content, m.media_url, m.media_type, 
+                SELECT
+                    m.id, m.conversation_id, m.sender_id, m.content, m.media_url, m.media_type,
                     m.media_thumbnail, m.media_filename, m.media_size, m.media_duration, m.local_media_path,
                     m.is_read,
                     m.created_at,
@@ -707,9 +716,9 @@ public class DMController {
                 -- Removed message_view table references
                 WHERE m.conversation_id = ?
                 AND m.sender_id NOT IN (
-                    SELECT umms.member_user_id 
-                    FROM user_member_message_settings umms 
-                    WHERE umms.user_id = ? 
+                    SELECT umms.member_user_id
+                    FROM user_member_message_settings umms
+                    WHERE umms.user_id = ?
                     AND umms.receive_messages = false
                 )
                 ORDER BY m.created_at DESC
@@ -717,7 +726,7 @@ public class DMController {
                 """;
 
             List<Map<String, Object>> messages = jdbcTemplate.queryForList(messagesSql, conversationId, currentUserId, size, offset);
-            
+
             // Process messages to add camelCase versions of fields (like main MessageController does)
             for (Map<String, Object> message : messages) {
                 // Convert local_media_path to localMediaPath for Flutter compatibility
@@ -725,7 +734,7 @@ public class DMController {
                     Object localMediaPath = message.get("local_media_path");
                     message.put("localMediaPath", localMediaPath);
                  }
-                
+
                 // Convert other fields for consistency
                 if (message.containsKey("media_url")) {
                     message.put("mediaUrl", message.get("media_url"));
@@ -736,7 +745,7 @@ public class DMController {
                 if (message.containsKey("media_thumbnail")) {
                     message.put("mediaThumbnail", message.get("media_thumbnail"));
                 }
-                
+
                 logger.debug("DM Message data: {}", message);
             }
 
@@ -780,7 +789,7 @@ public class DMController {
             @RequestHeader("Authorization") String authHeader,
             @PathVariable Long conversationId) {
         logger.debug("Marking messages as read for conversation: {}", conversationId);
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -792,9 +801,9 @@ public class DMController {
             // Validate user is part of this conversation (both 1:1 and group chats)
             String validateSql = """
                 SELECT c.id, c.is_group, c.user1_id, c.user2_id,
-                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp 
+                       EXISTS(SELECT 1 FROM dm_conversation_participant dcp
                               WHERE dcp.conversation_id = c.id AND dcp.user_id = ?) as is_participant
-                FROM dm_conversation c 
+                FROM dm_conversation c
                 WHERE c.id = ?
                 """;
             List<Map<String, Object>> convData = jdbcTemplate.queryForList(validateSql, currentUserId, conversationId);
@@ -805,7 +814,7 @@ public class DMController {
             Map<String, Object> conv = convData.get(0);
             Boolean isGroup = (Boolean) conv.get("is_group");
             Boolean isParticipant = (Boolean) conv.get("is_participant");
-            
+
             // Check authorization based on conversation type
             boolean authorized = false;
             if (isGroup != null && isGroup) {
@@ -821,23 +830,23 @@ public class DMController {
                     authorized = currentUserId.equals(user1Id) || currentUserId.equals(user2Id);
                 }
             }
-            
+
             if (!authorized) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authorized for this conversation"));
             }
 
             // Mark all unread messages from other users in this conversation as read
             String markReadSql = """
-                UPDATE dm_message 
-                SET is_read = TRUE 
-                WHERE conversation_id = ? 
-                AND sender_id != ? 
+                UPDATE dm_message
+                SET is_read = TRUE
+                WHERE conversation_id = ?
+                AND sender_id != ?
                 AND is_read = FALSE
                 """;
-            
+
             int markedCount = jdbcTemplate.update(markReadSql, conversationId, currentUserId);
             logger.debug("Marked {} messages as read for user {} in conversation {}", markedCount, currentUserId, conversationId);
-            
+
             return ResponseEntity.ok(Map.of("markedAsRead", markedCount));
 
         } catch (DataAccessException e) {
@@ -861,7 +870,7 @@ public class DMController {
             @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, Object> requestBody) {
         logger.debug("Creating new group chat");
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -874,18 +883,18 @@ public class DMController {
             String groupName = (String) requestBody.get("name");
             @SuppressWarnings("unchecked")
             List<Integer> participantIds = (List<Integer>) requestBody.get("participantIds");
-            
+
             // Validate participants
             if (participantIds == null || participantIds.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "At least one participant is required"));
             }
-            
+
             // Enforce configurable participant limit (including creator)
             if (participantIds.size() >= maxGroupChatParticipants) {
-                return ResponseEntity.badRequest().body(Map.of("error", 
+                return ResponseEntity.badRequest().body(Map.of("error",
                     "Maximum " + (maxGroupChatParticipants - 1) + " participants allowed (" + maxGroupChatParticipants + " total including you)"));
             }
-            
+
             // Convert to Long and add creator
             List<Long> allParticipantIds = new ArrayList<>();
             allParticipantIds.add(currentUserId); // Add creator first
@@ -895,43 +904,43 @@ public class DMController {
                     allParticipantIds.add(participantId);
                 }
             }
-            
+
             // Validate all participants exist
             String placeholders = allParticipantIds.stream()
                 .map(id -> "?")
                 .collect(Collectors.joining(","));
             String validateSql = "SELECT COUNT(*) FROM app_user WHERE id IN (" + placeholders + ")";
-            
-            Long validUserCount = jdbcTemplate.queryForObject(validateSql, Long.class, 
+
+            Long validUserCount = jdbcTemplate.queryForObject(validateSql, Long.class,
                 allParticipantIds.toArray());
-            
+
             if (validUserCount != allParticipantIds.size()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "One or more participants not found"));
             }
-            
+
             // Create group conversation
             String insertGroupSql = """
-                INSERT INTO dm_conversation (name, is_group, created_by_user_id, created_at) 
+                INSERT INTO dm_conversation (name, is_group, created_by_user_id, created_at)
                 VALUES (?, TRUE, ?, ?) RETURNING id, created_at
                 """;
-            
-            Map<String, Object> groupConversation = jdbcTemplate.queryForMap(insertGroupSql, 
+
+            Map<String, Object> groupConversation = jdbcTemplate.queryForMap(insertGroupSql,
                 groupName, currentUserId, Timestamp.valueOf(LocalDateTime.now()));
-            
+
             Long conversationId = ((Number) groupConversation.get("id")).longValue();
             logger.debug("Created group conversation: {}", conversationId);
-            
+
             // Add all participants
             String insertParticipantSql = """
-                INSERT INTO dm_conversation_participant (conversation_id, user_id, joined_at) 
+                INSERT INTO dm_conversation_participant (conversation_id, user_id, joined_at)
                 VALUES (?, ?, ?)
                 """;
-            
+
             for (Long participantId : allParticipantIds) {
-                jdbcTemplate.update(insertParticipantSql, conversationId, participantId, 
+                jdbcTemplate.update(insertParticipantSql, conversationId, participantId,
                     Timestamp.valueOf(LocalDateTime.now()));
             }
-            
+
             // Get participant info for response
             String participantInfoSql = """
                 SELECT u.id, u.username, u.first_name, u.last_name, u.photo
@@ -940,9 +949,9 @@ public class DMController {
                 WHERE dcp.conversation_id = ?
                 ORDER BY dcp.joined_at
                 """;
-            
+
             List<Map<String, Object>> participants = jdbcTemplate.queryForList(participantInfoSql, conversationId);
-            
+
             // Build response
             Map<String, Object> response = new HashMap<>();
             response.put("id", conversationId);
@@ -951,9 +960,9 @@ public class DMController {
             response.put("participants", participants);
             response.put("createdBy", currentUserId);
             response.put("createdAt", groupConversation.get("created_at"));
-            
+
             logger.debug("Successfully created group chat with {} participants", participants.size());
-            
+
             // Broadcast the new conversation to all participants so their conversation lists refresh
             for (Long participantId : allParticipantIds) {
                 Map<String, Object> notificationData = new HashMap<>();
@@ -962,15 +971,15 @@ public class DMController {
                 notificationData.put("conversationName", groupName);
                 notificationData.put("isGroup", true);
                 notificationData.put("participantCount", allParticipantIds.size());
-                
+
                 // Send to the conversation list topic for each participant
                 String destination = "/topic/dm-list/" + participantId;
                 webSocketBroadcastService.broadcastDMMessage(notificationData, participantId);
                 logger.debug("Broadcasted new group conversation notification to user: {}", participantId);
             }
-            
+
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
-            
+
         } catch (Exception e) {
             logger.error("Error creating group chat: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -989,7 +998,7 @@ public class DMController {
             @PathVariable Long conversationId,
             @RequestBody Map<String, Object> requestBody) {
         logger.debug("Adding participants to group {}", conversationId);
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -1008,7 +1017,7 @@ public class DMController {
             // Extract participant IDs
             @SuppressWarnings("unchecked")
             List<Integer> participantIds = (List<Integer>) requestBody.get("participantIds");
-            
+
             if (participantIds == null || participantIds.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "No participants specified"));
             }
@@ -1017,20 +1026,20 @@ public class DMController {
             String currentSizeSql = "SELECT COUNT(*) FROM dm_conversation_participant WHERE conversation_id = ?";
             Long currentSize = jdbcTemplate.queryForObject(currentSizeSql, Long.class, conversationId);
             if (currentSize + participantIds.size() > maxGroupChatParticipants) {
-                return ResponseEntity.badRequest().body(Map.of("error", 
+                return ResponseEntity.badRequest().body(Map.of("error",
                     "Group size limit exceeded (max " + maxGroupChatParticipants + " members)"));
             }
 
             // Add new participants
             String insertParticipantSql = "INSERT INTO dm_conversation_participant (conversation_id, user_id, joined_at) VALUES (?, ?, ?) ON CONFLICT (conversation_id, user_id) DO NOTHING";
-            
+
             List<Map<String, Object>> addedParticipants = new ArrayList<>();
             for (Integer participantId : participantIds) {
                 Long longParticipantId = participantId.longValue();
-                
-                jdbcTemplate.update(insertParticipantSql, conversationId, longParticipantId, 
+
+                jdbcTemplate.update(insertParticipantSql, conversationId, longParticipantId,
                     Timestamp.valueOf(LocalDateTime.now()));
-                
+
                 // Get participant info
                 String userInfoSql = "SELECT id, username, first_name, last_name, photo FROM app_user WHERE id = ?";
                 try {
@@ -1042,12 +1051,12 @@ public class DMController {
             }
 
             logger.debug("Successfully added {} participants to group {}", addedParticipants.size(), conversationId);
-            
+
             return ResponseEntity.ok(Map.of(
                 "message", "Participants added successfully",
                 "addedParticipants", addedParticipants
             ));
-            
+
         } catch (Exception e) {
             logger.error("Error adding group participants: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -1066,7 +1075,7 @@ public class DMController {
             @PathVariable Long conversationId,
             @PathVariable Long participantId) {
         logger.debug("Removing participant {} from group {}", participantId, conversationId);
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -1086,7 +1095,7 @@ public class DMController {
             String groupInfoSql = "SELECT created_by_user_id FROM dm_conversation WHERE id = ? AND is_group = true";
             Map<String, Object> groupInfo = jdbcTemplate.queryForMap(groupInfoSql, conversationId);
             Long createdBy = ((Number) groupInfo.get("created_by_user_id")).longValue();
-            
+
             if (!currentUserId.equals(participantId) && !currentUserId.equals(createdBy)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Only group creator can remove other members"));
             }
@@ -1099,7 +1108,7 @@ public class DMController {
             // Remove the participant
             String removeParticipantSql = "DELETE FROM dm_conversation_participant WHERE conversation_id = ? AND user_id = ?";
             int rowsAffected = jdbcTemplate.update(removeParticipantSql, conversationId, participantId);
-            
+
             if (rowsAffected == 0) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Participant not found in group"));
             }
@@ -1107,7 +1116,7 @@ public class DMController {
             // If this was the last member, delete the conversation
             String remainingMembersSql = "SELECT COUNT(*) FROM dm_conversation_participant WHERE conversation_id = ?";
             Long remainingMembers = jdbcTemplate.queryForObject(remainingMembersSql, Long.class, conversationId);
-            
+
             if (remainingMembers <= 1) {
                 // Delete the conversation if only 1 or 0 members remain
                 String deleteConversationSql = "DELETE FROM dm_conversation WHERE id = ?";
@@ -1116,13 +1125,13 @@ public class DMController {
             }
 
             logger.debug("Successfully removed participant {} from group {}", participantId, conversationId);
-            
+
             return ResponseEntity.ok(Map.of(
                 "message", "Participant removed successfully",
                 "removedParticipantId", participantId,
                 "remainingMembers", Math.max(0, remainingMembers - 1)
             ));
-            
+
         } catch (Exception e) {
             logger.error("Error removing group participant: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -1142,7 +1151,7 @@ public class DMController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         logger.debug("Searching DM conversations with query: {}", query);
-        
+
         try {
             // Extract user ID from token
             String token = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
@@ -1156,10 +1165,10 @@ public class DMController {
             }
 
             String searchTerm = "%" + query.toLowerCase() + "%";
-            
+
             // Search across conversations, group names, participant names, and message content
             String searchSql = """
-                SELECT DISTINCT 
+                SELECT DISTINCT
                     c.id as conversation_id,
                     c.is_group,
                     c.name as group_name,
@@ -1174,10 +1183,10 @@ public class DMController {
                     u.photo as other_user_photo,
                     m.content as last_message_content,
                     m.created_at as last_message_created_at,
-                    CASE 
+                    CASE
                         WHEN c.is_group = TRUE THEN (
-                            SELECT COUNT(*) 
-                            FROM dm_conversation_participant dcp 
+                            SELECT COUNT(*)
+                            FROM dm_conversation_participant dcp
                             WHERE dcp.conversation_id = c.id
                         )
                         ELSE 2
@@ -1189,13 +1198,13 @@ public class DMController {
                 -- For 1:1 chats, get the other user info
                 LEFT JOIN app_user u ON (
                     c.is_group = FALSE AND (
-                        (c.user1_id = ? AND u.id = c.user2_id) OR 
+                        (c.user1_id = ? AND u.id = c.user2_id) OR
                         (c.user2_id = ? AND u.id = c.user1_id)
                     )
                 )
                 -- Get latest message for preview
                 LEFT JOIN (
-                    SELECT DISTINCT ON (conversation_id) 
+                    SELECT DISTINCT ON (conversation_id)
                         conversation_id, content, created_at
                     FROM dm_message
                     ORDER BY conversation_id, created_at DESC
@@ -1217,8 +1226,8 @@ public class DMController {
                     )) OR
                     -- Search message content
                     EXISTS (
-                        SELECT 1 FROM dm_message dm 
-                        WHERE dm.conversation_id = c.id 
+                        SELECT 1 FROM dm_message dm
+                        WHERE dm.conversation_id = c.id
                         AND LOWER(dm.content) LIKE ?
                     ) OR
                     -- Search group participant names
@@ -1239,7 +1248,7 @@ public class DMController {
                 """;
 
             int offset = page * size;
-            List<Map<String, Object>> results = jdbcTemplate.queryForList(searchSql, 
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(searchSql,
                 currentUserId, currentUserId, currentUserId, currentUserId, currentUserId,
                 searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm,
                 searchTerm, searchTerm, searchTerm, searchTerm,
@@ -1262,7 +1271,7 @@ public class DMController {
                     formatted.put("name", conv.get("group_name"));
                     formatted.put("participant_count", conv.get("participant_count"));
                     formatted.put("created_by", conv.get("created_by_user_id"));
-                    
+
                     // Get participant data for group chats
                     Long conversationId = ((Number) conv.get("conversation_id")).longValue();
                     String participantSql = """
@@ -1273,10 +1282,10 @@ public class DMController {
                         ORDER BY dcp.joined_at
                         LIMIT 4
                         """;
-                    
+
                     List<Map<String, Object>> participants = jdbcTemplate.queryForList(participantSql, conversationId);
                     formatted.put("participants", participants);
-                    
+
                     // For group compatibility
                     formatted.put("user1_id", 0);
                     formatted.put("user2_id", 0);
@@ -1291,23 +1300,23 @@ public class DMController {
                     formatted.put("participant_count", 2);
                     formatted.put("created_by", null);
                     formatted.put("participants", null);
-                    
+
                     // User info
                     formatted.put("user1_id", conv.get("user1_id"));
                     formatted.put("user2_id", conv.get("user2_id"));
                     formatted.put("other_user_id", conv.get("other_user_id"));
-                    formatted.put("other_user_name", 
+                    formatted.put("other_user_name",
                         (conv.get("other_first_name") != null ? conv.get("other_first_name") + " " : "") +
                         (conv.get("other_last_name") != null ? conv.get("other_last_name") : ""));
                     formatted.put("other_user_photo", conv.get("other_user_photo"));
                     formatted.put("other_first_name", conv.get("other_first_name"));
                     formatted.put("other_last_name", conv.get("other_last_name"));
                 }
-                
+
                 // Calculate unread count (simplified for search results)
                 formatted.put("unread_count", 0);
                 formatted.put("has_unread_messages", false);
-                
+
                 formattedResults.add(formatted);
             }
 
@@ -1327,4 +1336,4 @@ public class DMController {
                 .body(Map.of("error", "Failed to search conversations: " + e.getMessage()));
         }
     }
-} 
+}
