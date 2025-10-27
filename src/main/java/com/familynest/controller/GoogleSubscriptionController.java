@@ -447,31 +447,59 @@ public class GoogleSubscriptionController {
         // Process based on notification type
         switch (notificationType) {
             case 4: // SUBSCRIPTION_PURCHASED
-                // Record transaction with notification type and event time from the webhook
+                // Update user subscription status and record transaction
+                updateUserSubscription(userId, "GOOGLE", purchaseToken, purchase);
                 recordPaymentTransaction(userId, purchase, notificationType, eventTimeMillis);
                 logger.info("✅ Updated user {} subscription (new purchase)", userId);
                 break;
 
             case 2: // SUBSCRIPTION_RENEWED
-                // Record transaction with notification type and event time from the webhook
+                // SUBSCRIPTION_RENEWED means the trial ended and user was charged
+                // Force non-trial and use the actual recurring price
+                // Google may still return trial offer details, but notificationType=2 means it's now paid
+                logger.info("🔄 SUBSCRIPTION_RENEWED: Trial ended, subscription is now paid - forcing non-trial");
+                purchase.setTrial(false);
+
+                // The model should already have the correct recurring price from Google Play API
+                // No need to override - just use what Google sent
+                logger.info("🔍 Renewal: Using price from Google Play API: ${}", purchase.getPrice());
+
+                // Update user subscription status and record transaction
+                updateUserSubscription(userId, "GOOGLE", purchaseToken, purchase);
                 recordPaymentTransaction(userId, purchase, notificationType, eventTimeMillis);
-                logger.info("✅ Updated user {} subscription (renewed)", userId);
+                logger.info("✅ Updated user {} subscription (renewed from trial to paid)", userId);
                 break;
 
             case 3: // SUBSCRIPTION_CANCELED
-                // Record transaction with notification type and event time from the webhook
+                // Force non-trial since this is after trial period
+                purchase.setTrial(false);
+                updateUserSubscription(userId, "GOOGLE", purchaseToken, purchase, "cancelled");
                 recordPaymentTransaction(userId, purchase, notificationType, eventTimeMillis);
                 logger.info("⏰ Updated user {} subscription (canceled)", userId);
                 break;
 
             case 13: // SUBSCRIPTION_EXPIRED
-                // Record transaction with notification type and event time from the webhook
+                // Force non-trial since this is after trial period
+                purchase.setTrial(false);
+                updateUserSubscription(userId, "GOOGLE", purchaseToken, purchase, "expired");
                 recordPaymentTransaction(userId, purchase, notificationType, eventTimeMillis);
                 logger.info("⏰ Updated user {} subscription (expired)", userId);
                 break;
 
+            case 5: // SUBSCRIPTION_ON_HOLD
+            case 6: // SUBSCRIPTION_IN_GRACE_PERIOD
+            case 7: // SUBSCRIPTION_RESTARTED
+            case 10: // SUBSCRIPTION_PRICE_CHANGE_CONFIRMED
+                // For these notification types, record transaction but don't change trial status
+                // They indicate subscription is still active, just in different state
+                recordPaymentTransaction(userId, purchase, notificationType, eventTimeMillis);
+                logger.info("📌 Updated user {} subscription (notification type: {})", userId, notificationType);
+                break;
+
             default:
-                logger.warn("⚠️ Unknown notification type: {}", notificationType);
+                logger.warn("⚠️ Unknown notification type: {} - recording transaction anyway", notificationType);
+                // Still record the transaction even for unknown types
+                recordPaymentTransaction(userId, purchase, notificationType, eventTimeMillis);
         }
     }
 
@@ -771,6 +799,11 @@ public class GoogleSubscriptionController {
      */
     private void updateUserSubscription(Long userId, String platform, String transactionId,
                                    SubscriptionPurchaseModel purchase) {
+        updateUserSubscription(userId, platform, transactionId, purchase, null);
+    }
+
+    private void updateUserSubscription(Long userId, String platform, String transactionId,
+                                   SubscriptionPurchaseModel purchase, String overrideStatus) {
         // Use the provided purchase model - no need to make another API call
 
         // CRITICAL: Use UTC for all subscription time handling
@@ -780,6 +813,8 @@ public class GoogleSubscriptionController {
         boolean isTrial = purchase.isTrial();
         LocalDateTime trialStartDate = purchase.getTrialStartDate();
         LocalDateTime trialEndDate = purchase.getTrialEndDate();
+
+        logger.info("🔍 DEBUG updateUserSubscription: isTrial={}", isTrial);
 
         if (isTrial) {
             logger.info("📅 Setting trial start date: {}", trialStartDate);
@@ -795,22 +830,26 @@ public class GoogleSubscriptionController {
                 trial_end_date = ?,
                 subscription_start_date = ?,
                 subscription_end_date = ?,
+                is_trial = ?,
                 updated_at = ?
             WHERE id = ?
         """;
 
-        // Get subscription state from our model
-        String status = purchase.getSubscriptionState();
+        // Use override status if provided, otherwise get subscription state from our model
+        String status = overrideStatus != null ? overrideStatus :
+                        (isTrial ? "trial" : purchase.getSubscriptionState());
 
         // Get product ID from the purchase model
         String productId = purchase.getProductId();
 
         // Log what we're actually updating in the database
-        logger.info("💾 Updating user {} subscription: status={}, productId={}, trial_start_date={}, trial_end_date={}, subscription_end_date={}",
-            userId, status, productId, trialStartDate, trialEndDate, purchase.getSubscriptionEndDate());
+        logger.info("💾 Updating user {} subscription: status={}, productId={}, trial_start_date={}, trial_end_date={}, subscription_end_date={}, is_trial={}",
+            userId, status, productId, trialStartDate, trialEndDate, purchase.getSubscriptionEndDate(), isTrial);
 
         jdbcTemplate.update(sql, status, platform, transactionId,
-            trialStartDate, trialEndDate, now, purchase.getSubscriptionEndDate(), now, userId);
+            trialStartDate, trialEndDate, now, purchase.getSubscriptionEndDate(), isTrial, now, userId);
+
+        logger.info("✅ DEBUG: SQL update completed with is_trial={}", isTrial);
 
         logger.info("✅ Updated user {} subscription: platform={}, transaction_id={}, status={}",
                    userId, platform, transactionId, status);
@@ -901,15 +940,25 @@ public class GoogleSubscriptionController {
                     String offerId = lineItem.getOfferDetails().getOfferId();
                     model.setOfferId(offerId);
 
+                    // DEBUG: Log the actual offer ID we received
+                    logger.info("🔍 DEBUG: Received offer ID: '{}' (expected: '{}')", offerId, OFFER_ID_30_DAY_FREE_TRIAL);
+
                     if (OFFER_ID_30_DAY_FREE_TRIAL.equals(offerId)) {
                         model.setTrial(true);
+                        // DON'T override price - let recordPaymentTransaction handle it
+                        logger.info("✅ Trial detected by offer ID match - will use $0.00 in transaction");
                     }
 
                     // Also check offer tags for FREE_TRIAL indicator
                     List<String> offerTags = lineItem.getOfferDetails().getOfferTags();
                     if (offerTags != null && offerTags.contains("FREE_TRIAL")) {
                         model.setTrial(true);
+                        // DON'T override price - let recordPaymentTransaction handle it
+                        logger.info("✅ Trial detected by FREE_TRIAL tag - will use $0.00 in transaction");
                     }
+
+                    // DEBUG: Log offer tags
+                    logger.info("🔍 DEBUG: Offer tags: {}", offerTags);
                 } catch (NullPointerException e) {
                     // If any part of the offer details is null, this is likely not a trial
                     logger.debug("No offer details found, likely not a trial subscription");
@@ -928,11 +977,19 @@ public class GoogleSubscriptionController {
                             if (lineItem.getAutoRenewingPlan().getRecurringPrice().getUnits() != null) {
                                 Long units = lineItem.getAutoRenewingPlan().getRecurringPrice().getUnits();
                                 double price = units.doubleValue();
+
+                                // DEBUG: Log the actual price from Google
+                                logger.info("🔍 DEBUG: Google Play API returned price units: {}", units);
+                                logger.info("🔍 DEBUG: Full line item: {}", lineItem);
+
                                 model.setPrice(price);
 
                                 // If price is 0, it's likely a trial
                                 if (units == 0) {
                                     model.setTrial(true);
+                                    logger.info("🔍 DEBUG: Price is $0.00, marking as trial based on units");
+                                } else {
+                                    logger.info("🔍 DEBUG: Price is ${}, NOT a trial based on units", price);
                                 }
                             } else {
                                 throw new IllegalStateException("Could not get price units from Google Play API");
@@ -946,8 +1003,11 @@ public class GoogleSubscriptionController {
                     // Check for trial based on offer details
                     if (lineItem.getOfferDetails() != null) {
                         String offerId = lineItem.getOfferDetails().getOfferId();
+                        logger.info("🔍 DEBUG: Second trial check - offer ID: '{}' (expected: '{}')", offerId, OFFER_ID_30_DAY_FREE_TRIAL);
                         if (OFFER_ID_30_DAY_FREE_TRIAL.equals(offerId)) {
                             model.setTrial(true);
+                            // DON'T override price - let recordPaymentTransaction handle it
+                            logger.info("✅ Trial detected in second check by offer ID match - will use $0.00 in transaction");
 
                             // Calculate trial end date based on expiry time if available
                             if (lineItem.getExpiryTime() != null) {
@@ -1109,7 +1169,30 @@ public class GoogleSubscriptionController {
             String platform = "GOOGLE"; // This is GoogleSubscriptionController
             String transactionId = purchase.getPurchaseToken();
             String productId = purchase.getProductId();
-            double price = purchase.getPrice();
+
+            // Determine price based on notification type and trial status
+            double price;
+            if (notificationType == 2) {
+                // SUBSCRIPTION_RENEWED means trial ended and user paid - use actual price
+                price = purchase.getPrice();
+                logger.info("🔍 RENEWAL: Using actual price from API: ${}", price);
+            } else if (notificationType == 3 || notificationType == 13) {
+                // SUBSCRIPTION_CANCELED or SUBSCRIPTION_EXPIRED - no charge for status change
+                price = 0.0;
+                logger.info("🔍 CANCELLED/EXPIRED: Using $0.00 (no charge for status change)");
+            } else if (purchase.isTrial()) {
+                // For trials, use $0.00
+                price = 0.0;
+                logger.info("🔍 TRIAL: Using $0.00 for trial");
+            } else {
+                // Regular paid subscription
+                price = purchase.getPrice();
+                logger.info("🔍 PAID: Using actual price from API: ${}", price);
+            }
+
+            logger.info("🔍 DEBUG recordPaymentTransaction: notificationType={}, isTrial={}, finalPrice={}",
+                notificationType, purchase.isTrial(), price);
+
             String linkedPurchaseToken = purchase.getLinkedPurchaseToken();
 
             // Check if we've already processed this notification
@@ -1137,17 +1220,44 @@ public class GoogleSubscriptionController {
             // No duplicate check on payment_transactions - we want to record all state changes
             // This allows us to see the full subscription lifecycle (trial → active → canceled)
 
-            // Insert the new record
+            // Determine transaction status based on notification type
+            String transactionStatus;
+            if (notificationType == 4) {
+                // SUBSCRIPTION_PURCHASED - initial purchase (could be trial)
+                transactionStatus = purchase.isTrial() ? "trial" : "active";
+            } else if (notificationType == 2) {
+                // SUBSCRIPTION_RENEWED - trial ended, now paid
+                transactionStatus = "renewal";
+            } else if (notificationType == 3) {
+                // SUBSCRIPTION_CANCELED
+                transactionStatus = "cancelled";
+            } else if (notificationType == 13) {
+                // SUBSCRIPTION_EXPIRED
+                transactionStatus = "expired";
+            } else if (notificationType == 5) {
+                // SUBSCRIPTION_ON_HOLD
+                transactionStatus = "on_hold";
+            } else if (notificationType == 6) {
+                // SUBSCRIPTION_IN_GRACE_PERIOD
+                transactionStatus = "grace_period";
+            } else if (notificationType == 7) {
+                // SUBSCRIPTION_RESTARTED
+                transactionStatus = "restarted";
+            } else {
+                // Use Google Play state for other notifications
+                transactionStatus = purchase.getSubscriptionState();
+            }
+
+            logger.info("🔍 DEBUG recordPaymentTransaction: notificationType={}, isTrial={}, subscriptionState={}, transactionStatus={}",
+                notificationType, purchase.isTrial(), purchase.getSubscriptionState(), transactionStatus);
+
+            // Insert the transaction
             String sql = """
                 INSERT INTO payment_transactions
                 (user_id, platform, amount, description, platform_transaction_id, linked_purchase_token, product_id, status, transaction_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
-            // Use what the Google Play API returns directly
-            String transactionStatus = purchase.getSubscriptionState();
-
-            // Insert the transaction
             jdbcTemplate.update(sql, userId, platform, price, transactionStatus, transactionId, linkedPurchaseToken, productId, transactionStatus, now);
 
             logger.info("💰 Recorded payment transaction for user {}: {} - {} - price: {}",
