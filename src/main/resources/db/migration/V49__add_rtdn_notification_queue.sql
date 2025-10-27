@@ -12,6 +12,3 @@ CREATE TABLE rtdn_notification_queue (
 -- Add indexes for faster lookups
 CREATE INDEX idx_rtdn_queue_purchase_token ON rtdn_notification_queue(purchase_token);
 CREATE INDEX idx_rtdn_queue_processed ON rtdn_notification_queue(processed);
-
-
-
